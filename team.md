@@ -8,3 +8,7 @@ I’m Paul, currently working towards my Master of Science in Software Developme
 
 ## Osasenaga Von Okunbor
 Hi, I'm Osasenaga Von Okunbor. I'm currently pursuing my master's degree and I'm looking forward to working with the team, contributing to the project, and gaining more experience with collaborative software development.
+
+## Miles Cameron
+My name is Miles. I live in Tennessee, and I enjoy spending time outdodrs. I have a professional experience in Mechanical Engineering
+and Product Management, and am now nearing the end of my MS Software Development degree at BU.
