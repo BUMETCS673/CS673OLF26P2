@@ -15,3 +15,6 @@ and Product Management, and am now nearing the end of my MS Software Development
 
 ## Nurzat Mukhamedali
 Hey everyone, it's Nurzat. I am currently pursuing my Master's degree in Computer Science at BU. I have a bachelor's degree in Economics, so comes the natural curiosity towards finances, quantitative analysis, and data science. Excited to work with y'all! 
+
+## Victor Cadena
+I'm a Master's student in Software Development at Boston University. I have professional experience in Data Engineering and Consuting. This is my last course of my masters.
