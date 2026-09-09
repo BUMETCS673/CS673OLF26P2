@@ -12,3 +12,6 @@ Hi, I'm Osasenaga Von Okunbor. I'm currently pursuing my master's degree and I'm
 ## Miles Cameron
 My name is Miles. I live in Tennessee, and I enjoy spending time outdodrs. I have a professional experience in Mechanical Engineering
 and Product Management, and am now nearing the end of my MS Software Development degree at BU.
+
+## Nurzat Mukhamedali
+Hey everyone, it's Nurzat. I am currently pursuing my Master's degree in Computer Science at BU. I have a bachelor's degree in Economics, so comes the natural curiosity towards finances, quantitative analysis, and data science. Excited to work with y'all! 
