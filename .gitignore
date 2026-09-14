@@ -14,13 +14,13 @@ htmlcov/
 venv/
 env/
 instance/
-node_modules/
+code/frontend/node_modules/
+code/frontend/dist/
+code/frontend/.vite/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
-frontend/dist/
-frontend/.vite/
 .vscode/
 .idea/
 .DS_Store
