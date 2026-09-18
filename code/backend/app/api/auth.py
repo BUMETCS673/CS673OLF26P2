@@ -16,12 +16,12 @@ Security notes, matching the plan's "Security basics":
     wrong, so nobody can use this endpoint to discover which emails have accounts
 """
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify
 from flask_login import current_user, login_required, login_user, logout_user
 from sqlalchemy.exc import IntegrityError
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from app.errors import bad_request, conflict, unauthorized, validation_error
+from app.errors import conflict, json_object, unauthorized, validation_error
 from app.extensions import db
 from app.models import User
 
@@ -42,7 +42,7 @@ _DUMMY_PASSWORD_HASH = generate_password_hash("not-a-real-password")
 
 @auth_bp.post("/register")
 def register():
-    body = _json_object()
+    body = json_object()
     # Still needed even though the model normalizes on assignment: this value is also
     # used for the duplicate lookup below, and a query compares the string as given.
     email = User.normalize_email(_required_string(body, "email"))
@@ -73,7 +73,7 @@ def register():
 
 @auth_bp.post("/login")
 def login():
-    body = _json_object()
+    body = json_object()
     # Not redundant with the model's validator -- that one only applies to what gets
     # written. This goes into a query, so without it MILES@BU.EDU finds nobody.
     email = User.normalize_email(_required_string(body, "email"))
@@ -108,13 +108,6 @@ def me():
 #
 # The frontend checks these rules too, so the user gets a fast, friendly message. These
 # checks are here because the frontend can be bypassed and is never the real defense.
-
-
-def _json_object() -> dict:
-    body = request.get_json(silent=True)  # silent: a parse failure is our 400, not a 500
-    if not isinstance(body, dict):
-        raise bad_request("Request body must be a JSON object.")
-    return body
 
 
 def _required_string(body: dict, field: str, strip: bool = True) -> str:

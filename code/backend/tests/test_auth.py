@@ -176,6 +176,20 @@ def test_register_requires_a_body(client):
     assert response.get_json()["error"]["code"] == "bad_request"
 
 
+def test_register_without_a_json_content_type_is_a_400(client):
+    """A curl without -H 'Content-Type: application/json' is the common way to hit this.
+
+    Flask answers a bare get_json() with a 415, whose code isn't in the contract;
+    these endpoints read bodies with json_object(), so it stays a 400.
+    """
+    response = client.post(
+        "/api/auth/register", data='{"email": "a@b.com", "password": "password123"}'
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]["code"] == "bad_request"
+
+
 def test_a_password_of_exactly_eight_characters_is_allowed(register):
     assert register(password="12345678").status_code == 201
 
