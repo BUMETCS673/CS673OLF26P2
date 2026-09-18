@@ -80,7 +80,17 @@ def register_error_handlers(app) -> None:
         # Covers Flask's own aborts: 404 on an unknown URL, 405, malformed JSON, etc.
         status = exc.code or 500
         code = STATUS_CODES.get(status, "error")
-        return ApiError(status, exc.description or code, code=code).to_response()
+        response, _ = ApiError(status, exc.description or code, code=code).to_response()
+
+        # Some of these carry headers the protocol requires -- Allow on a 405,
+        # WWW-Authenticate on a 401. Replacing the body with JSON would throw them
+        # away, so carry them over. Skip the content headers, which describe the
+        # body we just replaced.
+        for name, value in exc.get_headers():
+            if name.lower() not in ("content-type", "content-length"):
+                response.headers[name] = value
+
+        return response, status
 
     @app.errorhandler(Exception)
     def _handle_unexpected(exc: Exception):

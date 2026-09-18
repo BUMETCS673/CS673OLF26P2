@@ -71,7 +71,9 @@ def make_user(db):
     """Create a user directly, without going through the register endpoint."""
 
     def _make_user(email="user@example.com", password="password123", display_name=None):
-        user = User(email=User.normalize_email(email), display_name=display_name)
+        # Deliberately passes the email through as given: the model normalizes it, and
+        # a fixture that did it here would hide a model that stopped doing its job.
+        user = User(email=email, display_name=display_name)
         user.set_password(password)
         db.session.add(user)
         db.session.commit()

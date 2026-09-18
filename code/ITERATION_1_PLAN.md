@@ -95,6 +95,7 @@ code/
       config.py              # reads settings from environment variables
       extensions.py          # db = SQLAlchemy(), login_manager
       models/
+        base.py              # shared timestamp columns + the JSON date format
         user.py              # User
         deck.py              # Deck
         card.py              # Card
@@ -107,6 +108,7 @@ code/
       seed.py                # `flask seed` — demo user + demo deck
     tests/
       conftest.py
+      test_foundation.py     # WS0
       test_auth.py           # WS1
       test_decks.py          # WS2
       test_cards.py          # WS2
@@ -170,6 +172,9 @@ Vite dev server ── proxies /api ──▶ Flask (port 5000 inside Docker)
    returns JSON. Keep the queries in the route rather than scattering them across helper files.
 2. **The frontend never writes a URL inline.** Every `fetch` goes through `src/api/client.js` — one
    place to fix when something changes, one place that handles errors.
+3. **A test has to exercise the thing it names.** If a fixture prepares the value you then assert
+   on, you're testing the fixture — it'll pass just as happily when the real code stops working.
+   Build the object the way real code does, and check what the code under test actually produced.
 
 ---
 
@@ -182,10 +187,19 @@ Three tables. SQLAlchemy models create them; we're not writing SQL by hand.
 | Column | Type | Notes |
 | --- | --- | --- |
 | `id` | integer, primary key | |
-| `email` | text, unique, not null | stored lowercase |
+| `email` | text, unique, not null | stored lowercase — the model normalizes on assignment |
 | `password_hash` | text, not null | **never the actual password** — see [Security](#security-basics) |
 | `display_name` | text | optional |
 | `created_at` | timestamp, defaults to now | |
+
+The `User` model lowercases and trims `email` whenever it's set, so the row is lowercase no matter
+who wrote it — that's what makes the unique constraint mean "one account". It does **not** apply to
+reads: normalize user input yourself before looking someone up.
+
+```python
+User.query.filter_by(email=User.normalize_email(typed_in))   # finds Miles@BU.edu
+User.query.filter_by(email=typed_in)                         # doesn't
+```
 
 ### `decks`
 

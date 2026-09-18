@@ -20,6 +20,11 @@ def create_app(config_object: type = Config) -> Flask:
     app = Flask(__name__)  # app/config.py loads code/.env at import time
     app.config.from_object(config_object)
 
+    # Flask 3 reads this off `app.json`, not the config -- a JSON_SORT_KEYS entry in
+    # config.py is silently ignored. Off, so responses come back in the order the API
+    # contract lists the fields rather than alphabetically.
+    app.json.sort_keys = False
+
     db.init_app(app)
     login_manager.init_app(app)
 

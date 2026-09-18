@@ -38,8 +38,6 @@ class Config:
     SESSION_COOKIE_SAMESITE = "Lax"  # other sites can't make requests as you
     SESSION_COOKIE_SECURE = os.environ.get("SESSION_COOKIE_SECURE", "0") == "1"
 
-    JSON_SORT_KEYS = False
-
 
 class TestConfig(Config):
     """Used by `tests/conftest.py`. Keeps tests off the real database."""

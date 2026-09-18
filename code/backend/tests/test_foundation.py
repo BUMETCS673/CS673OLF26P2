@@ -3,7 +3,10 @@
 WS1 and WS2 test their endpoints in test_auth.py, test_decks.py, and test_cards.py.
 """
 
+import json
+
 import pytest
+from flask import jsonify
 
 from app.models import Card, Deck, User
 
@@ -23,6 +26,32 @@ def test_unknown_route_uses_the_contract_error_shape(client):
     assert "message" in response.get_json()["error"]
 
 
+def test_a_wrong_method_keeps_the_allow_header(client):
+    """RFC 9110 requires Allow on a 405. Swapping in a JSON body must not drop the
+    headers Werkzeug set on the original error."""
+    response = client.delete("/api/health")
+
+    assert response.status_code == 405
+    assert response.get_json()["error"]["code"] == "method_not_allowed"
+    assert "GET" in response.headers["Allow"]
+
+
+def test_json_keys_keep_contract_order(app):
+    """Flask 3 reads this off `app.json`; a JSON_SORT_KEYS entry in config is ignored,
+    which is why the fields used to come back alphabetized."""
+    assert app.json.sort_keys is False
+
+    with app.test_request_context():
+        response = jsonify({"id": 1, "email": "a@b.com", "display_name": None, "created_at": "now"})
+
+    assert list(json.loads(response.get_data(as_text=True))) == [
+        "id",
+        "email",
+        "display_name",
+        "created_at",
+    ]
+
+
 def test_password_is_hashed_and_never_serialized(make_user):
     user = make_user(email="Miles@BU.edu", password="password123")
 
@@ -33,10 +62,15 @@ def test_password_is_hashed_and_never_serialized(make_user):
     assert "password_hash" not in user.to_dict()
 
 
-def test_email_is_stored_lowercase(make_user):
-    user = make_user(email="  Miles@BU.edu  ")
+def test_the_model_lowercases_and_trims_the_email(db):
+    """Assigned straight onto the model, not through `make_user` -- otherwise this
+    passes on the fixture's normalization and says nothing about the model."""
+    user = User(email="  Miles@BU.edu  ", password_hash="x")
+    db.session.add(user)
+    db.session.commit()
 
     assert user.email == "miles@bu.edu"
+    assert User.query.filter_by(email="miles@bu.edu").first() is user
 
 
 def test_duplicate_email_is_rejected_by_the_database(db, make_user):

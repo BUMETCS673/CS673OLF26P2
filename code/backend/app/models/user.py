@@ -1,6 +1,7 @@
 """The `users` table."""
 
 from flask_login import UserMixin
+from sqlalchemy.orm import validates
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from app.extensions import db
@@ -31,6 +32,17 @@ class User(UserMixin, db.Model):
     def normalize_email(email: str) -> str:
         """Trim and lowercase, so Miles@BU.edu and miles@bu.edu are one account."""
         return (email or "").strip().lower()
+
+    @validates("email")
+    def _normalize_email_on_assignment(self, key: str, value: str | None) -> str | None:
+        """Normalize whenever the column is set, so the row is lowercase no matter
+        who wrote it -- and so the unique constraint actually means one account.
+
+        This fires on assignment only. **Queries still need it at the call site**:
+        `User.query.filter_by(email=User.normalize_email(typed_in))`, or someone
+        signing in as Miles@BU.edu won't be found.
+        """
+        return self.normalize_email(value) if value is not None else None
 
     def set_password(self, password: str) -> None:
         """Store the hash. The plain password is never written to the database."""
