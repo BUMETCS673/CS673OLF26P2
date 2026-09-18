@@ -16,7 +16,17 @@ logged-in user (Security basics #3) — not `Deck.query.get(id)` but:
     if deck is None:
         raise not_found("Deck not found")
 
-`Deck.to_dict()` already includes `card_count`.
+Read request bodies with `json_object()` from app.errors -- not `request.get_json()`,
+which answers a request without a JSON Content-Type with a 415 that isn't in the
+contract:
+
+    from app.errors import json_object, not_found, validation_error
+
+    body = json_object()          # a dict, or raises the contract's 400
+
+`Deck.to_dict()` already includes `card_count`, counted in SQL by the deck query
+itself. Don't count cards in Python (`len(deck.cards)`) -- that loads every card of
+every deck, one extra query each, which is what this endpoint exists to avoid.
 """
 
 from flask import Blueprint

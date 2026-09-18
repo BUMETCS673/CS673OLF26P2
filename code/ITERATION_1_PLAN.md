@@ -140,12 +140,13 @@ instead of editing it — that's where merge conflicts come from.
 
 ### Shared files
 
-Four files can't belong to one workstream, so they're the places two branches will collide. WS0
+Five files can't belong to one workstream, so they're the places two branches will collide. WS0
 sets each of them up so nobody has to edit them later:
 
 | File | Why it's shared | Rule |
 | --- | --- | --- |
 | `backend/app/api/__init__.py` | both backend lanes register a blueprint here | WS0 registers all three up front against empty modules — after that, nobody touches it |
+| `backend/app/errors.py` | both backend lanes raise from it and read bodies with its `json_object()` | WS0 owns it. Need a new helper or error code there? Channel first — it's the contract in code |
 | `backend/requirements.txt` | either backend lane might add a package | WS0 adds everything we know we need. Anything later goes in the channel first |
 | `frontend/src/App.jsx` | WS3 owns routing, but WS4's pages need routes | WS3 adds **all five** routes, with WS4's pointing at placeholder components Nurzat then fills in |
 | `frontend/package.json` + `package-lock.json` | new frontend packages | WS3 only. Nurzat shouldn't need a new dependency this iteration |
@@ -166,7 +167,7 @@ Vite dev server ── proxies /api ──▶ Flask (port 5000 inside Docker)
                                       └─ Postgres
 ```
 
-### Two rules that keep the code consistent
+### Rules that keep the code consistent
 
 1. **Routes stay thin.** A route reads the request, checks the input, does the database work, and
    returns JSON. Keep the queries in the route rather than scattering them across helper files.
@@ -175,6 +176,12 @@ Vite dev server ── proxies /api ──▶ Flask (port 5000 inside Docker)
 3. **A test has to exercise the thing it names.** If a fixture prepares the value you then assert
    on, you're testing the fixture — it'll pass just as happily when the real code stops working.
    Build the object the way real code does, and check what the code under test actually produced.
+4. **Read request bodies with `json_object()`,** from `app/errors.py` — never `request.get_json()`
+   directly. The bare call answers a request with no JSON `Content-Type` with a 415, which isn't in
+   the [errors table](#errors). `json_object()` gives you a dict or raises the contract's 400.
+5. **Don't count rows in Python.** `len(deck.cards)` looks free and isn't: it loads every card of
+   every deck to take a length. Counting belongs in the query — `card_count` on `Deck` is a SQL
+   count, so `GET /api/decks` stays one query whether you own three decks or three hundred.
 
 ---
 
@@ -255,11 +262,22 @@ Every error comes back in the same shape, so the frontend only has to handle one
 
 | Status | `code` | When |
 | --- | --- | --- |
-| 400 | `bad_request` | body isn't valid JSON |
+| 400 | `bad_request` | body isn't valid JSON, or wasn't sent as JSON |
 | 401 | `unauthorized` | not logged in, or wrong email/password |
+| 403 | `forbidden` | reserved; we answer 404 instead — see [Security](#security-basics) item 3 |
 | 404 | `not_found` | the thing doesn't exist, **or isn't yours** |
+| 405 | `method_not_allowed` | right URL, wrong HTTP method |
 | 409 | `conflict` | email already registered |
 | 422 | `validation_error` | a field is missing, blank, or too long |
+| 500 | `internal_error` | we crashed; the response never says more than that |
+
+**This table is closed.** Every error the API returns uses one of these codes, so the frontend can
+switch on `error.code` and know it has covered everything. If you need a code that isn't here, it
+goes in the channel first — adding one is a contract change, and Duc and Nurzat have to handle it.
+
+Sending a body without a `Content-Type: application/json` header is a `400`, not a 415. Flask
+raises 415 for it, which is why request bodies get read with `json_object()`
+([rule 4](#rules-that-keep-the-code-consistent)) rather than `request.get_json()`.
 
 ### Auth endpoints (WS1 and WS3)
 
@@ -466,7 +484,9 @@ and `-b` for cookies.
 - `@login_required` on every one, and **every query filtered by `current_user.id`**
   ([Security](#security-basics) item 3)
 - Validation per the rules table; blank or missing fields → 422 naming the field
-- `card_count` included on deck responses
+- `card_count` included on deck responses — it's already on `Deck`, counted in SQL. Use it; don't
+  recompute it with `len(deck.cards)` (rule 5)
+- Request bodies read with `json_object()` from `app/errors.py`, not `request.get_json()` (rule 4)
 - Deleting a deck deletes its cards (via the cascade, not a loop in Python)
 - `tests/test_decks.py` and `tests/test_cards.py`: create/read/update/delete for both; signed out →
   401; **and one test where user A tries to fetch user B's deck and gets 404** — that's the
@@ -577,6 +597,10 @@ log out → log back in → everything's still there.
 - **D5 — We write our own code rather than building on Anki.** Anki is AGPL-licensed, which would
   cover our project too. Writing our own keeps the license our choice. We'll add an MIT `LICENSE`
   file Monday.
+- **D6 — A missing `Content-Type` is a 400, not a 415.** Flask raises 415 when a request body
+  arrives without `Content-Type: application/json`. Rather than add a sixth error code the frontend
+  would have to handle, we read bodies with `json_object()` and the error handler turns any stray
+  415 into the contract's 400. Keeps the [errors table](#errors) closed.
 
 ## Out of scope
 

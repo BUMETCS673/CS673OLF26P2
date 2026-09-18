@@ -36,6 +36,40 @@ def test_a_wrong_method_keeps_the_allow_header(client):
     assert "GET" in response.headers["Allow"]
 
 
+def test_a_body_without_a_json_content_type_stays_on_contract(app):
+    """A bare `request.get_json()` raises 415, whose code isn't in the contract.
+
+    Endpoints should use `json_object()`, but the handler has to hold the line for
+    any that forget -- every error we emit uses a code from the contract's table.
+    """
+    from flask import request
+
+    @app.route("/api/_bare_get_json", methods=["POST"])
+    def _bare_get_json():
+        request.get_json()
+        return "", 204
+
+    response = app.test_client().post("/api/_bare_get_json", data='{"name": "x"}')
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]["code"] == "bad_request"
+
+
+def test_json_object_rejects_a_body_that_isnt_an_object(app):
+    from app.errors import json_object
+
+    @app.route("/api/_json_object", methods=["POST"])
+    def _json_object_route():
+        json_object()
+        return "", 204
+
+    client = app.test_client()
+
+    assert client.post("/api/_json_object", json=["not", "an", "object"]).status_code == 400
+    assert client.post("/api/_json_object", data="not json").status_code == 400
+    assert client.post("/api/_json_object", json={"ok": True}).status_code == 204
+
+
 def test_json_keys_keep_contract_order(app):
     """Flask 3 reads this off `app.json`; a JSON_SORT_KEYS entry in config is ignored,
     which is why the fields used to come back alphabetized."""
@@ -102,6 +136,37 @@ def test_deck_json_includes_card_count(make_user, make_deck):
 
     assert set(payload) == {"id", "name", "description", "card_count", "created_at", "updated_at"}
     assert payload["card_count"] == 2
+
+
+def test_card_count_does_not_query_per_deck(db, make_user, make_deck):
+    """GET /api/decks must stay one query however many decks you own.
+
+    `card_count` is a SQL count on the deck query. Going back to `len(self.cards)`
+    would load every card of every deck to count them, and this test would see the
+    extra SELECTs.
+    """
+    from sqlalchemy import event
+
+    user = make_user()
+    for i in range(5):
+        make_deck(user, name=f"Deck {i}", cards=[("front", "back"), ("a", "b")])
+    db.session.expire_all()
+
+    statements = []
+
+    def record(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    decks = Deck.query.filter_by(user_id=user.id).all()
+    event.listen(db.engine, "before_cursor_execute", record)
+    try:
+        payloads = [deck.to_dict() for deck in decks]
+    finally:
+        event.remove(db.engine, "before_cursor_execute", record)
+
+    assert len(payloads) == 5
+    assert [p["card_count"] for p in payloads] == [2, 2, 2, 2, 2]
+    assert statements == [], f"card_count fired {len(statements)} extra queries"
 
 
 def test_card_json_matches_the_contract(make_user, make_deck):
