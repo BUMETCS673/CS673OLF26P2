@@ -42,17 +42,34 @@ React · Python · PostgreSQL · Docker · GitHub Actions
 
 ```bash
 git clone https://github.com/BUMETCS673/CS673OLF26P2.git
-cd CS673OLF26P2
-cp .env.example .env   # add your LLM API key
-docker compose up
+cd CS673OLF26P2/code
+cp .env.example .env          # then put a real SECRET_KEY in it
+docker compose up --build
 ```
 
-_Full setup, environment variables, and run instructions land here in Iteration 1 once the project skeleton exists._
+Once the containers are up, create the tables and add some demo data:
+
+```bash
+docker compose exec backend flask init-db
+docker compose exec backend flask seed     # demo@cadence.local / demo1234
+```
+
+- Frontend: http://localhost:3000
+- Backend: http://localhost:5001 — `curl localhost:5001/api/health` should return `{"status": "ok"}`
+
+To start over from an empty database: `docker compose down -v`, then the steps above again.
 
 ### Tests
 
 ```bash
-# TBD
+docker compose exec backend python -m pytest
+```
+
+Or outside Docker, from `code/backend` (the tests use SQLite, so no database needed):
+
+```bash
+pip install -r requirements.txt
+pytest
 ```
 
 ## Repository Structure
