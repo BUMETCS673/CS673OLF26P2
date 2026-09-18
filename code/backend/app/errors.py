@@ -11,9 +11,12 @@ helpers below) from a route and the handler does the rest:
 
     raise not_found("Deck not found")
     raise validation_error("name is required", field="name")
+
+Any endpoint that takes a request body reads it with `json_object()` below, rather
+than calling `request.get_json()` itself.
 """
 
-from flask import jsonify
+from flask import jsonify, request
 from werkzeug.exceptions import HTTPException
 
 # Status code -> the `code` string in the contract.
@@ -70,6 +73,20 @@ def validation_error(message: str, field: str | None = None) -> ApiError:
     return ApiError(422, message, field=field)
 
 
+def json_object() -> dict:
+    """The request body as a dict, or the contract's 400.
+
+    **Use this instead of `request.get_json()`** in every endpoint that takes a body.
+    A bare `get_json()` raises 415 when the caller leaves off the `Content-Type:
+    application/json` header, and 415 isn't one of the codes in the contract.
+    """
+    # silent: a parse failure is our 400, not an unhandled 500, and not a 415.
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        raise bad_request("Request body must be a JSON object.")
+    return body
+
+
 def register_error_handlers(app) -> None:
     @app.errorhandler(ApiError)
     def _handle_api_error(exc: ApiError):
@@ -79,6 +96,14 @@ def register_error_handlers(app) -> None:
     def _handle_http_exception(exc: HTTPException):
         # Covers Flask's own aborts: 404 on an unknown URL, 405, malformed JSON, etc.
         status = exc.code or 500
+        if status == 415:
+            # Flask raises this from a bare `get_json()` when the request has no
+            # JSON Content-Type. The contract has no 415, so answer with the 400 it
+            # amounts to rather than inventing a code the frontend doesn't handle.
+            # Endpoints using `json_object()` never get here.
+            return bad_request(
+                "Request body must be JSON. Set Content-Type: application/json."
+            ).to_response()
         code = STATUS_CODES.get(status, "error")
         response, _ = ApiError(status, exc.description or code, code=code).to_response()
 
