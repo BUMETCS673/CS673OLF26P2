@@ -158,6 +158,15 @@ def test_you_can_log_in_with_any_casing_of_your_email(client, register):
         ({"email": "a@b.com", "password": "short"}, "password"),
         ({"password": ""}, "password"),
         ({"email": "a@" + "b" * 260 + ".com"}, "email"),
+        # shapes that aren't addresses -- "contains @" used to be the whole check
+        ({"email": "@"}, "email"),
+        ({"email": "a@"}, "email"),
+        ({"email": "@b.com"}, "email"),
+        ({"email": "a@b"}, "email"),
+        ({"email": "a b@c.com"}, "email"),
+        # eight spaces used to pass the length check and become a real password
+        ({"password": "        "}, "password"),
+        ({"password": "p" * 129}, "password"),
     ],
 )
 def test_register_rejects_bad_input(register, overrides, field):
@@ -188,6 +197,80 @@ def test_register_without_a_json_content_type_is_a_400(client):
 
     assert response.status_code == 400
     assert response.get_json()["error"]["code"] == "bad_request"
+
+
+def test_a_password_keeps_its_spaces(register, client):
+    """Only an all-blank password is rejected; we never trim what gets stored.
+
+    Trimming would quietly change someone's password, so " hunter2 " stays as typed
+    and is the only thing that logs you in.
+    """
+    assert register(email="spaces@bu.edu", password=" hunter2 ").status_code == 201
+    client.post("/api/auth/logout")
+
+    assert client.post(
+        "/api/auth/login", json={"email": "spaces@bu.edu", "password": "hunter2"}
+    ).status_code == 401
+    assert client.post(
+        "/api/auth/login", json={"email": "spaces@bu.edu", "password": " hunter2 "}
+    ).status_code == 200
+
+
+def test_a_password_at_the_length_limit_is_allowed(register):
+    assert register(password="p" * 128).status_code == 201
+
+
+@pytest.mark.parametrize(
+    "body, status, code",
+    [
+        ({"email": GOOD["email"]}, 422, "validation_error"),              # no password
+        ({"password": GOOD["password"]}, 422, "validation_error"),        # no email
+        ({"email": 123, "password": GOOD["password"]}, 422, "validation_error"),
+        ({"email": GOOD["email"], "password": 123}, 422, "validation_error"),
+        ({"email": "", "password": GOOD["password"]}, 422, "validation_error"),
+    ],
+)
+def test_login_rejects_bad_input(client, register, body, status, code):
+    """Login had no bad-input coverage at all -- every test sent a well-formed body."""
+    register()
+    client.post("/api/auth/logout")
+
+    response = client.post("/api/auth/login", json=body)
+
+    assert response.status_code == status
+    assert response.get_json()["error"]["code"] == code
+
+
+def test_login_requires_a_body(client):
+    assert client.post(
+        "/api/auth/login", data="not json", content_type="application/json"
+    ).status_code == 400
+
+
+def test_login_without_a_json_content_type_is_a_400(client):
+    response = client.post(
+        "/api/auth/login", data='{"email": "a@b.com", "password": "password123"}'
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]["code"] == "bad_request"
+
+
+def test_an_over_long_password_at_login_is_the_normal_401(client, register):
+    """Rejected without hashing, but it must look like any other failed login.
+
+    A different status here would tell an attacker their guess was merely too long
+    rather than wrong, and 422 would split the uniform failure message.
+    """
+    register()
+    client.post("/api/auth/logout")
+
+    response = client.post(
+        "/api/auth/login", json={"email": GOOD["email"], "password": "p" * 5000}
+    )
+
+    assert response.status_code == 401
+    assert response.get_json()["error"]["message"] == "Invalid email or password."
 
 
 def test_a_password_of_exactly_eight_characters_is_allowed(register):

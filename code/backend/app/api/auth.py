@@ -16,6 +16,8 @@ Security notes, matching the plan's "Security basics":
     wrong, so nobody can use this endpoint to discover which emails have accounts
 """
 
+import re
+
 from flask import Blueprint, jsonify
 from flask_login import current_user, login_required, login_user, logout_user
 from sqlalchemy.exc import IntegrityError
@@ -29,7 +31,14 @@ auth_bp = Blueprint("auth", __name__, url_prefix="/auth")
 
 MAX_EMAIL_LENGTH = 255
 MIN_PASSWORD_LENGTH = 8
+MAX_PASSWORD_LENGTH = 128
 MAX_DISPLAY_NAME_LENGTH = 120
+
+# Deliberately not an RFC-complete email pattern -- those are famously wrong in both
+# directions. This rules out the shapes that are obviously not addresses (`@`, `a@`,
+# `a@b`) and leaves the real proof of validity to sending mail, which we don't do.
+# Length is checked before this runs, so it never sees an unbounded string.
+EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 # One message for every kind of login failure. Two different messages would let someone
 # work out which emails are registered by watching which error they get back.
@@ -78,6 +87,11 @@ def login():
     # written. This goes into a query, so without it MILES@BU.EDU finds nobody.
     email = User.normalize_email(_required_string(body, "email"))
     password = _required_string(body, "password", strip=False)
+
+    if len(password) > MAX_PASSWORD_LENGTH:
+        # No stored password can be longer than the cap, so this can't be anyone's --
+        # same answer as any other failure, but without paying for the hash.
+        raise unauthorized(INVALID_CREDENTIALS)
 
     user = User.query.filter_by(email=email).first()
     if user is None:
@@ -140,12 +154,13 @@ def _optional_string(body: dict, field: str, max_length: int) -> str | None:
 
 
 def _validate_email(email: str) -> None:
-    if "@" not in email:
-        raise validation_error("email must contain @.", field="email")
+    # Length first, so the pattern below never runs against an unbounded string.
     if len(email) > MAX_EMAIL_LENGTH:
         raise validation_error(
             f"email must be {MAX_EMAIL_LENGTH} characters or fewer.", field="email"
         )
+    if not EMAIL_PATTERN.match(email):
+        raise validation_error("email must look like name@example.com.", field="email")
 
 
 def _validate_password(password: str) -> None:
@@ -154,3 +169,13 @@ def _validate_password(password: str) -> None:
             f"password must be at least {MIN_PASSWORD_LENGTH} characters.",
             field="password",
         )
+    if len(password) > MAX_PASSWORD_LENGTH:
+        raise validation_error(
+            f"password must be {MAX_PASSWORD_LENGTH} characters or fewer.",
+            field="password",
+        )
+    if not password.strip():
+        # Spaces inside a password are fine and we never trim what gets stored --
+        # trimming would quietly change someone's password. Only an entirely blank
+        # one is rejected, which eight spaces otherwise passes as.
+        raise validation_error("password can't be only spaces.", field="password")

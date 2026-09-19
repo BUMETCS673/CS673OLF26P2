@@ -350,8 +350,8 @@ checks because **the frontend can be bypassed** and is never the real defense.
 
 | Field | Rule |
 | --- | --- |
-| `email` | must contain `@`, max 255 characters, stored lowercase |
-| `password` | at least 8 characters |
+| `email` | must look like `name@example.com`, max 255 characters, stored lowercase |
+| `password` | 8 to 128 characters, and not only spaces |
 | `name` (deck) | not blank, max 120 characters |
 | `description` | optional, max 1000 characters |
 | `front` / `back` | not blank, max 2000 characters |
