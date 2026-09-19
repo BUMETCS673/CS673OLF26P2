@@ -1,12 +1,19 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
+import { BrowserRouter } from "react-router-dom";
 
-function App() {
-  return <h1>Cadence</h1>;
-}
+import App from "./App";
+import { AuthProvider } from "./auth/AuthContext";
+import "./styles.css";
 
+// AuthProvider sits inside the router so route guards and the header can both read the
+// current user, and so AuthProvider's own children may use hooks like useNavigate.
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
-    <App />
-  </React.StrictMode>
+    <BrowserRouter>
+      <AuthProvider>
+        <App />
+      </AuthProvider>
+    </BrowserRouter>
+  </React.StrictMode>,
 );

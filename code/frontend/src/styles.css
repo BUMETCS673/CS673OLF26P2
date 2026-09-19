@@ -1,0 +1,177 @@
+/* Plain, shared styles — WS3 (Duc). Enough to make the forms readable; no framework. */
+
+:root {
+  --text: #1c1d21;
+  --muted: #61646b;
+  --line: #d8dade;
+  --accent: #3a5bd9;
+  --danger: #b4232b;
+  --bg: #f6f7f9;
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+a {
+  color: var(--accent);
+}
+
+/* --- header ---------------------------------------------------------------- */
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 1.25rem;
+  background: #fff;
+  border-bottom: 1px solid var(--line);
+}
+
+.app-brand {
+  font-weight: 600;
+  text-decoration: none;
+  color: var(--text);
+}
+
+.app-header-user {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.app-header-name {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+/* --- pages ----------------------------------------------------------------- */
+
+.page {
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: 2rem 1.25rem;
+}
+
+.page-status {
+  color: var(--muted);
+  padding: 2rem 1.25rem;
+  text-align: center;
+}
+
+.auth-page {
+  display: flex;
+  justify-content: center;
+  padding: 3rem 1.25rem;
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 24rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 1.75rem;
+}
+
+.auth-card h1 {
+  margin: 0 0 1rem;
+  font-size: 1.35rem;
+}
+
+/* --- form bits -------------------------------------------------------------- */
+
+label {
+  margin-top: 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.optional {
+  font-weight: 400;
+  color: var(--muted);
+}
+
+input {
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font: inherit;
+  background: #fff;
+}
+
+input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+button {
+  padding: 0.6rem 0.9rem;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.app-header button {
+  background: #fff;
+  color: var(--text);
+  border-color: var(--line);
+  font-weight: 500;
+}
+
+.auth-card button {
+  margin-top: 1.25rem;
+}
+
+.field-error,
+.form-error {
+  color: var(--danger);
+  font-size: 0.85rem;
+  margin: 0.15rem 0 0;
+}
+
+.form-error {
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--danger);
+  border-radius: 6px;
+  background: #fdf1f1;
+  margin-bottom: 0.5rem;
+}
+
+.field-hint {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin: 0.15rem 0 0;
+}
+
+.auth-switch {
+  margin: 1rem 0 0;
+  font-size: 0.9rem;
+  text-align: center;
+  color: var(--muted);
+}
