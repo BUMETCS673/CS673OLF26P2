@@ -38,6 +38,12 @@ class Config:
     SESSION_COOKIE_SAMESITE = "Lax"  # other sites can't make requests as you
     SESSION_COOKIE_SECURE = os.environ.get("SESSION_COOKIE_SECURE", "0") == "1"
 
+    # Cap on a request body, so nobody can make us buffer an arbitrarily large one.
+    # Deliberately generous: a card is at most 2000 characters a side, so real requests
+    # are a few KB. The slack means someone pasting something huge still gets the 422
+    # naming the field, rather than a blunt "too large" on a legitimate mistake.
+    MAX_CONTENT_LENGTH = 1024 * 1024  # 1 MB
+
 
 class TestConfig(Config):
     """Used by `tests/conftest.py`. Keeps tests off the real database."""

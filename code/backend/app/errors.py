@@ -31,6 +31,17 @@ STATUS_CODES = {
     500: "internal_error",
 }
 
+# Statuses Werkzeug raises that the contract has no code for. Rather than invent one
+# the frontend doesn't handle, answer with the contract status these amount to.
+# See D6 and D7 in ITERATION_1_PLAN.md.
+REMAPPED_STATUS = {
+    # A bare `get_json()` on a request with no JSON Content-Type. Endpoints using
+    # `json_object()` never get here.
+    415: (400, "Request body must be JSON. Set Content-Type: application/json."),
+    # Body over MAX_CONTENT_LENGTH.
+    413: (400, "Request body is too large."),
+}
+
 
 class ApiError(Exception):
     """An error we're choosing to return. `field` is optional and only used by 422."""
@@ -96,14 +107,9 @@ def register_error_handlers(app) -> None:
     def _handle_http_exception(exc: HTTPException):
         # Covers Flask's own aborts: 404 on an unknown URL, 405, malformed JSON, etc.
         status = exc.code or 500
-        if status == 415:
-            # Flask raises this from a bare `get_json()` when the request has no
-            # JSON Content-Type. The contract has no 415, so answer with the 400 it
-            # amounts to rather than inventing a code the frontend doesn't handle.
-            # Endpoints using `json_object()` never get here.
-            return bad_request(
-                "Request body must be JSON. Set Content-Type: application/json."
-            ).to_response()
+        if status in REMAPPED_STATUS:
+            status, message = REMAPPED_STATUS[status]
+            return ApiError(status, message).to_response()
         code = STATUS_CODES.get(status, "error")
         response, _ = ApiError(status, exc.description or code, code=code).to_response()
 
