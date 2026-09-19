@@ -279,6 +279,9 @@ Sending a body without a `Content-Type: application/json` header is a `400`, not
 raises 415 for it, which is why request bodies get read with `json_object()`
 ([rule 4](#rules-that-keep-the-code-consistent)) rather than `request.get_json()`.
 
+A body over 1MB is also a `400`, not a 413 — see [D7](#decisions-we-made). Both live in
+`REMAPPED_STATUS` in `app/errors.py`, which is where anything like them goes.
+
 ### Auth endpoints (WS1 and WS3)
 
 | Method | Path | Body | Returns |
@@ -601,6 +604,11 @@ log out → log back in → everything's still there.
   arrives without `Content-Type: application/json`. Rather than add a sixth error code the frontend
   would have to handle, we read bodies with `json_object()` and the error handler turns any stray
   415 into the contract's 400. Keeps the [errors table](#errors) closed.
+- **D7 — Request bodies are capped at 1MB, and 413 is a 400 too.** Without a cap anyone
+  can make the server buffer an arbitrarily large body. `MAX_CONTENT_LENGTH` sets the
+  limit; Werkzeug then raises 413, which the handler remaps the same way as 415. 1MB is
+  deliberately generous — a card is 2000 characters a side, so a legitimate oversized
+  paste still gets the 422 naming the field rather than a blunt "too large".
 
 ## Out of scope
 

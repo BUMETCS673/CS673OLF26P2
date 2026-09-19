@@ -55,6 +55,31 @@ def test_a_body_without_a_json_content_type_stays_on_contract(app):
     assert response.get_json()["error"]["code"] == "bad_request"
 
 
+def test_an_oversized_body_stays_on_contract(app):
+    """MAX_CONTENT_LENGTH makes Werkzeug raise 413, which isn't a contract code.
+
+    Setting the cap without mapping the status would put `{"code": "error"}` back in
+    the API -- the thing the closed errors table exists to prevent.
+    """
+    app.config["MAX_CONTENT_LENGTH"] = 1024
+
+    from app.errors import json_object
+
+    @app.route("/api/_takes_a_body", methods=["POST"])
+    def _takes_a_body():
+        json_object()  # the cap is enforced when the body is read, not before
+        return "", 204
+
+    response = app.test_client().post("/api/_takes_a_body", json={"padding": "p" * 4096})
+
+    assert response.status_code == 400
+    body = response.get_json()
+    assert body["error"]["code"] == "bad_request"
+    # Pin the path: json_object()'s own 400 would say "must be a JSON object", so this
+    # asserts the size cap answered, not the parse check downstream of it.
+    assert body["error"]["message"] == "Request body is too large."
+
+
 def test_json_object_rejects_a_body_that_isnt_an_object(app):
     from app.errors import json_object
 
