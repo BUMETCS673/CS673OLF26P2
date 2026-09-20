@@ -1,7 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import DeckForm from '../components/DeckForm';
+import { useNavigate } from 'react-router-dom';
+import { decksApi } from '../api/decks.client';
 
-export default function DeckListPage({ api, onOpenDeck, onDeckCreated = onOpenDeck }) {
+export default function DeckListPage() {
+  const navigate = useNavigate();
+  return <div className="ws4"><DeckListView api={decksApi}
+    onOpenDeck={(id) => navigate(`/decks/${id}`)}
+    onDeckCreated={(id) => navigate(`/decks/${id}`, { state: { startAdding: true } })} />
+  </div>;
+}
+
+export function DeckListView({ api, onOpenDeck, onDeckCreated = onOpenDeck }) {
   const [decks, setDecks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');

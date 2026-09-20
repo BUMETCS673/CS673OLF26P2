@@ -1,8 +1,30 @@
 import React, { useEffect, useState } from 'react';
 import CardForm from '../components/CardForm';
 import CardRow from '../components/CardRow';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { decksApi } from '../api/decks.client';
 
-export default function DeckDetailPage({ api, deckId, onBack, startAdding = false }) {
+export default function DeckDetailPage() {
+  const { id } = useParams();
+  const location = useLocation();
+  const navigate = useNavigate();
+  return <div className="ws4"><RoutedDeckDetail key={id} id={id} location={location} navigate={navigate} /></div>;
+}
+
+function RoutedDeckDetail({ id, location, navigate }) {
+  // Consume the setup flag once. Back/Forward must not replay first-card setup.
+  const [startAdding] = useState(Boolean(location.state?.startAdding));
+  useEffect(() => {
+    if (location.state?.startAdding) {
+      const state = { ...location.state, startAdding: false };
+      navigate(`${location.pathname}${location.search}${location.hash}`, { replace: true, state });
+    }
+  }, [location, navigate]);
+  return <DeckDetailView api={decksApi} deckId={id} startAdding={startAdding}
+    onBack={() => navigate('/decks')} />;
+}
+
+export function DeckDetailView({ api, deckId, onBack, startAdding = false }) {
   const [deck, setDeck] = useState(null);
   const [cards, setCards] = useState([]);
   const [loading, setLoading] = useState(true);

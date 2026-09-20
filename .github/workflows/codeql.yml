@@ -1,0 +1,51 @@
+name: CodeQL
+
+# Static analysis for both halves of the app. Findings land in the repo's Security tab
+# under "Code scanning", and on a pull request they show up as review comments on the
+# line that caused them.
+#
+# This is CodeQL's "advanced setup" -- a workflow file rather than the one-click default
+# -- because the `security-and-quality` suite is only available this way. The one-click
+# version runs security queries only.
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [develop, main]
+  schedule:
+    # Mondays, 06:00 UTC. New queries ship regularly, and a vulnerability nobody has
+    # touched the code for wouldn't otherwise be found.
+    - cron: "0 6 * * 1"
+
+jobs:
+  analyze:
+    name: Analyze ${{ matrix.language }}
+    runs-on: ubuntu-latest
+
+    permissions:
+      # Writing the findings to the Security tab is what this one is for.
+      security-events: write
+      contents: read
+      actions: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # Both interpreted, so neither needs a build step for CodeQL to read them.
+        language: [javascript-typescript, python]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialise CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          # Security queries *plus* the quality ones: unused variables, dead code,
+          # comparisons that are always true, and similar.
+          queries: security-and-quality
+
+      - name: Analyse
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{ matrix.language }}"
