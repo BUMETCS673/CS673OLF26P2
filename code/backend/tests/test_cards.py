@@ -19,7 +19,8 @@ def test_every_card_route_requires_login(client):
         == 401
     )
     assert client.patch("/api/cards/1", json={"front": "q"}).status_code == 401
-    assert client.delete("/api/cards/1").status_code == 401
+    res = client.delete("/api/cards/1")
+    assert res.status_code == 401
 
 
 # ---- list ----------------------------------------------------------------

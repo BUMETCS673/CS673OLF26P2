@@ -95,15 +95,14 @@ def update_deck(deck_id):
     body = json_object()
 
     # Validate everything before changing anything.
+    updates = {}
     if "name" in body:
-        new_name = _valid_name(body["name"])
+        updates["name"] = _valid_name(body["name"])
     if "description" in body:
-        new_description = _valid_description(body["description"])
+        updates["description"] = _valid_description(body["description"])
 
-    if "name" in body:
-        deck.name = new_name
-    if "description" in body:
-        deck.description = new_description
+    for field, value in updates.items():
+        setattr(deck, field, value)
 
     db.session.commit()
     return jsonify(deck.to_dict()), 200

@@ -17,7 +17,8 @@ def test_every_deck_route_requires_login(client):
     assert client.post("/api/decks", json={"name": "x"}).status_code == 401
     assert client.get("/api/decks/1").status_code == 401
     assert client.patch("/api/decks/1", json={"name": "x"}).status_code == 401
-    assert client.delete("/api/decks/1").status_code == 401
+    res = client.delete("/api/decks/1")
+    assert res.status_code == 401
 
 
 # ---- list ----------------------------------------------------------------
