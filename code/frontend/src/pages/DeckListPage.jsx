@@ -54,7 +54,7 @@ export default function DeckListPage({ api, onOpenDeck, onDeckCreated = onOpenDe
         <button className="button secondary" onClick={() => setRevision((n) => n + 1)}>Try again</button></div>
       : decks.length === 0 ? !creating && <section className="empty-state"><div className="empty-icon" aria-hidden="true">▤</div>
         <h2>Your first deck starts here</h2><p>Give a topic a home, then add the things you want to remember.</p>
-        {!creating && <button className="button primary" onClick={() => setCreating(true)}>Create your first deck</button>}
+        <button className="button primary" onClick={() => setCreating(true)}>Create your first deck</button>
       </section> : <>
         <div className="section-heading"><h2>All decks <span className="count-badge">{decks.length}</span></h2>
           <span className="muted">{decks.reduce((total, deck) => total + deck.card_count, 0)} cards in your library</span></div>

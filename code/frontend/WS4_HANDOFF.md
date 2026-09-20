@@ -51,7 +51,7 @@ removes it. There are no accounts or ownership guarantees in the demo.
 ## Checks
 
 ```sh
-node --test tests/decks.test.mjs
+npm test
 npm run build
 ```
 
@@ -76,6 +76,17 @@ Manual browser checklist:
 
 Node tests exercise data operations, not rendered React interactions. The full
 plan's logged-in acceptance flow can only pass after real backend/auth integration.
+
+The Frontend tests workflow runs `npm test` on pull requests into `develop`/`main`
+and pushes to those branches. It uses Node 22 and needs no dependency installation.
+Tests include corrupt demo-data recovery and genuine browser-storage failures.
+Invalid demo data opens an empty library; the original stored value is preserved
+until a successful save replaces it. Valid saved decks and cards are preserved.
+
+Review regression checks: leave a newly created deck using Finish, All decks, the
+brand, or My decks; browser Back should show the normal deck view. Leaving should
+not reload the departing deck. After editing a card, reopen Add card and check
+that its hint is fresh and each notice has just one live status announcement.
 
 ## Connecting teammates' work
 

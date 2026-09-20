@@ -30,7 +30,7 @@ export default function DeckDetailPage({ api, deckId, onBack, startAdding = fals
       : deck && <>
         <div className="page-heading"><div><p className="eyebrow">Your deck · {cards.length} {cards.length === 1 ? 'card' : 'cards'}</p>
           <h1>{deck.name}</h1>{deck.description && <p className="subtitle deck-detail-description">{deck.description}</p>}</div>
-          {!adding && <button className="button primary" onClick={() => setAdding(true)}>+ Add card</button>}</div>
+          {!adding && <button className="button primary" onClick={() => { setNotice(''); setAdding(true); }}>+ Add card</button>}</div>
         {adding && <section className="card-composer" aria-labelledby="add-card-heading">
           <div className="composer-heading"><div><p className="eyebrow">{cards.length === 0 ? 'Your first flashcard' : 'One more idea'}</p>
             <h2 id="add-card-heading">{cards.length === 0 ? 'What do you want to remember?' : 'Add to your collection'}</h2></div>
@@ -41,7 +41,7 @@ export default function DeckDetailPage({ api, deckId, onBack, startAdding = fals
             setCards((items) => [...items, card]);
             setNotice(startAdding ? 'Card saved. Add another or finish for now.' : 'Card saved. Add another or cancel to return to your cards.');
           }} />
-          <p className="composer-note" role="status">{notice || 'Your deck is saved. Cards are optional—you can add them anytime.'}</p>
+          <p className="composer-note">{notice || 'Your deck is saved. Cards are optional—you can add them anytime.'}</p>
         </section>}
         {cards.length > 0 && <div className="section-heading"><h2>Cards <span className="count-badge">{cards.length}</span></h2><span className="muted">Make each idea memorable.</span></div>}
         {cards.length === 0 ? !adding && <section className="empty-state empty-deck">

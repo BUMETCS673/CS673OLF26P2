@@ -13,15 +13,37 @@ function text(body, field, limit, required) {
 }
 
 export function createDemoRequest(storage) {
+  const emptyState = () => ({ nextId: 1, decks: [], cards: [] });
+
+  function validState(state) {
+    if (!state || !Number.isSafeInteger(state.nextId) || state.nextId < 1 ||
+        !Array.isArray(state.decks) || !Array.isArray(state.cards)) return false;
+    const validId = (id) => Number.isSafeInteger(id) && id > 0 && id < state.nextId;
+    const validDates = (item) => typeof item.created_at === 'string' && typeof item.updated_at === 'string';
+    if (!state.decks.every((deck) => deck && validId(deck.id) &&
+        typeof deck.name === 'string' && (deck.description == null || typeof deck.description === 'string') && validDates(deck))) return false;
+    const deckIds = new Set(state.decks.map((deck) => deck.id));
+    if (!state.cards.every((card) => card && validId(card.id) && deckIds.has(card.deck_id) &&
+        typeof card.front === 'string' && typeof card.back === 'string' && validDates(card))) return false;
+    const ids = [...state.decks, ...state.cards].map((item) => item.id);
+    return new Set(ids).size === ids.length;
+  }
+
   function load() {
+    let saved;
     try {
-      const saved = storage.getItem(DEMO_STORAGE_KEY);
-      if (!saved) return { nextId: 1, decks: [], cards: [] };
-      const state = JSON.parse(saved);
-      if (!Number.isSafeInteger(state.nextId) || !Array.isArray(state.decks) || !Array.isArray(state.cards)) throw new Error();
-      return state;
+      saved = storage.getItem(DEMO_STORAGE_KEY);
     } catch {
       fail('demo_storage_error', 'The browser could not read your demo data. Check that site storage is available.');
+    }
+    if (!saved) return emptyState();
+    try {
+      const state = JSON.parse(saved);
+      return validState(state) ? state : emptyState();
+    } catch {
+      // Corrupt or obsolete demo data must not permanently block the UI. Keep the
+      // original value untouched until a successful user save replaces it.
+      return emptyState();
     }
   }
 

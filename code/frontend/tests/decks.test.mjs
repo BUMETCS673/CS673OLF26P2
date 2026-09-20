@@ -83,6 +83,32 @@ test('storage failures are visible and a failed save keeps the previous data', a
   const broken = createDecksApi(createDemoRequest({ getItem: storage.getItem, setItem() { throw new Error('Quota exceeded'); } }));
   await assert.rejects(broken.updateDeck(deck.id, { name: 'Lost change' }), { code: 'demo_storage_error' });
   assert.equal((await api.getDeck(deck.id)).name, 'Keep me');
-  storage.setItem(DEMO_STORAGE_KEY, '{broken');
+});
+
+test('unavailable storage remains an explicit error rather than an empty library', async () => {
+  const api = createDecksApi(createDemoRequest({ getItem() { throw new Error('Access denied'); } }));
   await assert.rejects(api.listDecks(), { code: 'demo_storage_error' });
+  await assert.rejects(api.createDeck({ name: 'Not saved' }), { code: 'demo_storage_error' });
+});
+
+test('corrupt or outdated demo data recovers and subsequent saves persist', async () => {
+  const invalid = [
+    '{broken', 'null', '{}',
+    JSON.stringify({ nextId: -1, decks: [], cards: [] }),
+    JSON.stringify({ nextId: 2, decks: [null], cards: [] }),
+    JSON.stringify({ nextId: 2, decks: [{ id: 1, name: {} }], cards: [] }),
+    JSON.stringify({ nextId: 2, decks: [], cards: [{ id: 1, deck_id: 99, front: 'q', back: 'a' }] }),
+  ];
+  for (const raw of invalid) {
+    const storage = memoryStorage();
+    storage.setItem(DEMO_STORAGE_KEY, raw);
+    const api = createDecksApi(createDemoRequest(storage));
+    assert.deepEqual(await api.listDecks(), []);
+    assert.equal(storage.getItem(DEMO_STORAGE_KEY), raw, 'reading must not erase the original data');
+    const deck = await api.createDeck({ name: 'Recovered' });
+    await api.createCard(deck.id, { front: 'Question', back: 'Answer' });
+    const reloaded = createDecksApi(createDemoRequest(storage));
+    assert.equal((await reloaded.getDeck(deck.id)).card_count, 1);
+    assert.equal((await reloaded.listCards(deck.id))[0].back, 'Answer');
+  }
 });
