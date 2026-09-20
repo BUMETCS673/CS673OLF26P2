@@ -1,0 +1,113 @@
+/* WS4 styles are scoped to .ws4 so the auth pages can keep their own styling. */
+body:has(.ws4) { margin: 0; background: #f7f8f5; }
+.ws4 { --ink: #233c34; --muted: #66746c; --green: #285c47; --border: #dce3da; min-height: 100vh; display: flex; flex-direction: column; color: var(--ink); font: 15px/1.55 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+.ws4 * { box-sizing: border-box; }
+.ws4 button, .ws4 input, .ws4 textarea { font: inherit; }
+.ws4 button, .ws4 a { -webkit-tap-highlight-color: transparent; }
+.ws4 button { cursor: pointer; }
+.ws4 button:disabled { cursor: wait; opacity: .55; }
+.ws4 :focus-visible { outline: 3px solid #a57630; outline-offset: 4px; }
+.ws4 a { color: inherit; }
+.ws4 h1, .ws4 h2, .ws4 p { margin-top: 0; }
+.ws4 h1 { font-size: clamp(32px, 4vw, 44px); letter-spacing: -1.6px; line-height: 1.15; margin-bottom: 14px; overflow-wrap: anywhere; }
+.ws4 h2 { font-size: 20px; line-height: 1.35; letter-spacing: -.35px; }
+.ws4 .app-header { min-height: 86px; display: flex; align-items: center; gap: 64px; padding: 0 max(28px, calc((100vw - 1120px) / 2)); background: #fff; border-bottom: 1px solid var(--border); }
+.ws4 .brand { display: inline-flex; align-items: center; font-size: 25px; font-weight: 750; text-decoration: none; letter-spacing: -1.1px; }
+.ws4 .brand-mark { background: var(--green); color: white; width: 34px; height: 36px; border-radius: 10px; margin-right: 11px; text-align: center; font-size: 25px; }
+.ws4 .brand-dot { color: #8b9f6c; }
+.ws4 nav a { display: inline-block; padding: 29px 0; text-decoration: none; font-weight: 650; border-bottom: 3px solid var(--green); }
+.ws4 .workspace-label { color: var(--muted); font-size: 13px; margin-left: auto; }
+.ws4 .demo-banner { padding: 13px 28px; background: #eef1e7; display: flex; justify-content: center; align-items: center; gap: 12px; font-size: 12px; color: #4d604b; }
+.ws4 .demo-badge { white-space: nowrap; font-weight: 700; border: 1px solid #c4ceb7; border-radius: 5px; padding: 2px 7px; }
+.ws4 .ws4-page { width: min(1120px, calc(100% - 56px)); margin: 58px auto 80px; flex: 1; }
+.ws4 .page-heading { display: flex; align-items: center; justify-content: space-between; gap: 28px; margin-bottom: 42px; }
+.ws4 .page-heading > div { min-width: 0; }
+.ws4 .eyebrow { text-transform: uppercase; letter-spacing: 1.7px; font-size: 10px; font-weight: 750; color: var(--muted); margin-bottom: 14px; }
+.ws4 .subtitle { color: var(--muted); margin-bottom: 0; font-size: 16px; }
+.ws4 .button { border: 1px solid transparent; border-radius: 8px; padding: 10px 17px; font-size: 13px; font-weight: 650; display: inline-flex; justify-content: center; align-items: center; white-space: nowrap; min-height: 42px; }
+.ws4 .primary { background: var(--green); color: #fff; }
+.ws4 .primary:hover:not(:disabled) { background: #1c4836; }
+.ws4 .secondary { background: white; color: var(--ink); border-color: var(--border); }
+.ws4 .secondary:hover:not(:disabled) { background: #f1f4ed; }
+.ws4 .destructive { background: #9d3430; color: #fff; }
+.ws4 .text-button { border: 0; background: transparent; padding: 6px 2px; color: var(--green); font-size: 12px; font-weight: 650; }
+.ws4 .text-button:hover { text-decoration: underline; }
+.ws4 .danger { color: #9b413b; }
+.ws4 .section-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 19px; gap: 15px; }
+.ws4 .section-heading h2 { margin: 0; font-size: 16px; }
+.ws4 .count-badge { display: inline-block; border-radius: 5px; background: #e8ede4; padding: 2px 8px; margin-left: 7px; font-size: 11px; vertical-align: middle; }
+.ws4 .muted { color: var(--muted); font-size: 13px; }
+.ws4 .deck-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 20px; list-style: none; padding: 0; margin: 0; align-items: start; }
+.ws4 .deck-tile { background: #fff; border: 1px solid var(--border); border-radius: 12px; padding: 24px; box-shadow: 0 3px 5px #263e3103; min-width: 0; }
+.ws4 .deck-tile-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 23px; }
+.ws4 .deck-icon { display: grid; place-items: center; width: 44px; height: 44px; background: #edf2e7; color: #526b42; border-radius: 10px; font-size: 28px; }
+.ws4 .card-count { font-size: 11px; color: var(--muted); background: #f5f6f2; border-radius: 20px; padding: 5px 10px; }
+.ws4 .deck-tile h2 { margin-bottom: 10px; }
+.ws4 .deck-title { font-size: inherit; font-weight: 650; letter-spacing: inherit; padding: 0; text-align: left; background: none; border: 0; color: inherit; overflow-wrap: anywhere; }
+.ws4 .deck-title:hover { text-decoration: underline; }
+.ws4 .deck-description { color: var(--muted); font-size: 13px; min-height: 42px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.ws4 .deck-footer { display: flex; justify-content: space-between; align-items: center; gap: 10px; border-top: 1px solid #edf0e9; margin-top: 24px; padding-top: 15px; }
+.ws4 .open-deck span { margin-left: 8px; }
+.ws4 .row-actions { display: flex; gap: 15px; }
+.ws4 .empty-state { border: 1px dashed #c8d3c3; background: #ffffff80; border-radius: 14px; text-align: center; padding: 65px 24px; }
+.ws4 .empty-state p { color: var(--muted); max-width: 390px; margin: 0 auto 24px; }
+.ws4 .empty-deck { border-style: solid; background: transparent; padding: 55px 24px; }
+.ws4 .empty-deck p { margin-bottom: 0; }
+.ws4 .empty-icon { display: grid; place-items: center; margin: 0 auto 22px; border-radius: 16px; width: 68px; height: 68px; background: #e8eee0; color: #57704b; font-size: 40px; }
+.ws4 .state-panel { padding: 40px; background: #fff; border: 1px solid var(--border); border-radius: 12px; }
+.ws4 .form-panel { background: #fff; border: 1px solid var(--border); border-radius: 12px; padding: 28px; margin-bottom: 32px; }
+.ws4 .form-panel h2 { margin-bottom: 16px; }
+.ws4 .ws4-form fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.ws4 .ws4-form label { display: block; font-size: 13px; font-weight: 650; margin: 16px 0 7px; }
+.ws4 .ws4-form input, .ws4 .ws4-form textarea { display: block; width: 100%; background: #fcfdfb; border: 1px solid #c7d1c3; border-radius: 7px; padding: 11px 12px; color: var(--ink); font-size: 14px; }
+.ws4 .ws4-form textarea { resize: vertical; min-height: 90px; }
+.ws4 .ws4-form input::placeholder, .ws4 .ws4-form textarea::placeholder { color: #788277; }
+.ws4 .ws4-form [aria-invalid=true] { border-color: #ad4941; }
+.ws4 .optional { color: var(--muted); font-weight: 400; margin-left: 5px; font-size: 11px; }
+.ws4 .form-actions { display: flex; gap: 9px; flex-wrap: wrap; margin-top: 20px; }
+.ws4 .field-hint { font-size: 11px; margin: 7px 0 0; color: var(--muted); }
+.ws4 .field-error { font-size: 12px; color: #9b312d; margin: 7px 0 0; }
+.ws4 .error-message { color: #8a2c28; background: #fff0ec; border-radius: 6px; padding: 12px; font-size: 13px; margin-top: 14px; }
+.ws4 .delete-confirmation { margin-top: 18px; padding: 16px; border: 1px solid #e8c9c3; background: #fff8f5; border-radius: 7px; }
+.ws4 .delete-confirmation p { font-size: 13px; margin: 0; overflow-wrap: anywhere; }
+.ws4 .back-link { margin-bottom: 27px; }
+.ws4 .deck-detail-description { white-space: pre-wrap; overflow-wrap: anywhere; }
+.ws4 .card-fields, .ws4 .card-content { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+.ws4 .card-list { list-style: none; padding: 0; display: grid; gap: 16px; }
+.ws4 .card-row { padding: 24px 28px; background: #fff; border: 1px solid var(--border); border-radius: 12px; }
+.ws4 .card-row-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.ws4 .card-row-heading .eyebrow { margin: 0; }
+.ws4 .field-caption { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
+.ws4 .card-content > div { min-width: 0; }
+.ws4 .card-content > div + div { border-left: 1px solid var(--border); padding-left: 28px; }
+.ws4 .card-content p { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ws4 .app-footer { display: flex; justify-content: space-between; width: min(1120px, calc(100% - 56px)); margin: 0 auto; padding: 23px 0; border-top: 1px solid var(--border); color: var(--muted); font-size: 11px; gap: 18px; }
+.ws4 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+.ws4 .deck-setup { max-width: 620px; margin-left: auto; margin-right: auto; border-top: 3px solid var(--green); }
+.ws4 .deck-setup .eyebrow { margin-bottom: 8px; }
+.ws4 .deck-setup h2 { margin-bottom: 8px; }
+.ws4 .card-composer { background: #f0f3eb; border: 1px solid #d7dfce; border-radius: 12px; padding: 24px; margin-bottom: 32px; }
+.ws4 .composer-heading { display: flex; align-items: center; justify-content: space-between; gap: 15px; margin-bottom: 18px; }
+.ws4 .composer-heading .eyebrow { margin-bottom: 5px; }
+.ws4 .composer-heading h2 { margin: 0; font-size: 18px; }
+.ws4 .composer-count { font-size: 12px; white-space: nowrap; color: var(--muted); }
+.ws4 .flashcard-form .card-fields { gap: 16px; }
+.ws4 .flashcard-form .card-fields > div { min-width: 0; background: #fff; border: 1px solid var(--border); border-radius: 9px; padding: 14px 16px 10px; }
+.ws4 .flashcard-form label { margin: 0 0 8px; font-size: 10px; text-transform: uppercase; letter-spacing: 1.3px; color: var(--muted); }
+.ws4 .flashcard-form textarea { border: 0; background: transparent; padding: 6px 0; border-radius: 2px; min-height: 85px; }
+.ws4 .flashcard-form .field-hint { text-align: right; font-size: 10px; }
+.ws4 .composer-note { font-size: 12px; color: var(--muted); margin: 14px 0 0; }
+@media (max-width: 640px) {
+  .ws4 .app-header { padding: 0 20px; gap: 30px; min-height: 72px; }
+  .ws4 nav a { padding: 22px 0; }
+  .ws4 .workspace-label { display: none; }
+  .ws4 .demo-banner { align-items: flex-start; padding: 12px 20px; }
+  .ws4 .ws4-page { width: calc(100% - 40px); margin-top: 35px; }
+  .ws4 .page-heading { align-items: flex-start; flex-direction: column; gap: 20px; margin-bottom: 30px; }
+  .ws4 .section-heading { align-items: flex-start; }
+  .ws4 .section-heading > .muted { max-width: 145px; text-align: right; }
+  .ws4 .card-fields, .ws4 .card-content { grid-template-columns: 1fr; gap: 16px; }
+  .ws4 .card-content > div + div { padding-left: 0; padding-top: 14px; border-left: 0; border-top: 1px solid var(--border); }
+  .ws4 .form-panel, .ws4 .card-row, .ws4 .card-composer { padding: 20px; }
+  .ws4 .app-footer { width: calc(100% - 40px); flex-direction: column; gap: 5px; }
+}
