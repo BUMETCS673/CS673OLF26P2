@@ -11,11 +11,6 @@ body:has(.ws4) { margin: 0; background: #f7f8f5; }
 .ws4 h1, .ws4 h2, .ws4 p { margin-top: 0; }
 .ws4 h1 { font-size: clamp(32px, 4vw, 44px); letter-spacing: -1.6px; line-height: 1.15; margin-bottom: 14px; overflow-wrap: anywhere; }
 .ws4 h2 { font-size: 20px; line-height: 1.35; letter-spacing: -.35px; }
-.ws4 .app-header { min-height: 86px; display: flex; align-items: center; gap: 64px; padding: 0 max(28px, calc((100vw - 1120px) / 2)); background: #fff; border-bottom: 1px solid var(--border); }
-.ws4 .brand { display: inline-flex; align-items: center; font-size: 25px; font-weight: 750; text-decoration: none; letter-spacing: -1.1px; }
-.ws4 .brand-mark { background: var(--green); color: white; width: 34px; height: 36px; border-radius: 10px; margin-right: 11px; text-align: center; font-size: 25px; }
-.ws4 .brand-dot { color: #8b9f6c; }
-.ws4 nav a { display: inline-block; padding: 29px 0; text-decoration: none; font-weight: 650; border-bottom: 3px solid var(--green); }
 .ws4 .workspace-label { color: var(--muted); font-size: 13px; margin-left: auto; }
 .ws4 .demo-banner { padding: 13px 28px; background: #eef1e7; display: flex; justify-content: center; align-items: center; gap: 12px; font-size: 12px; color: #4d604b; }
 .ws4 .demo-badge { white-space: nowrap; font-weight: 700; border: 1px solid #c4ceb7; border-radius: 5px; padding: 2px 7px; }
