@@ -10,10 +10,11 @@ gets attached here, and nowhere else.
 import click
 from flask import Flask
 from flask.cli import with_appcontext
+from flask_migrate import stamp
 
 from app.config import Config
 from app.errors import ApiError, register_error_handlers
-from app.extensions import db, login_manager
+from app.extensions import db, login_manager, migrate
 
 
 def create_app(config_object: type = Config) -> Flask:
@@ -26,6 +27,10 @@ def create_app(config_object: type = Config) -> Flask:
     app.json.sort_keys = False
 
     db.init_app(app)
+    # render_as_batch rewrites ALTER TABLE as create-copy-swap, which SQLite needs
+    # because it can't drop or alter a column in place. Harmless on Postgres, and it
+    # means a migration written here still applies to a SQLite database.
+    migrate.init_app(app, db, render_as_batch=True)
     login_manager.init_app(app)
 
     _register_login_handlers()
@@ -66,12 +71,21 @@ def _register_cli(app: Flask) -> None:
 @click.command("init-db")
 @with_appcontext
 def init_db_command():
-    """Create the database tables.
+    """Create the database tables directly, skipping migrations.
 
-    No migrations this iteration (decision D3) — to start over, run
-    `docker compose down -v`, then `up`, then this and `flask seed` again.
+    A convenience for a throwaway local database: `docker compose down -v`, `up`, then
+    this and `flask seed`. It is NOT how a deployed database is set up -- use
+    `flask db upgrade` there, which is what Render runs on every deploy.
+
+    The difference matters: create_all() only creates tables that are missing. It will
+    not add a column to a table that already exists, so it cannot apply a schema change
+    to a database that has data in it.
     """
     from app import models  # noqa: F401  (imported so SQLAlchemy sees every table)
 
     db.create_all()
-    click.echo("Tables created: users, decks, cards.")
+    # Record that the schema is already at the latest revision. Without this, a later
+    # `flask db upgrade` on this database would try to create the tables a second time
+    # and fail, because Alembic would have no record of what has been applied.
+    stamp()
+    click.echo("Tables created: users, decks, cards (stamped at head).")

@@ -11,9 +11,11 @@ What runs, when, and what to do when it goes red.
       open a PR ------------> CI ---------> [ci-ok] --- required to merge
                               |
                               +-- Backend lint          ruff check (ruff format advisory)
-                              +-- Backend tests         pytest x {sqlite, postgres}, coverage >= 90%
+                              +-- Backend tests sqlite  pytest, coverage >= 90%
+                              +-- Backend tests pg      pytest against Postgres 18
+                              +-- Migrations            db upgrade, db check, downgrade round-trip
                               +-- Frontend              eslint, npm test, vite build
-                              +-- Docker                build prod images, boot the stack
+                              +-- Docker                build prod images, Trivy scan, boot the stack
                               |
                          CodeQL (separate workflow, security + quality)
             |
@@ -86,6 +88,43 @@ cd code/frontend
 npm ci
 npm run build
 npx eslint .                # needs the lint tooling installed, see below
+```
+
+### Database migrations
+
+Schema changes are versioned files under `code/backend/migrations/versions/`, applied with
+`flask db upgrade`. This supersedes decision **D3** ("no migrations yet"), which was fine
+while nothing was deployed — but `db.create_all()` only creates *missing* tables. It will
+not add a column to a table that already exists, so the first schema change after a real
+deploy would otherwise mean hand-written SQL against live data.
+
+After changing a model:
+
+```sh
+cd code/backend
+export FLASK_APP=wsgi.py
+flask db migrate -m "add cards.difficulty"   # writes a new migration
+# READ the generated file before committing it
+flask db upgrade
+```
+
+Autogenerate is reliable for added columns, indexes and tables, and **wrong** for renames —
+a renamed column looks like a drop plus an add, which silently discards the data. Fix
+those by hand.
+
+CI enforces this: the Migrations job applies every migration to an empty Postgres, then
+runs `flask db check`, which fails if the resulting schema differs from the models. A model
+change without a migration cannot reach `develop`. It also round-trips
+`downgrade base` → `upgrade`, so a broken `downgrade()` is caught now rather than when
+someone urgently needs it.
+
+`flask init-db` still exists, but only for throwaway local databases — it calls
+`create_all()` and then stamps the revision table so a later `upgrade` doesn't try to
+recreate everything. For an **existing** database that predates migrations, bring it under
+control without recreating it:
+
+```sh
+flask db stamp 0001_initial_schema
 ```
 
 ### A note on the eslint dependencies
@@ -162,8 +201,10 @@ project; say so in the progress report either way.
   giving up — it is not a hung deploy.
 - Free Postgres instances **expire after 30 days**. Diarise it; when it happens, create a
   new one and update `DATABASE_URL`. Do not let this bite during the final demo.
-- `flask init-db` is not run automatically on deploy. After the first deploy of a schema
-  change, run it from the Render shell on `cadence-backend`.
+- Migrations run automatically. `preDeployCommand: flask db upgrade` in `render.yaml`
+  applies them after the image builds and before traffic moves to the new version — a
+  failed migration leaves the old version serving rather than breaking the site. No manual
+  Render shell step.
 
 ## Branch protection
 
@@ -230,6 +271,9 @@ gh api repos/BUMETCS673/CS673OLF26P2/branches/develop/protection \
 | Docker, "Build backend/frontend image" | the Dockerfile itself broke | `docker build --target prod code/backend` |
 | Docker, "Start the stack" | a container exited during boot | read the "Container logs" step, which only appears on failure |
 | Docker, "Backend answers /api/health" | Flask is up but erroring, usually the database connection | same logs step |
+| Docker, "Scan backend/frontend image" | Trivy found a fixable HIGH/CRITICAL CVE in a base image or dependency | bump the base image tag or the dependency; unfixable ones are already ignored |
+| **Migrations, "flask db check"** | a model changed without a matching migration | `cd code/backend && FLASK_APP=wsgi.py flask db migrate -m "what changed"`, read the generated file, commit it |
+| Migrations, "downgrade to base and back up" | a migration's `downgrade()` is wrong or incomplete | fix `downgrade()` in the migration file |
 | CD, deploy skipped | Render hooks not set | the setup section above — this is a warning, not a failure |
 | CD, health poll timed out | Render build failed, or a cold start took over 10 minutes | Render dashboard → the service → Events |
 
@@ -252,11 +296,9 @@ the revert if the bad commit is going to confuse anyone looking at history.
 
 Worth being able to defend in the progress report:
 
-- **No database migrations.** The app creates its schema with `flask init-db`. That is
-  fine while the schema is still moving and nothing in production needs preserving; the
-  moment real data exists, this needs Alembic (Flask-Migrate).
 - **No end-to-end browser tests.** The Docker job proves the stack boots and the API
-  answers, but nothing drives the UI. Playwright would be the next addition.
+  answers, but nothing drives the UI. Playwright covering signup → create deck → add card
+  is the next thing worth adding.
 - **Action versions pinned to major tags** (`actions/checkout@v4`), not SHAs. Dependabot
   tracks the majors. SHA pinning is the stricter supply-chain posture and costs little if
   the team wants it.

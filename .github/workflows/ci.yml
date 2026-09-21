@@ -61,25 +61,66 @@ jobs:
         continue-on-error: true
         run: ruff format --check --diff . || true
 
-  backend-test:
-    name: Backend tests (${{ matrix.database }})
+  # Split from the Postgres job rather than being a matrix leg of it. As a matrix, the
+  # postgres service container started for both legs and "Initialize containers" cost the
+  # sqlite leg 13s for a database it never opened.
+  backend-test-sqlite:
+    name: Backend tests (sqlite)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: code/backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            code/backend/requirements.txt
+            code/backend/requirements-dev.txt
+
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+
+      # sqlite:// explicitly, not ''. TestConfig does
+      # os.environ.get("TEST_DATABASE_URL", "sqlite://") and an empty string is a present
+      # key, so the default never applies, SQLAlchemy gets a blank URI, and every test
+      # errors at fixture setup.
+      #
+      # Coverage measured 95.54% (94 tests, 448 statements) when this gate was added, so
+      # 90 is a real floor with room to refactor. Raise it if coverage climbs; don't lower
+      # it to make a red build green.
+      - name: pytest
+        env:
+          TEST_DATABASE_URL: "sqlite://"
+        run: |
+          python -m pytest \
+            --cov=app \
+            --cov-report=term-missing \
+            --cov-report=xml \
+            --cov-fail-under=90
+
+      # Kept for the progress report: the percentage over time is the interesting part.
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-sqlite
+          path: code/backend/coverage.xml
+          if-no-files-found: warn
+          retention-days: 14
+
+  backend-test-postgres:
+    name: Backend tests (postgres)
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: code/backend
 
-    strategy:
-      fail-fast: false
-      matrix:
-        # sqlite is what everyone gets locally with a bare `pytest`. postgres is what the
-        # app actually deploys against, and the dialects disagree often enough to matter
-        # -- a column type or an ON CONFLICT that only SQLite tolerates fails here first.
-        database: [sqlite, postgres]
-
+    # What the app actually deploys against. The dialects disagree often enough to matter
+    # -- a column type or a query relying on SQLite's loose typing fails here first.
     services:
-      # Started for both legs; only the postgres leg points TEST_DATABASE_URL at it.
-      # Conditional services aren't expressible in a matrix, and an idle container costs
-      # a few seconds.
       postgres:
         image: postgres:18
         env:
@@ -107,32 +148,70 @@ jobs:
 
       - run: pip install -r requirements.txt -r requirements-dev.txt
 
-      # Set explicitly for both legs. `|| ''` looks equivalent for sqlite but is not:
-      # TestConfig does os.environ.get("TEST_DATABASE_URL", "sqlite://"), and an empty
-      # string is a present key, so the default never applies and SQLAlchemy gets a blank
-      # URI -- every test then errors at fixture setup.
-      # The suite measured 95.5% (94 tests, 448 statements) when this gate was added, so
-      # 90 is a real floor with room to refactor rather than a number that can never fire.
-      # Raise it if coverage climbs; don't lower it to make a red build green.
       - name: pytest
         env:
-          TEST_DATABASE_URL: ${{ matrix.database == 'postgres' && 'postgresql://postgres:postgres@localhost:5432/cadence_test' || 'sqlite://' }}
-        run: |
-          python -m pytest \
-            --cov=app \
-            --cov-report=term-missing \
-            --cov-report=xml \
-            --cov-fail-under=90
+          TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/cadence_test
+        run: python -m pytest
 
-      # Kept for the progress report: the percentage over time is the interesting part.
-      - name: Upload coverage
-        if: always()
-        uses: actions/upload-artifact@v4
+  migrations:
+    name: Migrations match the models
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: code/backend
+
+    # A real Postgres, because this is the one check whose whole point is that the
+    # migration produces the same schema the deployed database will have.
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: cadence_migrations
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d cadence_migrations"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      FLASK_APP: wsgi.py
+      # The app's real config reads DATABASE_URL (not TEST_DATABASE_URL) -- the CLI builds
+      # the app with Config, not TestConfig.
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/cadence_migrations
+      SECRET_KEY: ci-not-a-real-secret
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
         with:
-          name: coverage-${{ matrix.database }}
-          path: code/backend/coverage.xml
-          if-no-files-found: warn
-          retention-days: 14
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: code/backend/requirements.txt
+
+      - run: pip install -r requirements.txt
+
+      # Exactly what Render runs on deploy, against an empty database.
+      - name: flask db upgrade
+        run: flask db upgrade
+
+      # The gate that matters: `db check` compares the models to the database the
+      # migrations just built and fails if they differ. A model changed without a
+      # migration cannot reach develop.
+      - name: flask db check
+        run: flask db check
+
+      # A migration whose downgrade() is wrong is only discovered when someone needs it,
+      # which is the worst moment. Round-trip it now.
+      - name: downgrade to base and back up
+        run: |
+          flask db downgrade base
+          flask db upgrade
+          flask db check
 
   frontend:
     name: Frontend lint, test, build
@@ -218,6 +297,31 @@ jobs:
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,scope=frontend,mode=max
 
+      # CodeQL reads our source; this reads everything underneath it -- the Debian and
+      # Alpine packages in the base images, and the installed Python and npm dependencies.
+      # A CVE in gunicorn or nginx is invisible to CodeQL and shows up here.
+      #
+      # HIGH and CRITICAL only, and only ones with a fix available: an unfixable CVE in a
+      # base image is not something this team can act on, and a build that is red for
+      # something nobody can fix gets ignored, which costs more than it's worth.
+      - name: Scan backend image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: cadence-backend:ci
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
+
+      - name: Scan frontend image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: cadence-frontend:ci
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
+
       # The dev stack, end to end: Postgres accepts connections, Flask starts against it
       # and answers, and the tables can be created. This is the check that would have
       # caught the postgres:18 volume path being wrong.
@@ -239,9 +343,11 @@ jobs:
           echo "::error::/api/health never returned 200"
           exit 1
 
-      - name: Database schema creates cleanly
+      # `flask db upgrade`, not `flask init-db`: this is the command Render runs on every
+      # deploy, so it is the one worth testing. init-db still exists for local resets.
+      - name: Database schema migrates cleanly
         working-directory: code
-        run: docker compose exec -T backend flask init-db
+        run: docker compose exec -T backend flask db upgrade
 
       - name: Frontend dev server serves the page
         run: curl --fail --silent --show-error http://localhost:3000/ | head -c 200
@@ -262,15 +368,23 @@ jobs:
   ci-ok:
     name: CI passed
     runs-on: ubuntu-latest
-    needs: [backend-lint, backend-test, frontend, docker]
+    needs:
+      - backend-lint
+      - backend-test-sqlite
+      - backend-test-postgres
+      - migrations
+      - frontend
+      - docker
     if: always()
     steps:
       # A skipped or cancelled dependency is not a pass -- check the result explicitly
       # rather than relying on `needs` short-circuiting.
       - name: Check results
         run: |
-          echo "backend-lint: ${{ needs.backend-lint.result }}"
-          echo "backend-test: ${{ needs.backend-test.result }}"
-          echo "frontend:     ${{ needs.frontend.result }}"
-          echo "docker:       ${{ needs.docker.result }}"
+          echo "backend-lint:          ${{ needs.backend-lint.result }}"
+          echo "backend-test-sqlite:   ${{ needs.backend-test-sqlite.result }}"
+          echo "backend-test-postgres: ${{ needs.backend-test-postgres.result }}"
+          echo "migrations:            ${{ needs.migrations.result }}"
+          echo "frontend:              ${{ needs.frontend.result }}"
+          echo "docker:                ${{ needs.docker.result }}"
           [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}" = "false" ]

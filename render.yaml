@@ -34,6 +34,19 @@ services:
     # deploy on its own every push.
     autoDeploy: false
     healthCheckPath: /api/health
+    # Runs after the image is built and before any traffic reaches the new version. If it
+    # fails, Render keeps the old version serving, so a broken migration doesn't take the
+    # site down. This replaces the manual `flask init-db` in a Render shell.
+    #
+    # Render may restrict pre-deploy commands to paid instance types -- confirm when you
+    # create the blueprint. If it's rejected on free, delete this line and instead prepend
+    # the migration to the start command by setting dockerCommand:
+    #
+    #   dockerCommand: sh -c "flask db upgrade && exec gunicorn --bind 0.0.0.0:$PORT --workers 2 --threads 4 --access-logfile - wsgi:app"
+    #
+    # That is safe here only because the free tier runs a single instance; with several,
+    # every instance would race to migrate on boot.
+    preDeployCommand: flask db upgrade
     envVars:
       - key: DATABASE_URL
         fromDatabase:
