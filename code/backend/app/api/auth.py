@@ -70,11 +70,11 @@ def register():
 
     try:
         db.session.commit()
-    except IntegrityError:
+    except IntegrityError as exc:
         # Two registrations for the same email arriving at once: the unique constraint
         # catches the loser of the race, and it's still a 409 rather than a 500.
         db.session.rollback()
-        raise conflict("That email is already registered.")
+        raise conflict("That email is already registered.") from exc
 
     login_user(user)
     return jsonify(user.to_dict()), 201

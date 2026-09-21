@@ -1,0 +1,25 @@
+[tool.ruff]
+# 100 rather than PEP 8's 79. The code as written already sits under it almost
+# everywhere, so the standard is something we meet rather than something that would
+# have reformatted working code the week we adopted it.
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# E/W  pycodestyle    -- PEP 8 itself (SPPP 6b names PEP 8 as the Python standard)
+# F    pyflakes       -- unused imports, undefined names, shadowed variables
+# I    isort          -- import order, so imports stop showing up in unrelated diffs
+# B    bugbear        -- likely bugs: mutable defaults, `raise` losing its cause
+# C4   comprehensions -- list()/dict() calls that should be comprehensions
+#
+# Deliberately not pyupgrade (UP): its only finding here was rewriting
+# `timezone.utc` as `datetime.UTC`, which changes working code for no behavioural
+# gain. Revisit if it ever earns its place.
+select = ["E", "W", "F", "I", "B", "C4"]
+
+[tool.pytest.ini_options]
+# Coverage runs by default so the number is the same locally and in CI, rather than
+# something only the pipeline knows. Reporting only for now -- see the note in
+# .github/workflows/ci.yml about the --cov-fail-under gate.
+addopts = "--cov=app --cov-report=term-missing"
+testpaths = ["tests"]

@@ -46,7 +46,13 @@ REMAPPED_STATUS = {
 class ApiError(Exception):
     """An error we're choosing to return. `field` is optional and only used by 422."""
 
-    def __init__(self, status: int, message: str, code: str | None = None, field: str | None = None):
+    def __init__(
+        self,
+        status: int,
+        message: str,
+        code: str | None = None,
+        field: str | None = None,
+    ):
         super().__init__(message)
         self.status = status
         self.message = message

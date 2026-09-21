@@ -123,7 +123,9 @@ def test_an_unknown_email_and_a_wrong_password_look_identical(client, register):
     """Two different messages would let someone discover which emails have accounts."""
     register()
 
-    unknown = client.post("/api/auth/login", json={"email": "nobody@bu.edu", "password": "whatever1"})
+    unknown = client.post(
+        "/api/auth/login", json={"email": "nobody@bu.edu", "password": "whatever1"}
+    )
     wrong = client.post("/api/auth/login", json={"email": GOOD["email"], "password": "whatever1"})
 
     assert unknown.status_code == wrong.status_code == 401
