@@ -21,5 +21,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      # These tests use only Node built-ins and our plain JavaScript API modules.
+          cache: npm
+          cache-dependency-path: code/frontend/package-lock.json
+      - run: npm ci
+      # These tests use only Node built-ins and our own plain JavaScript modules, but
+      # installing anyway keeps that from being load-bearing.
       - run: npm test
