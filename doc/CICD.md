@@ -209,8 +209,19 @@ project; say so in the progress report either way.
 ## Branch protection
 
 CI only actually protects anything once merges are blocked on it. `ci-ok` is the single
-check to require — matrix leg names change whenever the matrix changes, which silently
-un-requires them, but that name never does.
+check to require — job names change whenever the pipeline is restructured, which either
+silently un-requires them or wedges the branch, but that name never does.
+
+> **Run this at merge time, not later.** `develop` currently requires `Backend tests` and
+> `Frontend build`, the job names from the old `ci.yml`. This PR renames them, so the
+> moment it lands those two contexts stop being reported — and a required check that
+> never reports is pending forever. Every PR into `develop` would be unmergeable until an
+> admin runs the command below. Check what is required now with:
+>
+> ```sh
+> gh api repos/BUMETCS673/CS673OLF26P2/branches/develop/protection \
+>   --jq '.required_status_checks.contexts'
+> ```
 
 Run these once, with a repo admin's `gh` login:
 
