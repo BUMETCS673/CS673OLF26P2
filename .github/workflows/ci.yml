@@ -325,39 +325,11 @@ jobs:
       # The dev stack, end to end: Postgres accepts connections, Flask starts against it
       # and answers, and the tables can be created. This is the check that would have
       # caught the postgres:18 volume path being wrong.
-      # Prebuilt with buildx so these hit the same layer cache as the prod images above --
-      # they share every stage except the last. `docker compose --build` can't see buildx's
-      # gha cache, so letting compose build them cost 17-37s of uncached work; these two
-      # steps replace that with a few seconds.
-      - name: Build backend dev image
-        uses: docker/build-push-action@v6
-        with:
-          context: code/backend
-          target: dev
-          push: false
-          load: true
-          tags: cadence-backend-dev:latest
-          cache-from: type=gha,scope=backend
-          cache-to: type=gha,scope=backend-dev,mode=max
-
-      - name: Build frontend dev image
-        uses: docker/build-push-action@v6
-        with:
-          context: code/frontend
-          target: dev
-          push: false
-          load: true
-          tags: cadence-frontend-dev:latest
-          cache-from: type=gha,scope=frontend
-          cache-to: type=gha,scope=frontend-dev,mode=max
-
-      # --no-build: the two steps above already produced the exact tags docker-compose.yml
-      # names, so compose only has to start containers.
       - name: Start the stack
         working-directory: code
         run: |
           cp .env.example .env
-          docker compose up -d --no-build --wait --wait-timeout 180
+          docker compose up -d --build --wait --wait-timeout 180
 
       - name: Backend answers /api/health
         run: |

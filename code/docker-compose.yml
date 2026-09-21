@@ -24,9 +24,6 @@ services:
       # The Dockerfile's last stage is `prod` (gunicorn, non-root). Local development
       # wants the reloader, so ask for `dev` explicitly.
       target: dev
-    # Named explicitly so CI can prebuild this exact tag with a warm layer cache and then
-    # run `compose up --no-build`. Without it the tag is derived from the directory name.
-    image: cadence-backend-dev
     container_name: flask-backend
     restart: unless-stopped
     environment:
@@ -47,7 +44,6 @@ services:
       context: ./frontend
       # `prod` is nginx serving a build; dev wants Vite and hot reload.
       target: dev
-    image: cadence-frontend-dev
     container_name: react-frontend
     restart: unless-stopped
     volumes:
