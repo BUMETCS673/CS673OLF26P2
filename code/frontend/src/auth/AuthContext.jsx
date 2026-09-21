@@ -69,9 +69,13 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
+  // A 401 already confirms the session is gone. Clear locally immediately;
+  // ProtectedRoute redirects to login without waiting for another network call.
+  const expireSession = useCallback(() => setUser(null), []);
+
   const value = useMemo(
-    () => ({ user, loading, login, register, logout }),
-    [user, loading, login, register, logout],
+    () => ({ user, loading, login, register, logout, expireSession }),
+    [user, loading, login, register, logout, expireSession],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
