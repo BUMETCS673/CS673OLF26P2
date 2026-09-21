@@ -219,7 +219,7 @@ gh api repos/BUMETCS673/CS673OLF26P2/branches/develop/protection \
 
 | Job | Likely cause | Fix |
 |---|---|---|
-| Backend lint | ruff found a style or import-order problem | `cd code/backend && ruff check --fix . && ruff format .` |
+| Backend lint | ruff found a style or import-order problem | `cd code/backend && ruff check --fix .` |
 | Backend tests (sqlite) | a genuine test failure | reproduce with `pytest` |
 | Backend tests (postgres) | SQLite tolerated something Postgres doesn't — a dialect-specific type, or a query relying on SQLite's loose typing | reproduce with the `TEST_DATABASE_URL` command above |
 | Backend tests, "Required test coverage not reached" | new code arrived without tests | add tests, or argue the threshold down in `ci.yml` |
@@ -258,4 +258,10 @@ Worth being able to defend in the progress report:
 - **Action versions pinned to major tags** (`actions/checkout@v4`), not SHAs. Dependabot
   tracks the majors. SHA pinning is the stricter supply-chain posture and costs little if
   the team wants it.
+- **`ruff format` is advisory, not a gate.** It would rewrite 11 of the backend's 20
+  files, all cosmetic, and it collapses the aligned end-of-line comments used throughout
+  (see the `parametrize` lists in `tests/test_auth.py`). `ruff check` — the half that
+  finds actual problems — *is* blocking. To make formatting blocking: run `ruff format .`
+  once, land it as its own commit so it never mixes with a behaviour change, then drop
+  `continue-on-error` from that step. Start of an iteration, not the middle.
 - **No load or performance testing.** Out of scope for the free tier.
