@@ -305,7 +305,7 @@ jobs:
       # base image is not something this team can act on, and a build that is red for
       # something nobody can fix gets ignored, which costs more than it's worth.
       - name: Scan backend image
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: cadence-backend:ci
           severity: HIGH,CRITICAL
@@ -314,7 +314,7 @@ jobs:
           format: table
 
       - name: Scan frontend image
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: cadence-frontend:ci
           severity: HIGH,CRITICAL
