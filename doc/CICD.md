@@ -10,8 +10,8 @@ What runs, when, and what to do when it goes red.
             v
       open a PR ------------> CI ---------> [ci-ok] --- required to merge
                               |
-                              +-- Backend lint          ruff check, ruff format
-                              +-- Backend tests         pytest x {sqlite, postgres}, coverage >= 70%
+                              +-- Backend lint          ruff check (ruff format advisory)
+                              +-- Backend tests         pytest x {sqlite, postgres}, coverage >= 90%
                               +-- Frontend              eslint, npm test, vite build
                               +-- Docker                build prod images, boot the stack
                               |
@@ -71,7 +71,8 @@ Backend tests and linters, without Docker:
 cd code/backend
 pip install -r requirements.txt -r requirements-dev.txt
 pytest                      # in-memory SQLite
-ruff check . && ruff format .
+ruff check .                # this one is the CI gate
+ruff format --diff .        # advisory only -- see "Deliberate omissions"
 
 # The same suite against real Postgres, the way CI's second matrix leg runs it:
 docker compose up -d postgres
@@ -99,7 +100,8 @@ To lint locally, or to fix this properly:
 ```sh
 cd code/frontend
 npm install --save-dev eslint@9.39.0 @eslint/js@9.39.0 globals@16.5.0 \
-  eslint-plugin-react-hooks@7.1.0 eslint-plugin-react-refresh@0.4.24
+  eslint-plugin-react@7.37.5 eslint-plugin-react-hooks@7.1.0 \
+  eslint-plugin-react-refresh@0.4.24
 ```
 
 Commit the updated `package.json` **and** `package-lock.json`, then delete the
