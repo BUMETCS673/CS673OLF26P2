@@ -37,6 +37,10 @@ RUN npm run build
 
 FROM nginx:1.27-alpine AS prod
 
+# Same reason as the backend: the pinned tag lags the distro's patched packages. This is
+# where the openssl and c-ares CVEs Trivy reported get fixed.
+RUN apk upgrade --no-cache
+
 # The official image runs envsubst over everything in templates/ at startup. The filter
 # restricts that to API_ORIGIN, so nginx's own $host / $remote_addr survive untouched.
 ENV NGINX_ENVSUBST_FILTER="^(API_ORIGIN|PORT)$" \

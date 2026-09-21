@@ -8,6 +8,14 @@
 
 FROM python:3.12-slim AS base
 
+# Base image tags are rebuilt on their own schedule, so a pinned tag drifts behind the
+# distro's security updates -- Trivy found 39 HIGH/CRITICAL in the frontend base this way.
+# Upgrading the OS packages here keeps the tag pinned (reproducible) while still picking up
+# patches, instead of chasing tag bumps every week.
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 COPY requirements.txt .
