@@ -74,7 +74,9 @@ def register():
         # Two registrations for the same email arriving at once: the unique constraint
         # catches the loser of the race, and it's still a 409 rather than a 500.
         db.session.rollback()
-        raise conflict("That email is already registered.")
+        # `from None`: losing the race is an expected outcome, not an internal error, so
+        # the IntegrityError adds nothing to the traceback a reader would want.
+        raise conflict("That email is already registered.") from None
 
     login_user(user)
     return jsonify(user.to_dict()), 201

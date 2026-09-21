@@ -7,6 +7,7 @@
 
 import js from "@eslint/js";
 import globals from "globals";
+import react from "eslint-plugin-react";
 import reactHooks from "eslint-plugin-react-hooks";
 import reactRefresh from "eslint-plugin-react-refresh";
 
@@ -26,11 +27,21 @@ export default [
       },
     },
     plugins: {
+      react,
       "react-hooks": reactHooks,
       "react-refresh": reactRefresh,
     },
+    settings: {
+      react: { version: "detect" },
+    },
     rules: {
       ...reactHooks.configs.recommended.rules,
+
+      // Without this, plain eslint has no idea that <DeckListPage /> is a *use* of the
+      // imported DeckListPage, so no-unused-vars flags every component in the project.
+      // jsx-uses-react does the same for the React identifier itself.
+      "react/jsx-uses-vars": "error",
+      "react/jsx-uses-react": "error",
 
       // Catches the bug class this project is most exposed to: a fetch in an effect
       // whose dependency list is missing the id it reads, so the deck detail page keeps
