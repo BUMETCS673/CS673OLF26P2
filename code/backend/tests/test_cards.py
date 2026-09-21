@@ -1,5 +1,6 @@
 """Tests for the card endpoints (WS2)."""
 
+from app.extensions import db
 from app.models import Card
 
 
@@ -176,6 +177,8 @@ def test_patch_someone_elses_card_is_404(client, make_user, login_as, make_deck)
     res = client.patch(f"/api/cards/{card_id}", json={"front": "hacked"})
 
     assert res.status_code == 404
+    # Drop the test session's cached copy so we really read from the database.
+    db.session.expire_all()
     assert Card.query.get(card_id).front == "front"
 
 
@@ -209,4 +212,5 @@ def test_delete_someone_elses_card_is_404(client, make_user, login_as, make_deck
     res = client.delete(f"/api/cards/{card_id}")
 
     assert res.status_code == 404
-    assert Card.query.get(card_id) is not None
+    # Ask the database directly (not the cached copy) that the card still exists.
+    assert Card.query.filter_by(id=card_id).count() == 1
