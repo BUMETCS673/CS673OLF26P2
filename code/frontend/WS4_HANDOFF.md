@@ -19,11 +19,12 @@ uploaded or imported into accounts.
   creation uses “Cancel” and stays on the deck.
 - The merged dependency files include Duc’s router and WS4’s npm test command.
 
-## Remaining dependency
+## Backend integration status
 
-Von’s WS2 deck/card endpoints are not yet in the develop revision merged here.
-The app intentionally uses real endpoints and shows errors if they are unavailable.
-Full account-backed persistence requires WS2 to land, followed by browser validation.
+Von’s WS2 deck/card endpoints and fixes from PR #17 are now merged from develop.
+Their routes and request fields match the frontend adapter. All nine frontend
+tests and the production build pass after this merge. Full account-backed browser
+validation is still pending; no app containers were running during this check.
 Duc’s known expired-session handling gap remains a separate follow-up.
 
 ## Run and check
@@ -46,7 +47,7 @@ those branches. Node tests cover the endpoint contract, demo recovery, and the
 actual WS3 client connection (URLs, cookies, serialization, 204s, and API errors).
 They do not prove browser session persistence or PostgreSQL behavior.
 
-## Browser acceptance after WS2 lands
+## Pending browser acceptance with the backend running
 
 1. Sign up, land on the deck library, refresh and remain signed in.
 2. Create a deck and immediately add two cards; edit one and delete the other.
