@@ -1,126 +1,71 @@
-# WS4: decks and cards
+# WS4: decks and cards — integrated with WS3
 
-This branch implements Nurzat's deck list, deck details, reusable forms, and inline
-card editing. It currently runs as a clearly labeled **browser-local demo**.
-It does not log users in or store data in PostgreSQL. Real authenticated persistence
-remains an integration task for WS2, WS3, and WS4 together.
+WS4 now runs inside Duc’s BrowserRouter, AuthProvider and protected routes.
+The temporary hash-routing shell and browser-local demo are no longer used by the app.
+The demo transport remains only as a test fixture; existing browser demo data is not
+uploaded or imported into accounts.
 
-## A quick guide for Nurzat
+## What changed during integration
 
-- A **branch** is a named line of work in Git. `feat/ws4-frontend-decks` uses the
-  same project folder as `develop`; it does not create a second folder.
-- An **uncommitted change** is an edit saved on disk but not yet recorded as a Git
-  snapshot. Branches isolate committed history; commit or stash edits before switching.
-- A **commit** records a snapshot locally. A **push** uploads commits to GitHub.
-- A **pull request** asks teammates to review and merge the branch into `develop`.
-  This implementation does not push or open a PR by itself.
+- Kept WS3’s `main.jsx` startup, auth, header, routes, and shared client.
+- Replaced WS3’s deck placeholders with WS4’s styled pages.
+- Page wrappers read route parameters and supply navigation/API props to the views.
+- `api/decks.client.js` adapts the nine WS4 operations to WS3’s get/post/patch/del
+  helpers, removing the prefix that WS3 adds itself. Cookies and errors go through
+  the shared client. No additional fetch wrapper was introduced.
+- New-deck creation passes a one-time router flag to open the card composer.
+  The flag is consumed so browser Back does not reopen first-time setup.
+- “Finish for now” returns to the library during new-deck setup. Ordinary card
+  creation uses “Cancel” and stays on the deck.
+- The merged dependency files include Duc’s router and WS4’s npm test command.
 
-## Files
+## Remaining dependency
 
-| File | Purpose |
-| --- | --- |
-| `src/pages/DeckListPage.jsx` | Load, create, edit, and delete decks; show card counts. |
-| `src/pages/DeckDetailPage.jsx` | Load a deck and manage its cards. |
-| `src/components/DeckForm.jsx` | Deck name/description fields and validation. |
-| `src/components/CardForm.jsx` | Shared create/edit form for card fronts and backs. |
-| `src/components/CardRow.jsx` | Display a card, edit it in place, or confirm deletion. |
-| `src/api/decks.js` | Nine endpoint functions built around an injected shared client. |
-| `src/api/decks.demo.js` | Temporary local-storage data transport. |
-| `src/main.jsx` | Temporary demo shell and hash navigation; WS3 will replace it. |
-| `src/ws4.css` | Plain CSS scoped under `.ws4`. |
-| `tests/decks.test.mjs` | Contract, demo persistence, validation, and failure checks. |
+Von’s WS2 deck/card endpoints are not yet in the develop revision merged here.
+The app intentionally uses real endpoints and shows errors if they are unavailable.
+Full account-backed persistence requires WS2 to land, followed by browser validation.
+Duc’s known expired-session handling gap remains a separate follow-up.
 
-## Run locally
+## Run and check
 
-With a current Node.js LTS release and npm installed, from `code/frontend`:
+From `code/frontend` with Node 22 or later:
 
 ```sh
 npm ci
-npm run dev -- --host 127.0.0.1
-```
-
-Open `http://localhost:3000`. `npm ci` installs the exact dependencies in the
-existing lockfile. It is only needed when setting up or when that lockfile changes.
-No new project packages are required for WS4.
-
-The existing Docker frontend can also serve the demo. The preview itself does not
-need the backend. Its URLs use `#/decks` and `#/decks/1` temporarily. Demo data is
-saved for this browser and origin under `cadence.ws4.demo.v1`; clearing site data
-removes it. There are no accounts or ownership guarantees in the demo.
-
-## Checks
-
-```sh
 npm test
 npm run build
 ```
 
-Manual browser checklist:
+Use the repository Docker setup for frontend/backend/PostgreSQL together. Outside
+Docker, start Vite with `VITE_API_PROXY_TARGET=http://localhost:5001 npm run dev`.
+The backend must be running and its database initialized. Routes are now `/login`,
+`/signup`, `/decks`, and `/decks/:id`, without a hash prefix.
 
-1. Start with no decks; check the empty state and create a deck.
-2. Reject a blank name; save a name and optional description.
-3. Creating a deck opens its card editor immediately. Add two cards, or choose
-   “Finish for now” to return to My decks, even with no cards. Reopen the empty deck:
-   it should say “This deck is empty” with one “+ Add card” button at the top right.
-   When adding cards from an existing deck, the secondary button is “Cancel”:
-   it closes the editor and stays on that deck. Only the automatic editor after
-   creating a deck uses “Finish for now” to return to the library.
-   Verify “+ New deck”
-   appears only once the library has a deck. Rename the deck from the library.
-4. Edit one card in place; cancel an edit and verify it was not saved.
-5. Cancel a card deletion, then confirm it. Check the card count.
-6. Refresh; verify the remaining card and edits survive.
-7. Return to all decks; check the count. Cancel deck deletion, then confirm it.
-8. Open a nonexistent deck URL; verify the error and way back.
-9. Check keyboard navigation, labels, and narrow-window layout.
+The Frontend tests workflow runs npm test on PRs into develop/main and pushes to
+those branches. Node tests cover the endpoint contract, demo recovery, and the
+actual WS3 client connection (URLs, cookies, serialization, 204s, and API errors).
+They do not prove browser session persistence or PostgreSQL behavior.
 
-Node tests exercise data operations, not rendered React interactions. The full
-plan's logged-in acceptance flow can only pass after real backend/auth integration.
+## Browser acceptance after WS2 lands
 
-The Frontend tests workflow runs `npm test` on pull requests into `develop`/`main`
-and pushes to those branches. It uses Node 22 and needs no dependency installation.
-Tests include corrupt demo-data recovery and genuine browser-storage failures.
-Invalid demo data opens an empty library; the original stored value is preserved
-until a successful save replaces it. Valid saved decks and cards are preserved.
+1. Sign up, land on the deck library, refresh and remain signed in.
+2. Create a deck and immediately add two cards; edit one and delete the other.
+3. Finish new-deck setup and return to the library; verify the count.
+4. Open an existing deck, add a card, and cancel to stay on that deck.
+5. Leave a new deck via the header, then press Back; first-time setup must not replay.
+6. Reopen the card composer after an edit; its hint should be fresh and notices
+   should have just one live status announcement.
+7. Refresh, log out and log in; confirm that the saved deck and cards remain.
+8. Check loading, validation, missing-deck errors, and deletion confirmation.
 
-Review regression checks: leave a newly created deck using Finish, All decks, the
-brand, or My decks; browser Back should show the normal deck view. Leaving should
-not reload the departing deck. After editing a card, reopen Add card and check
-that its hint is fresh and each notice has just one live status announcement.
+## Files to know
 
-## Connecting teammates' work
+- `src/pages/DeckListPage.jsx`: router wrapper and deck library view.
+- `src/pages/DeckDetailPage.jsx`: router wrapper and card management view.
+- `src/components/DeckForm.jsx`, `CardForm.jsx`, `CardRow.jsx`: reusable forms/cards.
+- `src/api/decks.js`: transport-independent endpoint functions.
+- `src/api/decks.client.js`: connection to Duc’s shared client.
+- `src/api/decks.demo.js`: standalone demo transport used in tests only.
+- `src/ws4.css`: deck/card styles scoped under `.ws4`.
 
-**Duc (WS3):** Keep ownership of `App.jsx`, auth, `client.js`, and dependencies.
-Replace the demo shell in `main.jsx` with your app entry point. Import these pages
-into the protected `/decks` and `/decks/:id` routes. Keep the API object stable
-(create it once outside the component), and pass:
-
-```jsx
-<DeckListPage api={decksApi}
-  onOpenDeck={(id) => navigate(`/decks/${id}`)}
-  onDeckCreated={(id) => navigate(`/decks/${id}`, { state: { startAdding: true } })} />
-<DeckDetailPage key={id} api={decksApi} deckId={id}
-  startAdding={Boolean(location.state?.startAdding)} onBack={() => navigate('/decks')} />
-```
-
-`location` comes from the router's location hook. Ordinary deck navigation should
-omit the `startAdding` state; only new-deck creation automatically opens the editor.
-
-Import `ws4.css` and wrap deck pages with `className="ws4"` (or coordinate the
-shared layout styles). `id` comes from the router's route parameters. WS3's shared
-header should replace the temporary demo header.
-
-`createDecksApi(request)` expects `request(path, { method, body })`. `body` is a
-JavaScript object, not serialized JSON. Adapt this call to WS3's chosen client
-signature in one place. The shared client handles JSON serialization, headers,
-`credentials: 'include'`, JSON responses, empty 204 responses, and errors carrying
-`code` and `message`. Coordinate unauthorized-session handling with AuthContext.
-No WS4 component calls `fetch`, and no replacement shared client is introduced.
-
-**Von (WS2):** Supply the nine endpoints in the existing iteration contract.
-Deck responses include `card_count`; card responses include `deck_id`. Lists are
-arrays. Missing or unowned resources return 404, invalid fields 422, and successful
-deletions 204. WS4 does not modify backend files or the contract.
-
-Once connected, remove the demo transport/imports and demo banner, then repeat the
-acceptance flow against real login and PostgreSQL, including logout/login and refresh.
+Further commits pushed to feat/ws4-frontend-decks update the existing PR #16.
