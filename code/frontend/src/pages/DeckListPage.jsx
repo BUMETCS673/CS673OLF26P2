@@ -13,10 +13,15 @@ export default function DeckListPage() {
 }
 
 export function DeckListView({ api, onOpenDeck, onDeckCreated = onOpenDeck }) {
-  const [decks, setDecks] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
   const [revision, setRevision] = useState(0);
+  // Decks, the load error and "which request produced them" live in one state tagged
+  // with the request it answers, so `loading` is derived instead of being switched on at
+  // the top of the effect. A synchronous setState there costs an extra render pass every
+  // time `revision` changes, which is what react-hooks/set-state-in-effect flags.
+  const [result, setResult] = useState({ key: null, decks: [], error: '' });
+  const requestKey = String(revision);
+  const loading = result.key !== requestKey;
+  const { decks, error } = result;
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState(null);
   const [deleting, setDeleting] = useState(null);
@@ -24,14 +29,21 @@ export function DeckListView({ api, onOpenDeck, onDeckCreated = onOpenDeck }) {
   const [deleteError, setDeleteError] = useState('');
   const [notice, setNotice] = useState('');
 
+  // Local edits to the loaded list -- same shape as a useState setter, so the handlers
+  // below read the way they did before the list moved inside `result`.
+  function setDecks(update) {
+    setResult((current) => ({
+      ...current,
+      decks: typeof update === 'function' ? update(current.decks) : update,
+    }));
+  }
+
   useEffect(() => {
     let active = true;
-    setLoading(true); setError('');
-    api.listDecks().then((result) => { if (active) setDecks(result); })
-      .catch((err) => { if (active) setError(err.message || 'Could not load your decks.'); })
-      .finally(() => { if (active) setLoading(false); });
+    api.listDecks().then((nextDecks) => { if (active) setResult({ key: requestKey, decks: nextDecks, error: '' }); })
+      .catch((err) => { if (active) setResult({ key: requestKey, decks: [], error: err.message || 'Could not load your decks.' }); });
     return () => { active = false; };
-  }, [api, revision]);
+  }, [api, requestKey]);
 
   async function remove(deck) {
     setBusy(true); setDeleteError('');

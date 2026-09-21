@@ -319,19 +319,4 @@ Worth being able to defend in the progress report:
   finds actual problems — *is* blocking. To make formatting blocking: run `ruff format .`
   once, land it as its own commit so it never mixes with a behaviour change, then drop
   `continue-on-error` from that step. Start of an iteration, not the middle.
-- **`react-hooks/set-state-in-effect` is advisory.** react-hooks 7 has it in
-  `recommended` as an error, and it fires on the `setLoading(true); setError('')` reset at
-  the top of the fetch effects in `DeckListPage` and `DeckDetailPage`. It is a real
-  finding — each reset costs an extra render pass when `revision` changes — but clearing
-  it means restructuring how those two pages hold loading state. Same rule as `ruff
-  format`: land that as its own WS4 change, then raise this back to `error`.
-  `exhaustive-deps`, the rule that catches actual stale-data bugs, stays blocking.
-- **No Terraform, and no plan to add it.** `render.yaml` is already the infrastructure as
-  code: the Blueprint declares the Postgres instance, both web services and every
-  environment variable, and Render reconciles it on push. Terraform on top would mean a
-  second description of the same three resources, a state file to host and lock, and a
-  Render API key in Actions — real setup cost for a stack that has no networking, IAM,
-  DNS or multi-region topology to manage. It becomes the right answer if this ever leaves
-  Render for a cloud account, where the resource count and the IAM surface are what make
-  hand-clicking untenable.
 - **No load or performance testing.** Out of scope for the free tier.
