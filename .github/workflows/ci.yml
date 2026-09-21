@@ -248,10 +248,14 @@ jobs:
       - name: eslint
         run: npx eslint .
 
-      # --if-present so this job works both before and after the PR that adds a `test`
-      # script (#16) lands, instead of failing on a missing script.
+      # No --if-present: #16 landed the `test` script, and the flag would turn a script
+      # someone deletes into a silent pass instead of a red build.
+      #
+      # This is the only place the frontend tests run. #16 also added a standalone
+      # frontend-tests.yml doing `npm ci && npm test`; merging develop brought it in and
+      # it ran the same two files a second time on every PR, so it is deleted here.
       - name: Unit tests
-        run: npm test --if-present
+        run: npm test
 
       # Vite type-checks nothing, but it does parse and bundle every module, so a bad
       # import path or broken JSX fails here.
