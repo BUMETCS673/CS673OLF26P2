@@ -21,6 +21,9 @@ services:
   backend:
     build:
       context: ./backend
+      # The Dockerfile's last stage is `prod` (gunicorn, non-root). Local development
+      # wants the reloader, so ask for `dev` explicitly.
+      target: dev
     container_name: flask-backend
     restart: unless-stopped
     environment:
@@ -39,6 +42,8 @@ services:
   frontend:
     build:
       context: ./frontend
+      # `prod` is nginx serving a build; dev wants Vite and hot reload.
+      target: dev
     container_name: react-frontend
     restart: unless-stopped
     volumes:

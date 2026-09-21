@@ -1,15 +1,35 @@
 name: CI
 
 # Nobody on the team runs the stack before pushing, so this is where "does it actually
-# build and pass" gets answered. Both jobs run on every push and every pull request.
+# build and pass" gets answered.
+#
+# Triggers: pull requests (any target), plus pushes to develop and main. A feature branch
+# with an open PR used to run this twice -- once for the push, once for the PR -- because
+# `push` matched every branch. Restricting push to the two long-lived branches keeps the
+# post-merge run and drops the duplicate.
 on:
   push:
-    branches: ["**"]
+    branches: [develop, main]
   pull_request:
+  workflow_dispatch:
+
+# Read-only by default; no job here needs to write to the repository.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  # Superseded PR runs are wasted minutes, so cancel them. Pushes to develop/main are
+  # left alone -- CD keys off those, and cancelling one would skip a deploy.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "22"
 
 jobs:
-  backend:
-    name: Backend tests
+  backend-lint:
+    name: Backend lint
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -19,17 +39,91 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
-          cache-dependency-path: code/backend/requirements.txt
+          cache-dependency-path: code/backend/requirements-dev.txt
 
-      - run: pip install -r requirements.txt
+      # Only the linter, not the app's own dependencies -- this job never imports app/.
+      - run: pip install -r requirements-dev.txt
 
-      # TestConfig points at in-memory SQLite, so there's no database service to start.
-      - run: python -m pytest -q
+      # --output-format=github turns each finding into an annotation on the diff, so a
+      # reviewer sees it on the line rather than in the log.
+      - name: ruff check
+        run: ruff check --output-format=github .
+
+      - name: ruff format --check
+        run: ruff format --check --diff .
+
+  backend-test:
+    name: Backend tests (${{ matrix.database }})
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: code/backend
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # sqlite is what everyone gets locally with a bare `pytest`. postgres is what the
+        # app actually deploys against, and the dialects disagree often enough to matter
+        # -- a column type or an ON CONFLICT that only SQLite tolerates fails here first.
+        database: [sqlite, postgres]
+
+    services:
+      # Started for both legs; only the postgres leg points TEST_DATABASE_URL at it.
+      # Conditional services aren't expressible in a matrix, and an idle container costs
+      # a few seconds.
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: cadence_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d cadence_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            code/backend/requirements.txt
+            code/backend/requirements-dev.txt
+
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+
+      # conftest.py reads TEST_DATABASE_URL and falls back to in-memory SQLite, so the
+      # sqlite leg just leaves it unset.
+      - name: pytest
+        env:
+          TEST_DATABASE_URL: ${{ matrix.database == 'postgres' && 'postgresql://postgres:postgres@localhost:5432/cadence_test' || '' }}
+        run: |
+          python -m pytest \
+            --cov=app \
+            --cov-report=term-missing \
+            --cov-report=xml \
+            --cov-fail-under=70
+
+      # Kept for the progress report: the percentage over time is the interesting part.
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.database }}
+          path: code/backend/coverage.xml
+          if-no-files-found: warn
+          retention-days: 14
 
   frontend:
-    name: Frontend build
+    name: Frontend lint, test, build
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -39,7 +133,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: code/frontend/package-lock.json
 
@@ -47,6 +141,123 @@ jobs:
       # package.json fails here rather than the next time someone builds the image.
       - run: npm ci
 
+      # --no-save on purpose: writing these into package.json would need a regenerated
+      # package-lock.json, and `npm ci` fails when the two disagree. See the comment at
+      # the top of eslint.config.mjs.
+      - name: Install lint tooling
+        run: |
+          npm install --no-save \
+            eslint@9.39.0 \
+            @eslint/js@9.39.0 \
+            globals@16.5.0 \
+            eslint-plugin-react-hooks@7.1.0 \
+            eslint-plugin-react-refresh@0.4.24
+
+      - name: eslint
+        run: npx eslint .
+
+      # --if-present so this job works both before and after the PR that adds a `test`
+      # script (#16) lands, instead of failing on a missing script.
+      - name: Unit tests
+        run: npm test --if-present
+
       # Vite type-checks nothing, but it does parse and bundle every module, so a bad
       # import path or broken JSX fails here.
       - run: npm run build
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: code/frontend/dist
+          retention-days: 7
+
+  docker:
+    name: Docker images and stack smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Builds the `prod` targets -- the ones CD pushes. Until now nothing built these
+      # images at all, so a broken Dockerfile passed CI and failed at `compose up`.
+      # No push here: that's cd.yml's job, and it only runs after this passes.
+      - name: Build backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: code/backend
+          target: prod
+          push: false
+          load: true
+          tags: cadence-backend:ci
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,scope=backend,mode=max
+
+      - name: Build frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: code/frontend
+          target: prod
+          push: false
+          load: true
+          tags: cadence-frontend:ci
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,scope=frontend,mode=max
+
+      # The dev stack, end to end: Postgres accepts connections, Flask starts against it
+      # and answers, and the tables can be created. This is the check that would have
+      # caught the postgres:18 volume path being wrong.
+      - name: Start the stack
+        working-directory: code
+        run: |
+          cp .env.example .env
+          docker compose up -d --build --wait --wait-timeout 180
+
+      - name: Backend answers /api/health
+        run: |
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent --show-error http://localhost:5001/api/health; then
+              echo "  <- healthy on attempt $attempt"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::/api/health never returned 200"
+          exit 1
+
+      - name: Database schema creates cleanly
+        working-directory: code
+        run: docker compose exec -T backend flask init-db
+
+      - name: Frontend dev server serves the page
+        run: curl --fail --silent --show-error http://localhost:3000/ | head -c 200
+
+      # Without this, a failure leaves no way to tell which container died.
+      - name: Container logs
+        if: failure()
+        working-directory: code
+        run: docker compose logs --no-color --tail 100
+
+      - name: Tear down
+        if: always()
+        working-directory: code
+        run: docker compose down --volumes --remove-orphans
+
+  # One job to require in branch protection. Matrix legs change names when the matrix
+  # changes, which silently un-requires them; this name never does.
+  ci-ok:
+    name: CI passed
+    runs-on: ubuntu-latest
+    needs: [backend-lint, backend-test, frontend, docker]
+    if: always()
+    steps:
+      # A skipped or cancelled dependency is not a pass -- check the result explicitly
+      # rather than relying on `needs` short-circuiting.
+      - name: Check results
+        run: |
+          echo "backend-lint: ${{ needs.backend-lint.result }}"
+          echo "backend-test: ${{ needs.backend-test.result }}"
+          echo "frontend:     ${{ needs.frontend.result }}"
+          echo "docker:       ${{ needs.docker.result }}"
+          [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}" = "false" ]

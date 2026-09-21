@@ -1,0 +1,36 @@
+# Tool configuration only -- the backend is run as a script (wsgi.py), not installed as
+# a package, so there's no [project] table or build backend here.
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["migrations"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes -- unused imports, undefined names
+    "I",    # isort -- import order
+    "B",    # flake8-bugbear -- likely bugs (mutable defaults, assert on tuple, ...)
+    "UP",   # pyupgrade -- syntax that's obsolete on 3.12
+    "C4",   # comprehension rewrites
+    "SIM",  # obvious simplifications
+]
+ignore = [
+    "E501",  # line length -- the formatter owns this; flagging it twice is noise
+    "B008",  # function call in default arg: normal in Flask/SQLAlchemy declarations
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests lean on fixtures and long descriptive asserts; neither is a smell there.
+"tests/*" = ["B011"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# -ra prints a short reason for every non-passing test at the end, so a CI log tells you
+# what failed without scrolling back through the whole run.
+addopts = "-ra --strict-markers"
