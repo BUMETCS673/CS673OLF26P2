@@ -25,7 +25,10 @@ Von’s WS2 deck/card endpoints and fixes from PR #17 are now merged from develo
 Their routes and request fields match the frontend adapter. All nine frontend
 tests and the production build pass after this merge. Full account-backed browser
 validation is still pending; no app containers were running during this check.
-Duc’s known expired-session handling gap remains a separate follow-up.
+Deck pages now use a memoized authenticated API adapter. Any deck/card operation
+that receives an unauthorized response clears AuthContext immediately, allowing
+ProtectedRoute to return the user to login. Failed operations still reject, so
+forms cannot treat a failed save as successful. Other errors keep the session.
 
 ## Run and check
 
@@ -58,6 +61,8 @@ They do not prove browser session persistence or PostgreSQL behavior.
    should have just one live status announcement.
 7. Refresh, log out and log in; confirm that the saved deck and cards remain.
 8. Check loading, validation, missing-deck errors, and deletion confirmation.
+9. Expire the session while a deck page is open, then load, save, or delete:
+   verify redirection to login and that the header no longer shows a signed-in user.
 
 ## Files to know
 

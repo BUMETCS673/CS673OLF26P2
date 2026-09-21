@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import DeckForm from '../components/DeckForm';
 import { useNavigate } from 'react-router-dom';
-import { decksApi } from '../api/decks.client';
+import { useDecksApi } from '../api/useDecksApi';
 
 export default function DeckListPage() {
   const navigate = useNavigate();
+  const decksApi = useDecksApi();
   return <div className="ws4"><DeckListView api={decksApi}
     onOpenDeck={(id) => navigate(`/decks/${id}`)}
     onDeckCreated={(id) => navigate(`/decks/${id}`, { state: { startAdding: true } })} />

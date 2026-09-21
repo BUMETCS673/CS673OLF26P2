@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import CardForm from '../components/CardForm';
 import CardRow from '../components/CardRow';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { decksApi } from '../api/decks.client';
+import { useDecksApi } from '../api/useDecksApi';
 
 export default function DeckDetailPage() {
   const { id } = useParams();
@@ -12,6 +12,7 @@ export default function DeckDetailPage() {
 }
 
 function RoutedDeckDetail({ id, location, navigate }) {
+  const decksApi = useDecksApi();
   // Consume the setup flag once. Back/Forward must not replay first-card setup.
   const [startAdding] = useState(Boolean(location.state?.startAdding));
   useEffect(() => {
