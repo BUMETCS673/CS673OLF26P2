@@ -12,6 +12,11 @@ databases:
     databaseName: cadence
     user: cadence
     plan: free
+    # Keep this equal to the version in docker-compose.yml and in ci.yml's postgres
+    # service. Testing on one major and deploying on another reintroduces exactly the
+    # gap the sqlite/postgres test matrix was added to close. If Render doesn't offer 18
+    # yet, lower all three together rather than letting them drift.
+    postgresMajorVersion: "18"
     # Only the backend service may connect; nothing from the public internet.
     ipAllowList: []
 
