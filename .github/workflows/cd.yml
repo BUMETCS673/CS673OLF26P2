@@ -68,7 +68,7 @@ jobs:
           echo "environment=$environment" >> "$GITHUB_OUTPUT"
           echo "Deploying $sha to $environment"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Check out the commit CI tested, not whatever the branch tip is now. Without
           # this, a push landing mid-run would ship untested code.
