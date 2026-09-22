@@ -1,13 +1,13 @@
 """Shared bits every model uses: UTC timestamps and how we put them in JSON."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.extensions import db
 
 
 def utcnow() -> datetime:
     """Timezone-aware "now". Always UTC, so timestamps compare correctly."""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def iso(value: datetime | None) -> str | None:
@@ -19,8 +19,8 @@ def iso(value: datetime | None) -> str | None:
     if value is None:
         return None
     if value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
 class TimestampMixin:

@@ -1,15 +1,35 @@
 name: CI
 
 # Nobody on the team runs the stack before pushing, so this is where "does it actually
-# build and pass" gets answered. Both jobs run on every push and every pull request.
+# build and pass" gets answered.
+#
+# Triggers: pull requests (any target), plus pushes to develop and main. A feature branch
+# with an open PR used to run this twice -- once for the push, once for the PR -- because
+# `push` matched every branch. Restricting push to the two long-lived branches keeps the
+# post-merge run and drops the duplicate.
 on:
   push:
-    branches: ["**"]
+    branches: [develop, main]
   pull_request:
+  workflow_dispatch:
+
+# Read-only by default; no job here needs to write to the repository.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  # Superseded PR runs are wasted minutes, so cancel them. Pushes to develop/main are
+  # left alone -- CD keys off those, and cancelling one would skip a deploy.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "22"
 
 jobs:
-  backend:
-    name: Backend tests
+  backend-lint:
+    name: Backend lint
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -19,17 +39,182 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: code/backend/requirements-dev.txt
+
+      # Only the linter, not the app's own dependencies -- this job never imports app/.
+      - run: pip install -r requirements-dev.txt
+
+      # --output-format=github turns each finding into an annotation on the diff, so a
+      # reviewer sees it on the line rather than in the log.
+      - name: ruff check
+        run: ruff check --output-format=github .
+
+      # `ruff format --check` is deliberately NOT a gate. It wanted to rewrite 11 of the
+      # backend's 20 files, all cosmetic, and it collapses the aligned end-of-line
+      # comments this codebase uses throughout (see the parametrize lists in
+      # tests/test_auth.py). That is a large, contentious diff for no correctness gain.
+      # Reconsider at the start of an iteration, not the middle: run `ruff format .`
+      # once, land it as its own commit, then make this blocking.
+      - name: ruff format (advisory, never fails the build)
+        continue-on-error: true
+        run: ruff format --check --diff . || true
+
+  # Split from the Postgres job rather than being a matrix leg of it. As a matrix, the
+  # postgres service container started for both legs and "Initialize containers" cost the
+  # sqlite leg 13s for a database it never opened.
+  backend-test-sqlite:
+    name: Backend tests (sqlite)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: code/backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            code/backend/requirements.txt
+            code/backend/requirements-dev.txt
+
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+
+      # sqlite:// explicitly, not ''. TestConfig does
+      # os.environ.get("TEST_DATABASE_URL", "sqlite://") and an empty string is a present
+      # key, so the default never applies, SQLAlchemy gets a blank URI, and every test
+      # errors at fixture setup.
+      #
+      # Coverage measured 95.54% (94 tests, 448 statements) when this gate was added, so
+      # 90 is a real floor with room to refactor. Raise it if coverage climbs; don't lower
+      # it to make a red build green.
+      - name: pytest
+        env:
+          TEST_DATABASE_URL: "sqlite://"
+        run: |
+          python -m pytest \
+            --cov=app \
+            --cov-report=term-missing \
+            --cov-report=xml \
+            --cov-fail-under=90
+
+      # Kept for the progress report: the percentage over time is the interesting part.
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-sqlite
+          path: code/backend/coverage.xml
+          if-no-files-found: warn
+          retention-days: 14
+
+  backend-test-postgres:
+    name: Backend tests (postgres)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: code/backend
+
+    # What the app actually deploys against. The dialects disagree often enough to matter
+    # -- a column type or a query relying on SQLite's loose typing fails here first.
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: cadence_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d cadence_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            code/backend/requirements.txt
+            code/backend/requirements-dev.txt
+
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: pytest
+        env:
+          TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/cadence_test
+        run: python -m pytest
+
+  migrations:
+    name: Migrations match the models
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: code/backend
+
+    # A real Postgres, because this is the one check whose whole point is that the
+    # migration produces the same schema the deployed database will have.
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: cadence_migrations
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d cadence_migrations"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      FLASK_APP: wsgi.py
+      # The app's real config reads DATABASE_URL (not TEST_DATABASE_URL) -- the CLI builds
+      # the app with Config, not TestConfig.
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/cadence_migrations
+      SECRET_KEY: ci-not-a-real-secret
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
           cache-dependency-path: code/backend/requirements.txt
 
       - run: pip install -r requirements.txt
 
-      # TestConfig points at in-memory SQLite, so there's no database service to start.
-      - run: python -m pytest -q
+      # Exactly what Render runs on deploy, against an empty database.
+      - name: flask db upgrade
+        run: flask db upgrade
+
+      # The gate that matters: `db check` compares the models to the database the
+      # migrations just built and fails if they differ. A model changed without a
+      # migration cannot reach develop.
+      - name: flask db check
+        run: flask db check
+
+      # A migration whose downgrade() is wrong is only discovered when someone needs it,
+      # which is the worst moment. Round-trip it now.
+      - name: downgrade to base and back up
+        run: |
+          flask db downgrade base
+          flask db upgrade
+          flask db check
 
   frontend:
-    name: Frontend build
+    name: Frontend lint, test, build
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -39,7 +224,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: code/frontend/package-lock.json
 
@@ -47,6 +232,163 @@ jobs:
       # package.json fails here rather than the next time someone builds the image.
       - run: npm ci
 
+      # --no-save on purpose: writing these into package.json would need a regenerated
+      # package-lock.json, and `npm ci` fails when the two disagree. See the comment at
+      # the top of eslint.config.mjs.
+      - name: Install lint tooling
+        run: |
+          npm install --no-save \
+            eslint@9.39.0 \
+            @eslint/js@9.39.0 \
+            globals@16.5.0 \
+            eslint-plugin-react@7.37.5 \
+            eslint-plugin-react-hooks@7.1.0 \
+            eslint-plugin-react-refresh@0.4.24
+
+      - name: eslint
+        run: npx eslint .
+
+      # No --if-present: #16 landed the `test` script, and the flag would turn a script
+      # someone deletes into a silent pass instead of a red build.
+      #
+      # This is the only place the frontend tests run. #16 also added a standalone
+      # frontend-tests.yml doing `npm ci && npm test`; merging develop brought it in and
+      # it ran the same two files a second time on every PR, so it is deleted here.
+      - name: Unit tests
+        run: npm test
+
       # Vite type-checks nothing, but it does parse and bundle every module, so a bad
       # import path or broken JSX fails here.
       - run: npm run build
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: code/frontend/dist
+          retention-days: 7
+
+  docker:
+    name: Docker images and stack smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Builds the `prod` targets -- the ones CD pushes. Until now nothing built these
+      # images at all, so a broken Dockerfile passed CI and failed at `compose up`.
+      # No push here: that's cd.yml's job, and it only runs after this passes.
+      - name: Build backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: code/backend
+          target: prod
+          push: false
+          load: true
+          tags: cadence-backend:ci
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,scope=backend,mode=max
+
+      - name: Build frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: code/frontend
+          target: prod
+          push: false
+          load: true
+          tags: cadence-frontend:ci
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,scope=frontend,mode=max
+
+      # CodeQL reads our source; this reads everything underneath it -- the Debian and
+      # Alpine packages in the base images, and the installed Python and npm dependencies.
+      # A CVE in gunicorn or nginx is invisible to CodeQL and shows up here.
+      #
+      # HIGH and CRITICAL only, and only ones with a fix available: an unfixable CVE in a
+      # base image is not something this team can act on, and a build that is red for
+      # something nobody can fix gets ignored, which costs more than it's worth.
+      - name: Scan backend image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: cadence-backend:ci
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
+
+      - name: Scan frontend image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: cadence-frontend:ci
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
+
+      # The dev stack, end to end: Postgres accepts connections, Flask starts against it
+      # and answers, and the tables can be created. This is the check that would have
+      # caught the postgres:18 volume path being wrong.
+      - name: Start the stack
+        working-directory: code
+        run: |
+          cp .env.example .env
+          docker compose up -d --build --wait --wait-timeout 180
+
+      - name: Backend answers /api/health
+        run: |
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent --show-error http://localhost:5001/api/health; then
+              echo "  <- healthy on attempt $attempt"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::/api/health never returned 200"
+          exit 1
+
+      # `flask db upgrade`, not `flask init-db`: this is the command Render runs on every
+      # deploy, so it is the one worth testing. init-db still exists for local resets.
+      - name: Database schema migrates cleanly
+        working-directory: code
+        run: docker compose exec -T backend flask db upgrade
+
+      - name: Frontend dev server serves the page
+        run: curl --fail --silent --show-error http://localhost:3000/ | head -c 200
+
+      # Without this, a failure leaves no way to tell which container died.
+      - name: Container logs
+        if: failure()
+        working-directory: code
+        run: docker compose logs --no-color --tail 100
+
+      - name: Tear down
+        if: always()
+        working-directory: code
+        run: docker compose down --volumes --remove-orphans
+
+  # One job to require in branch protection. Matrix legs change names when the matrix
+  # changes, which silently un-requires them; this name never does.
+  ci-ok:
+    name: CI passed
+    runs-on: ubuntu-latest
+    needs:
+      - backend-lint
+      - backend-test-sqlite
+      - backend-test-postgres
+      - migrations
+      - frontend
+      - docker
+    if: always()
+    steps:
+      # A skipped or cancelled dependency is not a pass -- check the result explicitly
+      # rather than relying on `needs` short-circuiting.
+      - name: Check results
+        run: |
+          echo "backend-lint:          ${{ needs.backend-lint.result }}"
+          echo "backend-test-sqlite:   ${{ needs.backend-test-sqlite.result }}"
+          echo "backend-test-postgres: ${{ needs.backend-test-postgres.result }}"
+          echo "migrations:            ${{ needs.migrations.result }}"
+          echo "frontend:              ${{ needs.frontend.result }}"
+          echo "docker:                ${{ needs.docker.result }}"
+          [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}" = "false" ]

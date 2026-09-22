@@ -1,0 +1,199 @@
+name: CD
+
+# Runs only after CI has passed on develop or main -- `workflow_run` means this cannot
+# start from a commit whose tests failed, which a plain `push` trigger would allow.
+#
+#   develop -> staging
+#   main    -> production
+#
+# Two things happen, in order:
+#   1. publish -- build the prod images and push them to GHCR, tagged with the SHA. This
+#      is the artifact of record: any commit on develop or main can be pulled and run.
+#   2. deploy  -- ask Render to roll out that commit. Skipped, not failed, when the
+#      deploy-hook secret is absent, so the pipeline is green before anyone has set up
+#      the Render account (see doc/CICD.md).
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [develop, main]
+  # For re-running a deploy without pushing a commit.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # One deploy per environment at a time, and never cancel one midway -- a half-applied
+  # rollout is worse than a queued one.
+  group: cd-${{ github.event.workflow_run.head_branch || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish images to GHCR
+    runs-on: ubuntu-latest
+    # workflow_dispatch has no workflow_run payload, so allow that through too.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+
+    permissions:
+      contents: read
+      # Pushing to GHCR needs this; the built-in GITHUB_TOKEN covers it, so there is no
+      # registry secret to manage.
+      packages: write
+
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+      environment: ${{ steps.resolve.outputs.environment }}
+
+    steps:
+      - name: Resolve commit and environment
+        id: resolve
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            sha="${{ github.sha }}"
+            branch="${{ github.ref_name }}"
+          else
+            sha="${{ github.event.workflow_run.head_sha }}"
+            branch="${{ github.event.workflow_run.head_branch }}"
+          fi
+          case "$branch" in
+            main)    environment=production ;;
+            develop) environment=staging ;;
+            *) echo "::error::CD does not run for branch '$branch'"; exit 1 ;;
+          esac
+          echo "sha=$sha"                 >> "$GITHUB_OUTPUT"
+          echo "environment=$environment" >> "$GITHUB_OUTPUT"
+          echo "Deploying $sha to $environment"
+
+      - uses: actions/checkout@v4
+        with:
+          # Check out the commit CI tested, not whatever the branch tip is now. Without
+          # this, a push landing mid-run would ship untested code.
+          ref: ${{ steps.resolve.outputs.sha }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Lowercased because the org is BUMETCS673 and GHCR rejects uppercase image paths.
+      - name: Compute image prefix
+        id: prefix
+        run: echo "value=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      - name: Push backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: code/backend
+          target: prod
+          push: true
+          # Three tags: the SHA is what a rollback pins to, the branch name is the
+          # moving pointer, and `latest` only ever means main.
+          tags: |
+            ${{ steps.prefix.outputs.value }}/backend:${{ steps.resolve.outputs.sha }}
+            ${{ steps.prefix.outputs.value }}/backend:${{ steps.resolve.outputs.environment }}
+            ${{ steps.prefix.outputs.value }}/backend:latest
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,scope=backend,mode=max
+
+      - name: Push frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: code/frontend
+          target: prod
+          push: true
+          tags: |
+            ${{ steps.prefix.outputs.value }}/frontend:${{ steps.resolve.outputs.sha }}
+            ${{ steps.prefix.outputs.value }}/frontend:${{ steps.resolve.outputs.environment }}
+            ${{ steps.prefix.outputs.value }}/frontend:latest
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,scope=frontend,mode=max
+
+      - name: Summary
+        run: |
+          {
+            echo "### Published \`${{ steps.resolve.outputs.environment }}\`"
+            echo
+            echo "| Image | Tag |"
+            echo "|---|---|"
+            echo "| backend  | \`${{ steps.resolve.outputs.sha }}\` |"
+            echo "| frontend | \`${{ steps.resolve.outputs.sha }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    name: Deploy to Render (${{ needs.publish.outputs.environment }})
+    runs-on: ubuntu-latest
+    needs: publish
+
+    # Ties the run to a GitHub Environment, which is where the deploy hooks live and
+    # where a required reviewer can be attached to production.
+    environment:
+      name: ${{ needs.publish.outputs.environment }}
+      url: ${{ vars.APP_URL }}
+
+    steps:
+      # A missing secret is a "not set up yet", not a broken build. This keeps develop
+      # green until someone creates the Render blueprint and adds the hooks.
+      - name: Check for deploy hooks
+        id: check
+        env:
+          BACKEND_HOOK: ${{ secrets.RENDER_BACKEND_DEPLOY_HOOK }}
+          FRONTEND_HOOK: ${{ secrets.RENDER_FRONTEND_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$BACKEND_HOOK" ] || [ -z "$FRONTEND_HOOK" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::RENDER_*_DEPLOY_HOOK not set for '${{ needs.publish.outputs.environment }}' -- skipping deploy. See doc/CICD.md."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Render builds the repo's Dockerfile, whose last stage is `prod`, so what it runs
+      # matches the image published above. ?ref pins the deploy to the tested commit
+      # rather than the branch tip.
+      - name: Trigger backend deploy
+        if: steps.check.outputs.configured == 'true'
+        env:
+          HOOK: ${{ secrets.RENDER_BACKEND_DEPLOY_HOOK }}
+          SHA: ${{ needs.publish.outputs.sha }}
+        run: curl --fail --silent --show-error --request POST "$HOOK&ref=$SHA"
+
+      - name: Trigger frontend deploy
+        if: steps.check.outputs.configured == 'true'
+        env:
+          HOOK: ${{ secrets.RENDER_FRONTEND_DEPLOY_HOOK }}
+          SHA: ${{ needs.publish.outputs.sha }}
+        run: curl --fail --silent --show-error --request POST "$HOOK&ref=$SHA"
+
+      # The hook returns as soon as Render queues the build, so "triggered" is not
+      # "live". Poll the deployed app's own health endpoint to find out.
+      - name: Wait for the deployed app to come back healthy
+        if: steps.check.outputs.configured == 'true' && vars.APP_URL != ''
+        env:
+          APP_URL: ${{ vars.APP_URL }}
+        run: |
+          echo "Polling $APP_URL/api/health for up to 10 minutes"
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent --show-error --max-time 20 "$APP_URL/api/health" > /dev/null; then
+              echo "Healthy after $((attempt * 10))s"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::$APP_URL/api/health did not recover within 10 minutes"
+          exit 1
+
+      - name: Summary
+        if: always()
+        run: |
+          if [ "${{ steps.check.outputs.configured }}" = "true" ]; then
+            echo "Deployed \`${{ needs.publish.outputs.sha }}\` to **${{ needs.publish.outputs.environment }}**" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Deploy skipped: Render hooks not configured. See \`doc/CICD.md\`." >> "$GITHUB_STEP_SUMMARY"
+          fi

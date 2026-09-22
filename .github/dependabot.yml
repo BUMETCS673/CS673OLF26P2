@@ -1,0 +1,46 @@
+version: 2
+
+# Weekly, grouped, and capped. The point is that a dependency with a published
+# vulnerability doesn't sit unnoticed for a whole semester -- not to generate a PR for
+# every patch release, which nobody would review.
+updates:
+  - package-ecosystem: pip
+    directory: /code/backend
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+    open-pull-requests-limit: 5
+    groups:
+      # One PR for the whole set of patch/minor bumps; majors come separately, since
+      # those are the ones that actually need reading.
+      backend-minor:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: "chore(deps)"
+
+  - package-ecosystem: npm
+    directory: /code/frontend
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+    open-pull-requests-limit: 5
+    groups:
+      frontend-minor:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: "chore(deps)"
+
+  # Actions get pinned to major tags (actions/checkout@v4), so this mostly catches the
+  # v4 -> v5 moves that would otherwise go stale.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+    commit-message:
+      prefix: "chore(ci)"

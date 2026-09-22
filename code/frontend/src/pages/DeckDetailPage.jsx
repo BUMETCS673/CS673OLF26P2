@@ -26,23 +26,32 @@ function RoutedDeckDetail({ id, location, navigate }) {
 }
 
 export function DeckDetailView({ api, deckId, onBack, startAdding = false }) {
-  const [deck, setDeck] = useState(null);
-  const [cards, setCards] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
   const [revision, setRevision] = useState(0);
+  // Deck, cards and the load error in one state tagged with the request that produced
+  // them, so `loading` is derived rather than switched on at the top of the effect --
+  // see the same comment in DeckListPage. The page is mounted with key={id}, so a
+  // different deck remounts this component rather than re-running the effect.
+  const [result, setResult] = useState({ key: null, deck: null, cards: [], error: '' });
+  const requestKey = `${deckId}#${revision}`;
+  const loading = result.key !== requestKey;
+  const { deck, cards, error } = result;
   const [adding, setAdding] = useState(startAdding);
   const [notice, setNotice] = useState('');
 
+  function setCards(update) {
+    setResult((current) => ({
+      ...current,
+      cards: typeof update === 'function' ? update(current.cards) : update,
+    }));
+  }
+
   useEffect(() => {
     let active = true;
-    setLoading(true); setError(''); setAdding(startAdding); setDeck(null); setCards([]);
     Promise.all([api.getDeck(deckId), api.listCards(deckId)])
-      .then(([nextDeck, nextCards]) => { if (active) { setDeck(nextDeck); setCards(nextCards); } })
-      .catch((err) => { if (active) setError(err.code === 'not_found' ? 'This deck could not be found.' : err.message || 'Could not load this deck.'); })
-      .finally(() => { if (active) setLoading(false); });
+      .then(([nextDeck, nextCards]) => { if (active) setResult({ key: requestKey, deck: nextDeck, cards: nextCards, error: '' }); })
+      .catch((err) => { if (active) setResult({ key: requestKey, deck: null, cards: [], error: err.code === 'not_found' ? 'This deck could not be found.' : err.message || 'Could not load this deck.' }); });
     return () => { active = false; };
-  }, [api, deckId, revision, startAdding]);
+  }, [api, deckId, requestKey]);
 
   return <main className="ws4-page">
     <button className="text-button back-link" onClick={onBack}>← All decks</button>
