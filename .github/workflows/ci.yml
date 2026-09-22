@@ -280,7 +280,7 @@ jobs:
       # images at all, so a broken Dockerfile passed CI and failed at `compose up`.
       # No push here: that's cd.yml's job, and it only runs after this passes.
       - name: Build backend image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: code/backend
           target: prod
@@ -291,7 +291,7 @@ jobs:
           cache-to: type=gha,scope=backend,mode=max
 
       - name: Build frontend image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: code/frontend
           target: prod
