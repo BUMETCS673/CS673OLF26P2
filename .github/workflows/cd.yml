@@ -89,7 +89,7 @@ jobs:
         run: echo "value=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
       - name: Push backend image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: code/backend
           target: prod
@@ -104,7 +104,7 @@ jobs:
           cache-to: type=gha,scope=backend,mode=max
 
       - name: Push frontend image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: code/frontend
           target: prod
