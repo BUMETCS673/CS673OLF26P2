@@ -10,4 +10,6 @@ app = create_app()
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    # No `debug=` on purpose: Flask reads FLASK_DEBUG (and .env) itself, so the debugger
+    # is off unless someone opts in. See code/.env.example.
+    app.run(host="0.0.0.0", port=5000)

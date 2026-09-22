@@ -37,8 +37,10 @@ MAX_DISPLAY_NAME_LENGTH = 120
 # Deliberately not an RFC-complete email pattern -- those are famously wrong in both
 # directions. This rules out the shapes that are obviously not addresses (`@`, `a@`,
 # `a@b`) and leaves the real proof of validity to sending mail, which we don't do.
-# Length is checked before this runs, so it never sees an unbounded string.
-EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+# Length is checked before this runs, so it never sees an unbounded string. The domain
+# is matched as dot-separated labels (no label may contain a dot) so there's only one
+# way to split it -- `[^@\s]+\.[^@\s]+` could backtrack polynomially (CodeQL ReDoS).
+EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s.]+(?:\.[^@\s.]+)+$")
 
 # One message for every kind of login failure. Two different messages would let someone
 # work out which emails are registered by watching which error they get back.
