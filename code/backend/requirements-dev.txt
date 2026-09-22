@@ -1,0 +1,7 @@
+# Tooling that CI and local development need, but the deployed image does not.
+# The Dockerfile installs requirements.txt only, so none of this ships to production.
+#
+#     pip install -r requirements.txt -r requirements-dev.txt
+
+ruff==0.16.8
+pytest-cov==7.1.0

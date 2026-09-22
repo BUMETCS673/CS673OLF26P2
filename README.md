@@ -2,12 +2,9 @@
 
 An AI-assisted spaced-repetition learning platform. Describe what you want to learn, and Cadence writes the flashcards, then schedules them so you review each one right before you'd forget it.
 
-<!-- Badges go here once CI is configured in Iteration 2:
-[![CI](https://github.com/BUMETCS673/CS673OLF26P2/actions/workflows/ci.yml/badge.svg)](...)
-[![Coverage](...)](...)
--->
+[![CI](https://github.com/BUMETCS673/CS673OLF26P2/actions/workflows/ci.yml/badge.svg)](https://github.com/BUMETCS673/CS673OLF26P2/actions/workflows/ci.yml)
 
-<!-- Screenshot or demo GIF goes here once the review interface exists -->
+Iteration 1 presentation video: [demo/CS673_presentation1_team2.md](demo/CS673_presentation1_team2.md)
 
 ## Why
 
@@ -27,9 +24,7 @@ It's aimed at people who need to retain a lot of discrete facts: students in med
 
 ## Tech Stack
 
-React · Python · PostgreSQL · Docker · GitHub Actions
-
-> Provisional. Final selections are confirmed in Iteration 1 design.
+React + Vite · Python + Flask + SQLAlchemy · PostgreSQL · Docker · GitHub Actions · Render
 
 ## Getting Started
 
@@ -42,17 +37,36 @@ React · Python · PostgreSQL · Docker · GitHub Actions
 
 ```bash
 git clone https://github.com/BUMETCS673/CS673OLF26P2.git
-cd CS673OLF26P2
-cp .env.example .env   # add your LLM API key
-docker compose up
+cd CS673OLF26P2/code
+cp .env.example .env          # then put a real SECRET_KEY in it
+docker compose up --build
 ```
 
-_Full setup, environment variables, and run instructions land here in Iteration 1 once the project skeleton exists._
+Once the containers are up, create the tables and add some demo data:
+
+```bash
+docker compose exec backend flask init-db
+docker compose exec backend flask seed     # demo@cadence.local / demo1234
+```
+
+- Frontend: http://localhost:3000
+- Backend: http://localhost:5001 — `curl localhost:5001/api/health` should return `{"status": "ok"}`
+
+To start over from an empty database: `docker compose down -v`, then the steps above again.
+
+If the browser shows `Failed to resolve import` after you pull, a frontend dependency was added and the container still has the old `node_modules` volume. Rebuild with `docker compose up --build -V` (`-V` recreates that volume).
 
 ### Tests
 
 ```bash
-# TBD
+docker compose exec backend python -m pytest
+```
+
+Or outside Docker, from `code/backend` (the tests use SQLite, so no database needed):
+
+```bash
+pip install -r requirements.txt
+pytest
 ```
 
 ## Repository Structure
@@ -67,7 +81,7 @@ code/
 
 ## Contributing
 
-Branching model, commit conventions, PR requirements, and the AI attribution format are in [CONTRIBUTING.md](CONTRIBUTING.md).
+Branch from `develop` (`feat/`, `fix/`, `chore/`, `doc/`), open a pull request back into `develop`, and merge once CI passes and a teammate has reviewed it. `develop` is released to `main` after validation.
 
 ## License
 

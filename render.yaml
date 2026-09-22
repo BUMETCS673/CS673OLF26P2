@@ -1,0 +1,81 @@
+# Render Blueprint -- the deploy target's infrastructure, in the repo rather than in a
+# dashboard nobody can review. Create it once at
+# https://dashboard.render.com/select-repo?type=blueprint, then CD's deploy hooks take
+# over. Full walkthrough in doc/CICD.md.
+#
+# Everything here is on Render's free tier. Free web services sleep after 15 minutes
+# idle, so the first request to a cold deployment takes ~30 seconds -- expected, not a
+# bug, and the reason CD's health poll allows 10 minutes.
+
+databases:
+  - name: cadence-db
+    databaseName: cadence
+    user: cadence
+    plan: free
+    # Keep this equal to the version in docker-compose.yml and in ci.yml's postgres
+    # service. Testing on one major and deploying on another reintroduces exactly the
+    # gap the sqlite/postgres test matrix was added to close. If Render doesn't offer 18
+    # yet, lower all three together rather than letting them drift.
+    postgresMajorVersion: "18"
+    # Only the backend service may connect; nothing from the public internet.
+    ipAllowList: []
+
+services:
+  - type: web
+    name: cadence-backend
+    runtime: docker
+    plan: free
+    region: ohio
+    # The Dockerfile's last stage is `prod` (gunicorn, non-root), which is what Render
+    # builds. That is the same stage CI builds and CD pushes to GHCR.
+    dockerfilePath: ./code/backend/Dockerfile
+    dockerContext: ./code/backend
+    # CD posts to the deploy hook with an explicit commit, so Render should not also
+    # deploy on its own every push.
+    autoDeploy: false
+    healthCheckPath: /api/health
+    # Runs after the image is built and before any traffic reaches the new version. If it
+    # fails, Render keeps the old version serving, so a broken migration doesn't take the
+    # site down. This replaces the manual `flask init-db` in a Render shell.
+    #
+    # Render may restrict pre-deploy commands to paid instance types -- confirm when you
+    # create the blueprint. If it's rejected on free, delete this line and instead prepend
+    # the migration to the start command by setting dockerCommand:
+    #
+    #   dockerCommand: sh -c "flask db upgrade && exec gunicorn --bind 0.0.0.0:$PORT --workers 2 --threads 4 --access-logfile - wsgi:app"
+    #
+    # That is safe here only because the free tier runs a single instance; with several,
+    # every instance would race to migrate on boot.
+    preDeployCommand: flask db upgrade
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: cadence-db
+          property: connectionString
+      # Generated once by Render and then held; never in the repo, never in a log.
+      - key: SECRET_KEY
+        generateValue: true
+      # Render terminates TLS, so the session cookie can and must be Secure here.
+      - key: SESSION_COOKIE_SECURE
+        value: "1"
+      - key: PORT
+        value: "5000"
+
+  - type: web
+    name: cadence-frontend
+    runtime: docker
+    plan: free
+    region: ohio
+    # Last stage is `prod`: nginx serving the Vite build.
+    dockerfilePath: ./code/frontend/Dockerfile
+    dockerContext: ./code/frontend
+    autoDeploy: false
+    envVars:
+      - key: PORT
+        value: "8080"
+      # Where nginx forwards /api. Render's blueprint syntax can't prepend "http://" to a
+      # fromService value, so this is set once when the blueprint is created: use the
+      # backend's internal address, http://cadence-backend:5000. Keeping the browser on
+      # one origin is what makes the session cookie work without CORS (decision D4).
+      - key: API_ORIGIN
+        sync: false

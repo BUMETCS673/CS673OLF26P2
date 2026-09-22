@@ -1,0 +1,20 @@
+Database migrations, managed by Flask-Migrate (Alembic).
+
+Everyday use:
+
+    flask db upgrade            # apply everything outstanding -- what Render runs
+    flask db migrate -m "add cards.difficulty"   # write a migration from model changes
+    flask db current            # which revision this database is on
+    flask db history            # all revisions, newest first
+    flask db downgrade -1       # step back one (check the downgrade() body first)
+
+After changing a model, ALWAYS run `flask db migrate`, then read the generated file
+before committing it. Autogenerate is good at columns and indexes and blind to a few
+things -- a column rename looks like a drop plus an add, which silently discards the
+data. Fix those by hand.
+
+CI runs `flask db upgrade` followed by `flask db check` against a real Postgres. If the
+models and the migrations disagree, the Migrations job fails, so a model change without
+a migration cannot reach develop.
+
+Do not edit a migration that has already been applied anywhere. Write a new one.

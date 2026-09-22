@@ -1,0 +1,58 @@
+services:
+  postgres:
+    image: postgres:18
+    container_name: postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-cadence}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      # Correct for postgres:18 — the data lives at /var/lib/postgresql, not .../data.
+      - postgres_data:/var/lib/postgresql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-cadence}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      # The Dockerfile's last stage is `prod` (gunicorn, non-root). Local development
+      # wants the reloader, so ask for `dev` explicitly.
+      target: dev
+    container_name: flask-backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/cadence}
+      SECRET_KEY: ${SECRET_KEY:-dev-secret-change-me}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-0}
+    volumes:
+      - ./backend:/app
+    ports:
+      - "5001:5000"
+    depends_on:
+      postgres:
+        # Wait until Postgres actually answers, not just until the container starts.
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      # `prod` is nginx serving a build; dev wants Vite and hot reload.
+      target: dev
+    container_name: react-frontend
+    restart: unless-stopped
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
