@@ -3,7 +3,7 @@
 WS0 wires all three up front, against modules that have no routes in them yet, so WS1
 and WS2 each only ever touch their own file. **Nobody edits this file again** — if you
 find yourself needing to, say so in the team channel first (see "Shared files" in
-ITERATION_1_PLAN.md).
+code/plans/ITERATION_1_PLAN.md).
 """
 
 from flask import Blueprint, jsonify
