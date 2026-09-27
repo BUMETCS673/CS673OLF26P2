@@ -232,24 +232,12 @@ jobs:
       # package.json fails here rather than the next time someone builds the image.
       - run: npm ci
 
-      # --no-save on purpose: writing these into package.json would need a regenerated
-      # package-lock.json, and `npm ci` fails when the two disagree. See the comment at
-      # the top of eslint.config.mjs.
-      - name: Install lint tooling
-        run: |
-          npm install --no-save \
-            eslint@9.39.0 \
-            @eslint/js@9.39.0 \
-            globals@16.5.0 \
-            eslint-plugin-react@7.37.5 \
-            eslint-plugin-react-hooks@7.1.0 \
-            eslint-plugin-react-refresh@0.4.24
-
+      # eslint and its plugins are devDependencies, so `npm ci` above installed them.
       - name: eslint
         run: npx eslint .
 
       # No --if-present: #16 landed the `test` script, and the flag would turn a script
-      # someone deletes into a silent pass instead of a red build.
+      # someone deletes into a silent pass instead of a red build. It runs Vitest.
       #
       # This is the only place the frontend tests run. #16 also added a standalone
       # frontend-tests.yml doing `npm ci && npm test`; merging develop brought it in and

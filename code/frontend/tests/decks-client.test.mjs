@@ -1,10 +1,13 @@
-import test from 'node:test';
+import { afterEach, test, vi } from 'vitest';
 import assert from 'node:assert/strict';
 import { decksApi, createAuthenticatedDecksApi } from '../src/api/decks.client.js';
 
-test('WS4 calls WS3 client with one /api prefix, cookies, JSON and empty deletes', async (t) => {
+// Each test replaces fetch with a spy; put the real one back afterwards.
+afterEach(() => { vi.restoreAllMocks(); });
+
+test('WS4 calls WS3 client with one /api prefix, cookies, JSON and empty deletes', async () => {
   const calls = [];
-  t.mock.method(globalThis, 'fetch', async (url, options) => {
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, options) => {
     calls.push({ url, ...options });
     return options.method === 'DELETE'
       ? new Response(null, { status: 204 })
@@ -31,23 +34,23 @@ test('WS4 calls WS3 client with one /api prefix, cookies, JSON and empty deletes
   assert.deepEqual(JSON.parse(calls[6].body), { front: 'hola', back: 'hello' });
 });
 
-test('WS3 validation and auth errors reach WS4 unchanged', async (t) => {
-  t.mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify({
+test('WS3 validation and auth errors reach WS4 unchanged', async () => {
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(JSON.stringify({
     error: { code: 'validation_error', message: 'name is required', field: 'name' },
   }), { status: 422 }));
   await assert.rejects(decksApi.createDeck({ name: '' }), {
     status: 422, code: 'validation_error', field: 'name', message: 'name is required',
   });
-  globalThis.fetch.mock.mockImplementation(async () => new Response(JSON.stringify({
+  globalThis.fetch.mockImplementation(async () => new Response(JSON.stringify({
     error: { code: 'unauthorized', message: 'Authentication required.' },
   }), { status: 401 }));
   await assert.rejects(decksApi.listDecks(), { status: 401, code: 'unauthorized' });
 });
 
-test('expired sessions notify auth and reject all nine deck/card operations', async (t) => {
+test('expired sessions notify auth and reject all nine deck/card operations', async () => {
   let expirations = 0;
   const api = createAuthenticatedDecksApi(() => { expirations += 1; });
-  t.mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify({
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(JSON.stringify({
     error: { code: 'unauthorized', message: 'Authentication required.' },
   }), { status: 401 }));
   const operations = [
@@ -62,25 +65,25 @@ test('expired sessions notify auth and reject all nine deck/card operations', as
     assert.equal(expirations, index + 1);
   }
   // A proxy's 401 may not include the backend's JSON error code.
-  globalThis.fetch.mock.mockImplementation(async () => new Response('', { status: 401 }));
+  globalThis.fetch.mockImplementation(async () => new Response('', { status: 401 }));
   await assert.rejects(api.listDecks(), { status: 401 });
   assert.equal(expirations, 10);
 });
 
-test('ordinary failures and successful requests preserve the signed-in session', async (t) => {
+test('ordinary failures and successful requests preserve the signed-in session', async () => {
   let expirations = 0;
   const api = createAuthenticatedDecksApi(() => { expirations += 1; });
-  t.mock.method(globalThis, 'fetch', async () => new Response('[]', { status: 200 }));
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response('[]', { status: 200 }));
   assert.deepEqual(await api.listDecks(), []);
-  globalThis.fetch.mock.mockImplementation(async () => new Response(null, { status: 204 }));
+  globalThis.fetch.mockImplementation(async () => new Response(null, { status: 204 }));
   assert.equal(await api.deleteCard(9), null);
   for (const [status, code] of [[422, 'validation_error'], [404, 'not_found'], [500, 'internal_error']]) {
-    globalThis.fetch.mock.mockImplementation(async () => new Response(JSON.stringify({
+    globalThis.fetch.mockImplementation(async () => new Response(JSON.stringify({
       error: { code, message: 'Request failed' },
     }), { status }));
     await assert.rejects(api.createDeck({ name: 'Spanish' }), { status, code });
   }
-  globalThis.fetch.mock.mockImplementation(async () => { throw new Error('Offline'); });
+  globalThis.fetch.mockImplementation(async () => { throw new Error('Offline'); });
   await assert.rejects(api.listDecks(), { code: 'network_error' });
   assert.equal(expirations, 0);
 });

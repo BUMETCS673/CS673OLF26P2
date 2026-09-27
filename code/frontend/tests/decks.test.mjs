@@ -1,4 +1,4 @@
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { createDecksApi } from '../src/api/decks.js';
 import { createDemoRequest, DEMO_STORAGE_KEY } from '../src/api/decks.demo.js';
