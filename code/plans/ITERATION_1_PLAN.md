@@ -625,7 +625,7 @@ This file is written so you can hand it to Claude Code (or similar) and get work
 everyone else's. Start a session in `code/` on your own branch:
 
 ```
-Read ITERATION_1_PLAN.md in the code/ directory, all of it.
+Read plans/ITERATION_1_PLAN.md in the code/ directory, all of it.
 
 Implement Workstream WS<N>: <title>, from the "Workstreams in detail" section.
 

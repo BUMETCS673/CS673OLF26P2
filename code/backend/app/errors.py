@@ -33,7 +33,7 @@ STATUS_CODES = {
 
 # Statuses Werkzeug raises that the contract has no code for. Rather than invent one
 # the frontend doesn't handle, answer with the contract status these amount to.
-# See D6 and D7 in ITERATION_1_PLAN.md.
+# See D6 and D7 in code/plans/ITERATION_1_PLAN.md.
 REMAPPED_STATUS = {
     # A bare `get_json()` on a request with no JSON Content-Type. Endpoints using
     # `json_object()` never get here.

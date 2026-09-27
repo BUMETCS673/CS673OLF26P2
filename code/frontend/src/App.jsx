@@ -3,7 +3,7 @@
  *
  * Shared file: WS4's pages are already wired up here against placeholders, so Nurzat
  * fills those in without anyone editing this file a second time. See "Shared files"
- * in ITERATION_1_PLAN.md.
+ * in code/plans/ITERATION_1_PLAN.md.
  */
 
 import { Navigate, Route, Routes } from "react-router-dom";

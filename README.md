@@ -75,6 +75,7 @@ pytest
 docs/     Project documentation — SPPP, SDD, STD, meeting minutes,
           progress reports, iteration presentations
 code/
+  plans/      Team implementation plans, one per iteration or lab
   frontend/   React client
   backend/    Python API service
 ```

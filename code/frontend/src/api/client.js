@@ -1,8 +1,8 @@
 /**
  * The one place that calls fetch() — WS3 (Duc).
  *
- * Every request in the app goes through here (rule 2 in ITERATION_1_PLAN.md), so no
- * component ever writes a URL inline. WS4 uses this too.
+ * Every request in the app goes through here (rule 2 in code/plans/ITERATION_1_PLAN.md),
+ * so no component ever writes a URL inline. WS4 uses this too.
  *
  * What it takes care of:
  *   - the /api prefix, which the Vite dev server proxies to Flask (decision D4), so the
