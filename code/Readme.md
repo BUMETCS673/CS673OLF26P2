@@ -63,6 +63,14 @@ pip install -r requirements.txt
 pytest
 ```
 
+The frontend tests use Vitest:
+
+```bash
+docker compose exec frontend npm test
+```
+
+or, outside Docker, `npm ci` and then `npm test` from `code/frontend`.
+
 ## Accessing the Frontend Container
 
 The frontend container uses an Alpine-based Node image. Alpine includes `sh` by default instead of `bash`.
