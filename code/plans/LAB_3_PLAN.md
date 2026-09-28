@@ -50,11 +50,11 @@ The study page itself is **not** in the lab. It's the first thing after it — s
 | --- | --- | --- | --- | --- | --- |
 | **0a** | **Backend foundation** — scheduling columns and migration, the scheduler's types and settings, a test fixture | backend | Miles | nothing | S |
 | **0b** | **Frontend foundation** — Vitest and React Testing Library, the existing tests moved over, two constants | frontend | Miles | nothing | S |
-| **1** | **Scheduler** — Anki's algorithm | `backend/app/scheduler.py` | _TBD_ | 0a | M |
-| **2** | **Due cards** — `GET /api/decks/:id/due` | `backend/app/api/decks.py` | _TBD_ | 0a | S |
-| **3** | **Study session** — the session reducer | `frontend/src/study/session.js` | _TBD_ | 0b | M |
-| **4** | **Typed answer** — the answer checker | `frontend/src/study/typedAnswer.js` | _TBD_ | 0b | S |
-| **5** | **Save a review** — `POST /api/cards/:id/review` | `backend/app/api/cards.py` | _TBD_ | 0a, plus 1 for its last two tests | S |
+| **1** | **Scheduler** — Anki's algorithm | `backend/app/scheduler.py` | Miles | 0a | M |
+| **2** | **Due cards** — `GET /api/decks/:id/due` | `backend/app/api/decks.py` | Nurzat | 0a | S |
+| **3** | **Study session** — the session reducer | `frontend/src/study/session.js` | Duc | 0b | M |
+| **4** | **Typed answer** — the answer checker | `frontend/src/study/typedAnswer.js` | Von | 0b | S |
+| **5** | **Save a review** — `POST /api/cards/:id/review` | `backend/app/api/cards.py` | Miles | 0a, plus 1 for its last two tests | S |
 
 Step 0 is small on purpose and lands first, because every story builds on it — the same job WS0
 did in Iteration 1. Its two halves don't depend on each other, so two people can do them at the
