@@ -17,20 +17,24 @@ placeholder value, so add any new variable to both.
 
 ## Setting Up the Database
 
-There are no migrations this iteration (decision D3). The tables are created by a
-command, and you reset by deleting the volume.
+The schema is managed by migrations (Flask-Migrate). Run them on a new database, and
+again whenever you pull a change that adds one:
 
 ```bash
-docker compose exec backend flask init-db   # create users, decks, cards
-docker compose exec backend flask seed      # demo@cadence.local / demo1234
+docker compose exec backend flask db upgrade   # create or update the tables
+docker compose exec backend flask seed         # demo@cadence.local / demo1234
 ```
+
+`flask init-db` still works for a throwaway database: it creates the tables directly and
+marks them as up to date. It can't add columns to tables that already exist, though, so
+after pulling a migration use `flask db upgrade`, which keeps your data.
 
 To start over from an empty database:
 
 ```bash
 docker compose down -v
 docker compose up --build
-docker compose exec backend flask init-db
+docker compose exec backend flask db upgrade
 docker compose exec backend flask seed
 ```
 
@@ -58,6 +62,14 @@ The tests run against in-memory SQLite, so they also work outside Docker from
 pip install -r requirements.txt
 pytest
 ```
+
+The frontend tests use Vitest:
+
+```bash
+docker compose exec frontend npm test
+```
+
+or, outside Docker, `npm ci` and then `npm test` from `code/frontend`.
 
 ## Accessing the Frontend Container
 

@@ -10,17 +10,26 @@ def utcnow() -> datetime:
     return datetime.now(UTC)
 
 
-def iso(value: datetime | None) -> str | None:
-    """Format a timestamp the way the API contract shows it: 2026-09-17T14:00:00Z.
+def as_utc(value: datetime | None) -> datetime | None:
+    """`value` as a timezone-aware UTC datetime, or None.
 
-    Values read back from Postgres come out naive, so assume UTC when there's no
-    timezone attached rather than silently shifting the time.
+    Values read back from the database can come out naive -- SQLite always does. We only
+    ever store UTC, so attach it rather than silently shifting the time. Anything that
+    already has a timezone is converted.
     """
     if value is None:
         return None
     if value.tzinfo is None:
-        value = value.replace(tzinfo=UTC)
-    return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def iso(value: datetime | None) -> str | None:
+    """Format a timestamp the way the API contract shows it: 2026-09-17T14:00:00Z."""
+    value = as_utc(value)
+    if value is None:
+        return None
+    return value.isoformat().replace("+00:00", "Z")
 
 
 class TimestampMixin:

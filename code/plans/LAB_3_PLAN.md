@@ -469,15 +469,19 @@ channel when it's merged.
 
 ### Step 0b — Frontend foundation 🔴 blocks stories 3 and 4
 
-**Owner:** _TBD_ · **Due:** Day 0 · **Roughly:** 2 hours
+**Owner:** Miles · **Due:** Day 0 · **Roughly:** 2 hours
 
-- `npm install -D vitest jsdom @testing-library/react`, picking a Vitest release that supports
-  Vite 7 (npm complains if the peer versions clash). Commit `package.json` and
-  `package-lock.json` together; the Dockerfile's `npm ci` fails if they disagree.
+- `npm install -D --save-exact vitest jsdom@29 @testing-library/react @testing-library/dom`.
+  React Testing Library 16 needs `@testing-library/dom` installed alongside it. jsdom 30 needs
+  Node 24.15 or later, so hold it at 29, which runs on Node 22 (CI and Docker) and any Node 24.
+  Commit `package.json` and `package-lock.json` together; the Dockerfile's `npm ci` fails if
+  they disagree.
 - `package.json`: `"test": "vitest run"`.
-- Move the two existing test files to Vitest by swapping `import test from 'node:test'` for
-  `import { test } from 'vitest'`. Their `node:assert/strict` assertions keep working inside
-  Vitest, so nothing else changes.
+- Move the two existing test files to Vitest. In `decks.test.mjs` that's one line: swap
+  `import test from 'node:test'` for `import { test } from 'vitest'`. `decks-client.test.mjs`
+  also mocks `fetch` with Node's `t.mock.method()`, which becomes Vitest's
+  `vi.spyOn(globalThis, 'fetch').mockImplementation()`, plus an `afterEach` that restores it.
+  Both files keep their `node:assert/strict` assertions, which work inside Vitest.
 - `tests/CardRow.test.jsx`, starting with the line `// @vitest-environment jsdom`: a card's front
   and back are shown, and clicking Delete asks for confirmation. `CardRow` takes plain props and
   needs no login state, which makes it the simplest component to prove the setup on. We import
@@ -487,11 +491,12 @@ channel when it's merged.
   `react/jsx-uses-vars` rule. Without that, eslint silently skips `.jsx` test files.
 - `src/study/constants.js`: `RATINGS = ['again', 'hard', 'good', 'easy']` and
   `LEARN_AHEAD_MS = 20 * 60 * 1000`, with a comment pointing at the backend's `LEARN_AHEAD`.
-- Optional, in the same lockfile change: move the eslint packages into `devDependencies`, as the
-  comment at the top of `eslint.config.mjs` asks, so anyone can run eslint locally. CI's
-  `npm install --no-save` step can then go.
+- In the same lockfile change, move the eslint packages into `devDependencies`, as the comment
+  at the top of `eslint.config.mjs` asked, so anyone can run `npx eslint .` locally, and drop
+  CI's `npm install --no-save` step.
 
-**Done when:** `npm test` runs all 12 tests under Vitest; CI's frontend job is green; and after
+**Done when:** `npm test` runs the 11 existing tests and the new component tests under Vitest;
+CI's frontend job is green; and after
 `docker compose up --build -V`, `docker compose exec frontend npm test` passes. Post in the
 channel when it's merged.
 

@@ -199,7 +199,9 @@ def test_card_json_matches_the_contract(make_user, make_deck):
 
     payload = deck.cards[0].to_dict()
 
-    assert set(payload) == {"id", "deck_id", "front", "back", "created_at", "updated_at"}
+    assert set(payload) == {
+        "id", "deck_id", "front", "back", "state", "due_at", "created_at", "updated_at",
+    }
     assert payload["deck_id"] == deck.id
 
 
