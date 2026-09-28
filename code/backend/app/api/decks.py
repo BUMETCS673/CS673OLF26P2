@@ -6,6 +6,7 @@ under /api/decks.
     GET    /api/decks          -> 200 [Deck]
     POST   /api/decks          {name, description?}   -> 201 Deck
     GET    /api/decks/<id>     -> 200 Deck
+    GET    /api/decks/<id>/due -> 200 {learning, review, new}
     PATCH  /api/decks/<id>     {name?, description?}  -> 200 Deck
     DELETE /api/decks/<id>     -> 204
 
@@ -18,7 +19,8 @@ from flask_login import current_user, login_required
 
 from app.errors import json_object, not_found, validation_error
 from app.extensions import db
-from app.models import Deck
+from app.models import Card, Deck, utcnow
+from app.scheduler import LEARN_AHEAD, NEW_CARDS_PER_SESSION, REVIEWS_PER_SESSION, CardState
 
 decks_bp = Blueprint("decks", __name__, url_prefix="/decks")
 
@@ -86,6 +88,40 @@ def create_deck():
 @login_required
 def get_deck(deck_id):
     return jsonify(_own_deck_or_404(deck_id).to_dict()), 200
+
+
+@decks_bp.get("/<int:deck_id>/due")
+@login_required
+def get_due_cards(deck_id):
+    """Return this deck's learning, due review, and new cards for a session."""
+    _own_deck_or_404(deck_id)
+    now = utcnow()
+    cards = Card.query.filter_by(deck_id=deck_id)
+    learning = (
+        cards.filter(
+            Card.state.in_((CardState.LEARNING, CardState.RELEARNING)),
+            Card.due_at <= now + LEARN_AHEAD,
+        )
+        .order_by(Card.due_at, Card.id)
+        .all()
+    )
+    review = (
+        cards.filter(Card.state == CardState.REVIEW, Card.due_at <= now)
+        .order_by(Card.due_at, Card.id)
+        .limit(REVIEWS_PER_SESSION)
+        .all()
+    )
+    new = (
+        cards.filter(Card.state == CardState.NEW)
+        .order_by(Card.id)
+        .limit(NEW_CARDS_PER_SESSION)
+        .all()
+    )
+    return jsonify({
+        "learning": [card.to_dict() for card in learning],
+        "review": [card.to_dict() for card in review],
+        "new": [card.to_dict() for card in new],
+    }), 200
 
 
 @decks_bp.patch("/<int:deck_id>")
