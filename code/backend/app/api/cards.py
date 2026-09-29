@@ -15,9 +15,10 @@ joining through the deck. Someone else's card answers 404.
 from flask import Blueprint, jsonify
 from flask_login import current_user, login_required
 
-from app.errors import json_object, not_found, validation_error
+from app.errors import conflict, json_object, not_found, validation_error
 from app.extensions import db
-from app.models import Card, Deck
+from app.models import Card, Deck, utcnow
+from app.scheduler import LEARN_AHEAD, CardState, Rating, answer_card
 
 cards_bp = Blueprint("cards", __name__)
 
@@ -52,6 +53,14 @@ def _valid_text(body: dict, field: str) -> str:
             f"{field} must be at most {TEXT_MAX} characters", field=field
         )
     return value
+
+
+def _is_due(schedule, now) -> bool:
+    if schedule.state is CardState.NEW:
+        return True
+    if schedule.state is CardState.REVIEW:
+        return schedule.due_at <= now
+    return schedule.due_at <= now + LEARN_AHEAD  # learning, relearning
 
 
 @cards_bp.get("/decks/<int:deck_id>/cards")
@@ -102,3 +111,24 @@ def delete_card(card_id):
     db.session.delete(card)
     db.session.commit()
     return "", 204
+
+
+@cards_bp.post("/cards/<int:card_id>/review")
+@login_required
+def review_card(card_id):
+    card = _own_card_or_404(card_id)
+    body = json_object()
+    try:
+        rating = Rating(body.get("rating"))
+    except ValueError:
+        raise validation_error(
+            "rating must be again, hard, good, or easy", field="rating"
+        ) from None
+
+    now = utcnow()
+    if not _is_due(card.schedule, now):
+        raise conflict("This card isn't due yet.")
+
+    card.schedule = answer_card(card.schedule, rating, now)
+    db.session.commit()
+    return jsonify(card.to_dict()), 200
