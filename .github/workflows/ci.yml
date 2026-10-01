@@ -288,6 +288,12 @@ jobs:
           tags: cadence-frontend:ci
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,scope=frontend,mode=max
+          # The prod stage's `apk upgrade` is how this image picks up Alpine security
+          # patches. Served from cache, it never runs again, and Trivy fails the build as
+          # soon as a new CVE is published against the stale layer (OpenSSL, Oct 2026).
+          # The stage is the upgrade plus two COPYs, so rebuilding it costs seconds;
+          # npm ci and vite build above it still come from the cache.
+          no-cache-filters: prod
 
       # CodeQL reads our source; this reads everything underneath it -- the Debian and
       # Alpine packages in the base images, and the installed Python and npm dependencies.
