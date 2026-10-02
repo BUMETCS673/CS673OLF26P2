@@ -29,13 +29,13 @@ export default function Header() {
 
   return (
     <header className="app-header">
-      <Link className="app-brand" to="/decks">
+      <Link className="wordmark" to="/decks">
         Cadence
       </Link>
       <div className="app-header-user">
         {/* display_name is optional in the contract, so fall back to the email. */}
         <span className="app-header-name">{user.display_name || user.email}</span>
-        <button type="button" onClick={handleLogout} disabled={leaving}>
+        <button type="button" className="button ghost" onClick={handleLogout} disabled={leaving}>
           {leaving ? "Signing out…" : "Sign out"}
         </button>
       </div>
