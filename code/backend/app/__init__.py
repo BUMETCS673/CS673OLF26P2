@@ -62,10 +62,11 @@ def _register_blueprints(app: Flask) -> None:
 
 
 def _register_cli(app: Flask) -> None:
-    from app.seed import seed_command
+    from app.seed import seed_command, time_travel_command
 
     app.cli.add_command(init_db_command)
     app.cli.add_command(seed_command)
+    app.cli.add_command(time_travel_command)
 
 
 @click.command("init-db")
