@@ -55,11 +55,12 @@ export default function LoginPage() {
 
   return (
     <main className="auth-page">
+      <p className="wordmark">Cadence</p>
       <form className="auth-card" onSubmit={handleSubmit} noValidate>
         <h1>Sign in to Cadence</h1>
 
         {formError && (
-          <p className="form-error" role="alert">
+          <p className="error-message" role="alert">
             {formError}
           </p>
         )}
@@ -90,7 +91,7 @@ export default function LoginPage() {
         />
         {fieldErrors.password && <p className="field-error">{fieldErrors.password}</p>}
 
-        <button type="submit" disabled={submitting}>
+        <button className="button primary" type="submit" disabled={submitting}>
           {submitting ? "Signing in…" : "Sign in"}
         </button>
 
