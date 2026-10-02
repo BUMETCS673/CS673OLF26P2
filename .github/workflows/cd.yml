@@ -115,6 +115,9 @@ jobs:
             ${{ steps.prefix.outputs.value }}/frontend:latest
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,scope=frontend,mode=max
+          # Same as ci.yml: always rerun the prod stage's `apk upgrade`, so the image we
+          # push has today's Alpine security patches rather than a cached layer's.
+          no-cache-filters: prod
 
       - name: Summary
         run: |
