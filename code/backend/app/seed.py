@@ -13,6 +13,13 @@ Safe to run twice: if the demo user is already there it does nothing, unless you
 come back after it graduates.
 """
 
+# AI Utilization: ~100% of this file's code
+# AI Tools Used: Claude Code (Claude Opus 5.5; Iteration 1's version, Claude Opus 5)
+# AI-Assisted Activities:
+#   Demo data and CLI command development
+#   Documentation
+# Human role: plan approval, code review, and hands-on testing by Miles Cameron.
+
 from datetime import datetime, timedelta
 
 import click

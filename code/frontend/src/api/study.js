@@ -1,3 +1,12 @@
+/*
+ * AI Utilization: ~100% of this file's code
+ * AI Tools Used: Claude Code (Claude Opus 5.5)
+ * AI-Assisted Activities:
+ *   API client development
+ *   Documentation
+ * Human role: plan approval, code review, and hands-on testing by Miles Cameron.
+ */
+
 // Study mode's two endpoints: Lab 3's due cards (story 2) and saving a review (story 5).
 // Built like createDecksApi, so it can be tested without fetch: request(path,
 // { method, body }) must return parsed JSON and reject with an Error carrying the API's

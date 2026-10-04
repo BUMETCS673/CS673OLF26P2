@@ -1,3 +1,13 @@
+/*
+ * Step 0b: requestApi() and withSessionExpiry(), moved here from WS4's
+ * decks.client.js so the study client could share them.
+ * AI Utilization: ~100% of that refactor
+ * AI Tools Used: Claude Code (Claude Opus 5.5)
+ * AI-Assisted Activities:
+ *   Refactoring
+ * Human role: plan approval, code review, and hands-on testing by Miles Cameron.
+ */
+
 import { get, post, patch, del } from './client.js';
 
 // The transport the endpoint modules (decks.js, study.js) are built on. They write full

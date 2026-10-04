@@ -7,6 +7,15 @@
  * by Step 0b in code/plans/FINALIZE_ITERATION_2_PLAN.md.
  */
 
+/*
+ * Step 0b: the StudyPage import and the /decks/:id/study route.
+ * AI Utilization: ~100% of that code
+ * AI Tools Used: Claude Code (Claude Opus 5.5)
+ * AI-Assisted Activities:
+ *   Routing
+ * Human role: plan approval, code review, and hands-on testing by Miles Cameron.
+ */
+
 import { Navigate, Route, Routes } from "react-router-dom";
 
 import Header from "./components/Header";

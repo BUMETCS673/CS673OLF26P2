@@ -2,6 +2,12 @@
 //
 // F2: the four rating buttons. One test per acceptance example under F2 in
 // code/plans/FINALIZE_ITERATION_2_PLAN.md, plus the order and names F1's tests rely on.
+//
+// AI Utilization: ~100% of this file's code
+// AI Tools Used: Claude Code (Claude Opus 5.5)
+// AI-Assisted Activities:
+//   Unit test creation
+// Human role: plan approval, code review, and hands-on testing by Miles Cameron.
 
 import { afterEach, expect, test, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';

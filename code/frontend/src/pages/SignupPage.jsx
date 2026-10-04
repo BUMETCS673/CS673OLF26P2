@@ -5,6 +5,16 @@
  * so this goes straight to the deck list rather than bouncing through the login form.
  */
 
+/*
+ * Step 0c: the wordmark, and the design system's class names on the error message
+ * and the Create account button.
+ * AI Utilization: ~100% of those edits
+ * AI Tools Used: Claude Code (Claude Opus 5.5)
+ * AI-Assisted Activities:
+ *   Restyling onto the shared design system
+ * Human role: plan approval, code review, and hands-on testing by Miles Cameron.
+ */
+
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 

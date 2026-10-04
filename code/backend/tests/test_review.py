@@ -7,6 +7,12 @@ with their Given / When / Then as comments. The rest cover the technical cases i
 code/plans/LAB_3_PLAN.md, Story 5.
 """
 
+# AI Utilization: ~100% of this file's code
+# AI Tools Used: Claude Code (Claude Opus 5.5)
+# AI-Assisted Activities:
+#   API test creation, including the Jira acceptance tests AT1-AT4
+# Human role: plan approval, code review, and hands-on testing by Miles Cameron.
+
 from datetime import UTC, datetime, timedelta
 
 import pytest

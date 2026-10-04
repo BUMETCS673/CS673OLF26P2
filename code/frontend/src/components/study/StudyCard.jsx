@@ -1,3 +1,12 @@
+/*
+ * AI Utilization: ~100% of this file's code
+ * AI Tools Used: Claude Code (Claude Opus 5.5)
+ * AI-Assisted Activities:
+ *   UI component development
+ *   Documentation
+ * Human role: plan approval, code review, and hands-on testing by Miles Cameron.
+ */
+
 /**
  * One card in a study session (F2): the front in large type, and below a divider, the
  * back once it's revealed. A badge says where the card is in its cycle.

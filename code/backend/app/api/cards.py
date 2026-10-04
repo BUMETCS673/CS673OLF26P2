@@ -17,6 +17,14 @@ what comes back. A card that isn't due yet answers 409 instead of being
 rescheduled early (decision L7 in code/plans/LAB_3_PLAN.md).
 """
 
+# Lab 3, Story 5: _is_due(), review_card(), and the review lines in the docstring.
+# AI Utilization: ~100% of that code
+# AI Tools Used: Claude Code (Claude Opus 5.5)
+# AI-Assisted Activities:
+#   API endpoint development
+#   Documentation
+# Human role: plan approval, code review, and hands-on testing by Miles Cameron.
+
 from datetime import datetime
 
 from flask import Blueprint, jsonify

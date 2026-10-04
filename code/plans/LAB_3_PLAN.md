@@ -1,5 +1,14 @@
 # Cadence — Lab 3 Plan: Study Mode Foundations
 
+<!--
+B1: the note on ids after `flask seed --reset`, in the walk-through.
+AI Utilization: ~100% of that edit
+AI Tools Used: Claude Code (Claude Opus 5.5)
+AI-Assisted Activities:
+  Documentation
+Human role: plan approval, code review, and hands-on testing by Miles Cameron.
+-->
+
 **Status:** Draft 1, for team review. Nothing here is final until we agree on it in the channel.
 **Dates:** _TBD_ → Lab 3 due _TBD_
 **Team:** _TBD_, one owner per story

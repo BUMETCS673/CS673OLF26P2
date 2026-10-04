@@ -1,3 +1,12 @@
+/*
+ * AI Utilization: ~100% of this file's code
+ * AI Tools Used: Claude Code (Claude Opus 5.5)
+ * AI-Assisted Activities:
+ *   UI component development
+ *   Documentation
+ * Human role: plan approval, code review, and hands-on testing by Miles Cameron.
+ */
+
 import { RATINGS } from '../../study/constants.js';
 import { formatInterval } from '../../study/formatInterval.js';
 
