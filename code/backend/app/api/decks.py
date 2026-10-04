@@ -118,9 +118,9 @@ def get_due_cards(deck_id):
         .all()
     )
     return jsonify({
-        "learning": [card.to_dict() for card in learning],
-        "review": [card.to_dict() for card in review],
-        "new": [card.to_dict() for card in new],
+        "learning": [card.to_study_dict(now) for card in learning],
+        "review": [card.to_study_dict(now) for card in review],
+        "new": [card.to_study_dict(now) for card in new],
     }), 200
 
 

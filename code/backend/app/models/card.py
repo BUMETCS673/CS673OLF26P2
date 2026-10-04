@@ -1,8 +1,10 @@
 """The `cards` table."""
 
+from datetime import datetime, timedelta
+
 from app.extensions import db
 from app.models.base import TimestampMixin, as_utc, iso
-from app.scheduler import STARTING_EASE, CardSchedule, CardState
+from app.scheduler import STARTING_EASE, CardSchedule, CardState, preview_intervals
 
 
 class Card(TimestampMixin, db.Model):
@@ -73,6 +75,23 @@ class Card(TimestampMixin, db.Model):
             "due_at": iso(self.due_at),
             "created_at": iso(self.created_at),
             "updated_at": iso(self.updated_at),
+        }
+
+    # B3 (Von) -- AI Utilization: 90% | AI Tools Used: Claude |
+    # AI-Assisted Activities: API response field (intervals)
+    def to_study_dict(self, now: datetime) -> dict:
+        """`to_dict()` plus `intervals`, for cards shown in a study session (B3).
+
+        `intervals[rating]` is how many whole seconds after `now` the card would be due
+        if it were answered with `rating` at `now`. Only the study endpoints send this.
+        `now` is passed in rather than read from the clock (rule 8).
+        """
+        previews = preview_intervals(self.schedule, now)
+        return {
+            **self.to_dict(),
+            "intervals": {
+                rating.value: delta // timedelta(seconds=1) for rating, delta in previews.items()
+            },
         }
 
     def __repr__(self) -> str:
