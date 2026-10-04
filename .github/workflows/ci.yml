@@ -242,8 +242,36 @@ jobs:
       # This is the only place the frontend tests run. #16 also added a standalone
       # frontend-tests.yml doing `npm ci && npm test`; merging develop brought it in and
       # it ran the same two files a second time on every PR, so it is deleted here.
-      - name: Unit tests
-        run: npm test
+      #
+      # Coverage, like the backend's pytest step. The v8 provider is installed here only,
+      # with --no-save, so package.json and the lockfile don't change (rule 13 in
+      # code/plans/FINALIZE_ITERATION_2_PLAN.md) and `npm test` stays the same for
+      # everyone else. Its version has to match vitest's exactly; bump both together.
+      #
+      # AI Utilization: ~100% of this step
+      # AI Tools Used: Claude Code (Claude Opus 5.5)
+      # AI-Assisted Activities:
+      #   CI configuration
+      # Human role: direction and review by Duc Anh Nguyen.
+      - name: Unit tests with coverage
+        run: |
+          npm install --no-save @vitest/coverage-v8@5.0.2
+          npm test -- \
+            --coverage.enabled \
+            --coverage.provider=v8 \
+            --coverage.include='src/**' \
+            --coverage.reporter=text \
+            --coverage.reporter=json-summary
+
+      # Kept for the progress report, the same as the backend's coverage.xml.
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-frontend
+          path: code/frontend/coverage/coverage-summary.json
+          if-no-files-found: warn
+          retention-days: 14
 
       # Vite type-checks nothing, but it does parse and bundle every module, so a bad
       # import path or broken JSX fails here.
