@@ -1,0 +1,14 @@
+/*
+ * The study page (Iteration 2): layout only. Colors, fonts, buttons, and panels come from
+ * the tokens and shared classes in styles.css (rule 14 and the style guide in
+ * code/plans/FINALIZE_ITERATION_2_PLAN.md), so nothing here names a color or a font.
+ *
+ * The page's root element has the `study` class. Each chunk fills in its own section
+ * below, and none of them before Step 0c's style foundation has merged.
+ */
+
+/* --- F1: page --------------------------------------------------------------- */
+
+/* --- F2: card and buttons --------------------------------------------------- */
+
+/* --- F3: summary ------------------------------------------------------------ */
