@@ -65,11 +65,12 @@ export default function SignupPage() {
 
   return (
     <main className="auth-page">
+      <p className="wordmark">Cadence</p>
       <form className="auth-card" onSubmit={handleSubmit} noValidate>
         <h1>Create your account</h1>
 
         {formError && (
-          <p className="form-error" role="alert">
+          <p className="error-message" role="alert">
             {formError}
           </p>
         )}
@@ -122,7 +123,7 @@ export default function SignupPage() {
           <p className="field-hint">At least {MIN_PASSWORD_LENGTH} characters.</p>
         )}
 
-        <button type="submit" disabled={submitting}>
+        <button className="button primary" type="submit" disabled={submitting}>
           {submitting ? "Creating account…" : "Create account"}
         </button>
 
