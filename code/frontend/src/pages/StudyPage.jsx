@@ -105,9 +105,11 @@ const isTyping = (target) => ['INPUT', 'TEXTAREA', 'SELECT'].includes(target?.ta
 /** One session over `due`, from the first card to the summary. */
 function StudySession({ api, deck, due, now, onExit, onStudyMore }) {
   const [state, dispatch] = useReducer(sessionReducer, { due, now: now() }, initSession);
-  // Rule 11: one review request per card shown. The ref stops a second click or key press
-  // that arrives before React has re-rendered with the buttons disabled.
-  const inFlight = useRef(false);
+  // Rule 11: one review request per card shown. The ref holds the session state the request
+  // was sent from, so a second click or key press made from that same state does nothing.
+  // A flag isn't enough: it would clear before React re-renders and re-attaches the
+  // keydown listener, and the stale listener would rate the answered card again.
+  const sentFrom = useRef(null);
   const [saving, setSaving] = useState(false);
   const [reviewError, setReviewError] = useState('');
   const { current, revealed } = state;
@@ -115,8 +117,8 @@ function StudySession({ api, deck, due, now, onExit, onStudyMore }) {
   const reveal = useCallback(() => dispatch({ type: 'reveal' }), []);
 
   const rate = useCallback(async (rating) => {
-    if (inFlight.current || !current || !revealed) return;
-    inFlight.current = true;
+    if (sentFrom.current === state || !current || !revealed) return;
+    sentFrom.current = state;
     setSaving(true);
     setReviewError('');
     try {
@@ -126,15 +128,18 @@ function StudySession({ api, deck, due, now, onExit, onStudyMore }) {
       // See "How the study page handles each review response" in the plan.
       if (err.code === 'conflict' || err.code === 'not_found') {
         dispatch({ type: 'skipped', now: now() });
-      } else if (err.code !== 'unauthorized') {
+      } else {
+        // Nothing was saved, so the same card can be rated again.
+        sentFrom.current = null;
         // A 401 is the adapter's job: it signs out, and ProtectedRoute redirects.
-        setReviewError(err.message || 'Could not save your answer. Try again.');
+        if (err.code !== 'unauthorized') {
+          setReviewError(err.message || 'Could not save your answer. Try again.');
+        }
       }
     } finally {
-      inFlight.current = false;
       setSaving(false);
     }
-  }, [api, now, current, revealed]);
+  }, [api, now, state, current, revealed]);
 
   // Space reveals, and 1-4 rate once the answer is showing (decision P10).
   useEffect(() => {

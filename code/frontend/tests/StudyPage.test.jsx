@@ -146,6 +146,21 @@ test('3 pressed twice saves once', async () => {
   expect(api.reviewCard).toHaveBeenCalledWith(AIRPORT.id, 'good');
 });
 
+test('a digit that lands between the response and the re-render saves nothing more', async () => {
+  const held = heldReview();
+  const { api } = renderView(fakeApi({ reviewCard: held.reviewCard }));
+  await screen.findByText('the airport');
+  showAnswer();
+
+  press('3');
+  held.finish(reviewed(AIRPORT));
+  for (let i = 0; i < 10; i += 1) await Promise.resolve();  // finally has run; no re-render yet
+  press('3');
+
+  expect(await screen.findByText('the song')).toBeTruthy();
+  expect(api.reviewCard).toHaveBeenCalledTimes(1);
+});
+
 // The plan says to ignore key events from buttons, but a button does nothing with a
 // digit, so a keyboard user who has tabbed onto a rating button can still press 1-4.
 test('a digit pressed while a rating button has focus still rates', async () => {
