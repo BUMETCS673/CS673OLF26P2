@@ -123,10 +123,12 @@ def seed_command(reset):
     db.session.add(travel)
     db.session.commit()
 
+    # The ids, because they're only 1 and 2 on a fresh database: Postgres never reuses an
+    # id, so every --reset gives the decks new ones, and the walkthrough needs to know them.
     click.echo(
         f"{'Reset' if existing else 'Seeded'} {DEMO_EMAIL} (password: {DEMO_PASSWORD}) with "
-        f"{spanish.name!r} ({len(spanish.cards)} cards) and "
-        f"{travel.name!r} ({len(travel.cards)} cards)."
+        f"{spanish.name!r} (id {spanish.id}, {len(spanish.cards)} cards) and "
+        f"{travel.name!r} (id {travel.id}, {len(travel.cards)} cards)."
     )
 
 

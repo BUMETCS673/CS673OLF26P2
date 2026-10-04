@@ -933,6 +933,10 @@ curl -s -b /tmp/cadence -H 'Content-Type: application/json' \
   -d '{"rating":"good"}' localhost:5001/api/cards/1/review      # 409: not due until tomorrow
 ```
 
+The ids in these commands hold because the walk-through starts from an empty database. After
+`flask seed --reset` (Iteration 2), the decks and cards have new ids. Use the deck id `flask seed`
+prints, and a card id from that deck's `/due`.
+
 Using `flask db upgrade` instead of `init-db` here also proves the migration builds a working
 database from nothing.
 

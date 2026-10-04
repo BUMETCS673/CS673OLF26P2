@@ -41,12 +41,20 @@ def run(app):
 
 
 def _seed(run):
-    """Seed, and return the clock just before and just after, to bound the seed's `now`."""
+    """Seed, and return the clock just before and just after (to bound the seed's `now`)
+    and what the command printed."""
     before = utcnow()
     result = run("seed")
     after = utcnow()
     assert result.exit_code == 0, result.output
-    return before, after
+    return before, after, result.output
+
+
+def _assert_ids_printed(output):
+    """The seed names each deck's id: they're only 1 and 2 on a fresh database."""
+    spanish, travel = _demo_decks()
+    assert f"'Spanish 101' (id {spanish.id}, 4 cards)" in output
+    assert f"'Travel Spanish' (id {travel.id}, {len(TRAVEL_SPANISH)} cards)" in output
 
 
 def _demo_user():
@@ -74,12 +82,13 @@ def _everything(db):
 def test_an_empty_database_gets_spanish_101_then_travel_spanish(run):
     # Given an empty database
     # When I run flask seed
-    before, after = _seed(run)
+    before, after, output = _seed(run)
 
-    # Then the demo user has two decks, Spanish 101 first...
+    # Then the demo user has two decks, Spanish 101 first, and the output names their ids...
     spanish, travel = _demo_decks()
     assert (spanish.name, travel.name) == ("Spanish 101", "Travel Spanish")
     assert travel.description == "English → Spanish, with cards at every stage"
+    _assert_ids_printed(output)
 
     # ...with Spanish 101's four new cards, unchanged since Iteration 1...
     assert [(c.front, c.back, c.state, c.due_at) for c in _cards(spanish)] == [
@@ -168,6 +177,10 @@ def test_reset_puts_a_reviewed_card_back_and_keeps_one_demo_user(run, db, client
     assert [deck.name for deck in _demo_decks()] == ["Spanish 101", "Travel Spanish"]
     assert Deck.query.count() == 2
     assert Card.query.count() == 4 + len(TRAVEL_SPANISH)
+
+    # And the output names the new decks' ids. On Postgres they're never the old ones, and
+    # the walkthrough needs them after a reset.
+    _assert_ids_printed(result.output)
 
 
 def test_time_travel_moves_only_the_demo_users_due_times_one_day_earlier(
