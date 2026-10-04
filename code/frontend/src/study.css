@@ -9,6 +9,77 @@
 
 /* --- F1: page --------------------------------------------------------------- */
 
+/*
+ * AI Utilization: ~100% of this section
+ * AI Tools Used: Claude Code (Claude Opus 5.5)
+ * AI-Assisted Activities:
+ *   CSS layout on the style guide's tokens
+ * Human role: direction and review by Duc Anh Nguyen.
+ */
+
+/* One card at a time reads better in a narrower column than the deck pages use. */
+.study .study-session {
+  max-width: 720px;
+}
+
+.study-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
+}
+
+.study-heading > div {
+  min-width: 0;
+}
+
+.study-heading h1 {
+  margin: 0;
+}
+
+.study-left {
+  margin: 0;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--color-muted);
+}
+
+.study-actions {
+  margin-top: var(--space-5);
+}
+
+.study-reveal {
+  width: 100%;
+  min-height: 64px;
+  font-size: 16px;
+}
+
+.study-hint {
+  margin: var(--space-3) 0 0;
+  font-size: 13px;
+  text-align: center;
+  color: var(--color-muted);
+}
+
+.study-exit {
+  margin-top: var(--space-6);
+}
+
+@media (max-width: 640px) {
+  .study-heading {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-2);
+  }
+
+  /* No keyboard to press them on. */
+  .study-hint {
+    display: none;
+  }
+}
+
 /* --- F2: card and buttons --------------------------------------------------- */
 
 /* --- F3: summary ------------------------------------------------------------ */
