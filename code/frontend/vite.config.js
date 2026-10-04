@@ -29,8 +29,8 @@ export default defineConfig({
   },
   test: {
     // Read only when coverage is on, which CI turns on with --coverage.enabled; the v8
-    // provider is installed there, not in package.json. See the "Unit tests with
-    // coverage" step in .github/workflows/ci.yml for why.
+    // provider is the @vitest/coverage-v8 devDependency. See the "Unit tests with
+    // coverage" step in .github/workflows/ci.yml.
     //
     // AI Utilization: ~100% of this block
     // AI Tools Used: Claude Code (Claude Opus 5.5)

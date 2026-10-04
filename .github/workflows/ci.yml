@@ -243,10 +243,10 @@ jobs:
       # frontend-tests.yml doing `npm ci && npm test`; merging develop brought it in and
       # it ran the same two files a second time on every PR, so it is deleted here.
       #
-      # Coverage, like the backend's pytest step. The v8 provider is installed here only,
-      # with --no-save, so package.json and the lockfile don't change (rule 13 in
-      # code/plans/FINALIZE_ITERATION_2_PLAN.md) and `npm test` stays the same for
-      # everyone else. Its version has to match vitest's exactly; bump both together.
+      # Coverage, like the backend's pytest step. The v8 provider is a devDependency, so
+      # the lockfile pins it and `npm ci` above installed it (rule 13 allows test-only
+      # tooling). `npm test` stays the same for everyone; coverage only runs with the
+      # flag. Its version has to match vitest's exactly; bump both together.
       #
       # Coverage measured 35.25% of lines (44 tests) on develop when this gate was added:
       # the API layer, session.js and formatInterval are near 100%, but no page, form or
@@ -260,9 +260,7 @@ jobs:
       #   CI configuration
       # Human role: direction and review by Duc Anh Nguyen.
       - name: Unit tests with coverage
-        run: |
-          npm install --no-save @vitest/coverage-v8@5.0.2
-          npm test -- --coverage.enabled
+        run: npm test -- --coverage.enabled
 
       # Kept for the progress report, the same as the backend's coverage.xml.
       - name: Upload coverage
