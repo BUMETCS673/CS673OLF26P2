@@ -248,6 +248,11 @@ jobs:
       # code/plans/FINALIZE_ITERATION_2_PLAN.md) and `npm test` stays the same for
       # everyone else. Its version has to match vitest's exactly; bump both together.
       #
+      # Coverage measured 35.25% of lines (44 tests) on develop when this gate was added:
+      # the API layer, session.js and formatInterval are near 100%, but no page, form or
+      # auth component has a test yet. 30 is a floor, not a goal. Raise it as F1-F4 add
+      # component tests; don't lower it to make a red build green.
+      #
       # AI Utilization: ~100% of this step
       # AI Tools Used: Claude Code (Claude Opus 5.5)
       # AI-Assisted Activities:
@@ -261,7 +266,9 @@ jobs:
             --coverage.provider=v8 \
             --coverage.include='src/**' \
             --coverage.reporter=text \
-            --coverage.reporter=json-summary
+            --coverage.reporter=json-summary \
+            --coverage.thresholds.lines=30 \
+            --coverage.thresholds.statements=30
 
       # Kept for the progress report, the same as the backend's coverage.xml.
       - name: Upload coverage
