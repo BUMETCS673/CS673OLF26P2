@@ -146,4 +146,4 @@ def review_card(card_id):
 
     card.schedule = answer_card(schedule, rating, now)
     db.session.commit()
-    return jsonify(card.to_dict()), 200
+    return jsonify(card.to_study_dict(now)), 200
