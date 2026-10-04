@@ -97,7 +97,9 @@ test('+ Add card saves a card, adds it to the list, and keeps the form open for 
   type('Back', 'the map');
   fireEvent.click(screen.getByRole('button', { name: 'Save card' }));
 
-  expect(await screen.findByText('Card saved. Add another or cancel to return to your cards.')).toBeTruthy();
+  // Twice on purpose: under the form, and in the hidden status line screen readers announce.
+  const saved = await screen.findAllByText('Card saved. Add another or cancel to return to your cards.');
+  expect(saved.map((node) => node.getAttribute('role'))).toEqual(['status', null]);
   expect(api.createCard).toHaveBeenCalledWith(2, { front: 'el mapa', back: 'the map' });
   expect(screen.getByText('Your deck · 1 card')).toBeTruthy();
   expect(screen.getByLabelText('Front').value).toBe('');
