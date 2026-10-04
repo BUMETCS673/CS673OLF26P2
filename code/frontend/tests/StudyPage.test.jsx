@@ -52,7 +52,11 @@ function renderView(api = fakeApi(), onExit = vi.fn()) {
 
 const ratingButton = (name) => screen.queryByRole('button', { name: new RegExp(`^${name}`) });
 const showAnswer = () => fireEvent.click(screen.getByRole('button', { name: 'Show answer' }));
-const summaryText = () => document.querySelector('.session-summary').textContent;
+const summaryText = () =>
+  screen.getByRole('heading', { name: 'Session complete' }).closest('.session-summary').textContent;
+// The page listens on window. A key pressed on the page bubbles up to it, the same as a
+// real key press with nothing focused.
+const press = (key) => fireEvent.keyDown(screen.getByRole('main'), { key });
 
 test('the first card shows its front, not its back, and no rating buttons', async () => {
   renderView();
@@ -78,7 +82,7 @@ test('Space reveals the answer too', async () => {
   renderView();
   await screen.findByText('the airport');
 
-  fireEvent.keyDown(window, { key: ' ' });
+  press(' ');
 
   expect(screen.getByText('el aeropuerto')).toBeTruthy();
 });
@@ -87,7 +91,7 @@ test('1-4 do nothing before the answer is showing', async () => {
   const { api } = renderView();
   await screen.findByText('the airport');
 
-  fireEvent.keyDown(window, { key: '3' });
+  press('3');
 
   expect(api.reviewCard).not.toHaveBeenCalled();
 });
@@ -133,8 +137,8 @@ test('3 pressed twice saves once', async () => {
   await screen.findByText('the airport');
   showAnswer();
 
-  fireEvent.keyDown(window, { key: '3' });
-  fireEvent.keyDown(window, { key: '3' });
+  press('3');
+  press('3');
   held.finish(reviewed(AIRPORT));
 
   expect(await screen.findByText('the song')).toBeTruthy();
