@@ -88,6 +88,16 @@ def answer_card(card: CardSchedule, rating: Rating, now: datetime) -> CardSchedu
     return _answer_in_steps(card, rating, now)
 
 
+# B3 (Von) -- AI Utilization: 90% | AI Tools Used: Claude |
+# AI-Assisted Activities: scheduler preview function
+def preview_intervals(card: CardSchedule, now: datetime) -> dict[Rating, timedelta]:
+    """How long after `now` the card would be due for each rating, if answered at `now`.
+
+    Pure, like `answer_card()`: it only asks the scheduler, and saves nothing (B3).
+    """
+    return {rating: answer_card(card, rating, now).due_at - now for rating in Rating}
+
+
 def _answer_in_steps(card: CardSchedule, rating: Rating, now: datetime) -> CardSchedule:
     """New, learning, and relearning cards: short steps measured in minutes.
 

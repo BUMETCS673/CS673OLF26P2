@@ -234,4 +234,4 @@ def test_seed_is_safe_to_run_twice(app, db):
     runner.invoke(seed_command)
 
     assert User.query.filter_by(email=DEMO_EMAIL).count() == 1
-    assert Deck.query.count() == 1
+    assert Deck.query.count() == 2  # Spanish 101 and Travel Spanish (B1)

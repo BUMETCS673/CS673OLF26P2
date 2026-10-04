@@ -724,14 +724,15 @@ in the channel, because everyone's styling starts from here.
 | the library | la biblioteca | new | null | 0 | 2500 | 0 | 0 | a new card |
 | the song | la canción | new | null | 0 | 2500 | 0 | 0 | a new card |
 
-- Right after seeding, `GET /api/decks/2/due` returns `learning` [passport, suitcase, ticket],
-  `review` [airport, train station, beach], and `new` [goodbye, library, song], so B2's
-  `due_counts` for the deck is `{ "learning": 3, "review": 3, "new": 3 }`.
+- Right after seeding a fresh database, `GET /api/decks/2/due` returns `learning` [passport,
+  suitcase, ticket], `review` [airport, train station, beach], and `new` [goodbye, library,
+  song], so B2's `due_counts` for the deck is `{ "learning": 3, "review": 3, "new": 3 }`.
 - **`flask seed --reset`** deletes the demo user, which cascades to their decks and cards, and
   seeds again with fresh times. Every time in the table is relative to when you seeded, so a
   rehearsal the day before the demo needs a reset on the day. Without `--reset`, nothing changes:
   it still does nothing if the demo user exists, and `test_seed_is_safe_to_run_twice` keeps
-  passing.
+  passing. Postgres never reuses an id, so after a reset the decks aren't 1 and 2 any more.
+  `flask seed` prints each deck's id so you can see the new ones.
 - 🟢 **Optional: `flask time-travel --days N`**, with `--email` defaulting to the demo user. It
   moves `due_at` N days earlier on every card of that user's that isn't new, as if N days had
   passed. With it, the demo can show a card graduate to "1d" and come back. It's a CLI command
@@ -831,7 +832,7 @@ and Spanish 101 at `{ "learning": 0, "review": 0, "new": 4 }`.
 | any deck | `GET /api/decks/:id/cards` | no card has an `intervals` key |
 | a learning card | `GET /api/decks/:id/due` | the card's row in the database is unchanged: previews save nothing |
 
-**Done when:** the tests pass on SQLite and Postgres, and after B1's seed,
+**Done when:** the tests pass on SQLite and Postgres, and after B1's seed on a fresh database,
 `curl localhost:5001/api/decks/2/due` shows the airport card with `"good": 2592000`.
 
 ---
@@ -1069,6 +1070,10 @@ docker compose exec backend flask db upgrade
 docker compose exec backend flask seed
 ```
 
+On this fresh database the decks are 1 and 2. If you rehearse with `flask seed --reset` instead
+of starting over, the decks get new ids. `flask seed` prints them, and step 12 uses Travel
+Spanish's.
+
 Then open `localhost:3000`:
 
 1. The sign-in page has the Cadence wordmark, the guide's two fonts, a blue **Sign in** button,
@@ -1098,13 +1103,15 @@ Then open `localhost:3000`:
 10. On one card, double-click **Good** with the browser's Network tab open. There's one
     `POST /review`, not two. (Rule 11)
 11. Sign out, sign back in, and open Travel Spanish. Everything from step 8 is still there.
-12. Sign up as a second user and go to `/decks/2/study`. The page says the deck could not be
-    found.
+12. Sign up as a second user and go to `/decks/<id>/study`, using the Travel Spanish id that
+    `flask seed` printed (2 on a fresh database). The page says the deck could not be found.
+    Use the printed id, not 2: after a `--reset`, deck 2 no longer exists at all, so every user
+    would see that message and the step would prove nothing.
 13. 🟢 Optional, if B1 built it: `docker compose exec backend flask time-travel --days 1`, then
     refresh the deck list. Travel Spanish shows the cards graduated in step 7 as due again.
 
-The [Lab 3 curl walk-through](LAB_3_PLAN.md#the-walk-through) should still pass too: B1 leaves
-deck 1 as it was.
+The [Lab 3 curl walk-through](LAB_3_PLAN.md#the-walk-through) should still pass too, on a fresh
+database: B1 leaves deck 1 as it was.
 
 ### Things that could go wrong
 

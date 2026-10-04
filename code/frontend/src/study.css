@@ -9,6 +9,270 @@
 
 /* --- F1: page --------------------------------------------------------------- */
 
+/*
+ * AI Utilization: ~100% of this section
+ * AI Tools Used: Claude Code (Claude Opus 5.5)
+ * AI-Assisted Activities:
+ *   CSS layout on the style guide's tokens
+ * Human role: direction and review by Duc Anh Nguyen.
+ */
+
+/* One card at a time reads better in a narrower column than the deck pages use. */
+.study .study-session {
+  max-width: 720px;
+}
+
+.study-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
+}
+
+.study-heading > div {
+  min-width: 0;
+}
+
+.study-heading h1 {
+  margin: 0;
+}
+
+.study-left {
+  margin: 0;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--color-muted);
+}
+
+.study-actions {
+  margin-top: var(--space-5);
+}
+
+.study-reveal {
+  width: 100%;
+  min-height: 64px;
+  font-size: 16px;
+}
+
+.study-hint {
+  margin: var(--space-3) 0 0;
+  font-size: 13px;
+  text-align: center;
+  color: var(--color-muted);
+}
+
+.study-exit {
+  margin-top: var(--space-6);
+}
+
+@media (max-width: 640px) {
+  .study-heading {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-2);
+  }
+
+  /* No keyboard to press them on. */
+  .study-hint {
+    display: none;
+  }
+}
+
 /* --- F2: card and buttons --------------------------------------------------- */
 
+/* The card is a .panel; this is its layout. */
+.study-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 280px;
+  padding: var(--space-7) var(--space-6);
+  text-align: center;
+}
+
+.study-card .badge {
+  margin-bottom: var(--space-4);
+}
+
+.study-card-front,
+.study-card-back {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.study-card-front {
+  font: 600 28px/1.3 var(--font-heading);
+  letter-spacing: -0.01em;
+}
+
+/* Empty until the reveal, and takes no space while it is. */
+.study-card-answer {
+  width: 100%;
+}
+
+.study-card-divider {
+  width: min(100%, 360px);
+  margin: var(--space-5) auto;
+  border: 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.study-card-back {
+  font: 400 22px/1.45 var(--font-body);
+}
+
+.rating-buttons {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+/* Secondary buttons with an accent bar along the top, in the style guide's rating
+   colors. The bar is a ::before, so .button's hover border can't paint over it. */
+.rating-button {
+  --rating-accent: var(--color-border);
+  position: relative;
+  overflow: hidden;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 64px;
+  padding: var(--space-3) var(--space-2);
+  white-space: normal;
+}
+
+.rating-button::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 3px;
+  background: var(--rating-accent);
+}
+
+.rating-again { --rating-accent: var(--color-danger); }
+.rating-hard { --rating-accent: var(--color-gold-strong); }
+.rating-good { --rating-accent: var(--color-primary); }
+.rating-easy { --rating-accent: var(--color-navy); }
+
+.rating-label {
+  font-size: 15px;
+}
+
+.rating-interval {
+  font: 500 13px/1.2 var(--font-body);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-muted);
+}
+
+.rating-key {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  font: 500 11px/1 var(--font-body);
+  color: var(--color-muted);
+}
+
+@media (max-width: 640px) {
+  .study-card {
+    min-height: 220px;
+    padding: var(--space-6) var(--space-5);
+  }
+
+  .study-card-front {
+    font-size: 24px;
+  }
+
+  .study-card-back {
+    font-size: 19px;
+  }
+
+  /* No keyboard to press them on. */
+  .rating-key {
+    display: none;
+  }
+}
+
 /* --- F3: summary ------------------------------------------------------------ */
+
+/*
+ * AI Utilization: ~100% of this section
+ * AI Tools Used: Claude Code (Claude Opus 5.5)
+ * AI-Assisted Activities:
+ *   CSS layout on the style guide's tokens
+ * Human role: direction and review by Duc Anh Nguyen.
+ */
+
+/* The summary is a .panel; this is its layout. */
+.session-summary {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: var(--space-7) var(--space-6);
+  text-align: center;
+}
+
+.summary-total {
+  font: 600 16px/1.4 var(--font-body);
+  color: var(--color-muted);
+}
+
+/* One tile per rating, with the same accent colors as the rating buttons. */
+.summary-counts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: var(--space-5) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.summary-count {
+  --rating-accent: var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-2);
+  border: 1px solid var(--color-border);
+  border-top: 3px solid var(--rating-accent);
+  border-radius: var(--radius-control);
+}
+
+.summary-count.rating-again { --rating-accent: var(--color-danger); }
+.summary-count.rating-hard { --rating-accent: var(--color-gold-strong); }
+.summary-count.rating-good { --rating-accent: var(--color-primary); }
+.summary-count.rating-easy { --rating-accent: var(--color-navy); }
+
+.summary-count-label {
+  font-size: 13px;
+  color: var(--color-muted);
+}
+
+.summary-count-value {
+  font: 700 24px/1.2 var(--font-heading);
+  font-variant-numeric: tabular-nums;
+}
+
+.summary-next {
+  margin: var(--space-5) 0 0;
+  font-weight: 600;
+}
+
+.summary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-2);
+  margin-top: var(--space-6);
+}
+
+@media (max-width: 640px) {
+  .session-summary {
+    padding: var(--space-6) var(--space-5);
+  }
+
+  .summary-counts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
