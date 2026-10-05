@@ -7,6 +7,12 @@ acceptance examples in code/plans/LAB_3_PLAN.md, Story 1.
 `answer_card()` is pure, so these are plain asserts: no database, no app, no clock.
 """
 
+# AI Utilization: ~100% of this file's code
+# AI Tools Used: Claude Code (Claude Opus 5.5)
+# AI-Assisted Activities:
+#   Unit test creation
+# Human role: plan approval, code review, and hands-on testing by Miles Cameron.
+
 from datetime import UTC, datetime, timedelta
 
 import pytest

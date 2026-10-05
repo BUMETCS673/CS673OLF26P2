@@ -1,5 +1,15 @@
 # Cadence — Finalize Iteration 2: Study Mode, End to End
 
+<!--
+B1: the notes on deck ids after `flask seed --reset`, under B1, under B3's
+"Done when", and in the demo walk-through.
+AI Utilization: ~100% of those edits
+AI Tools Used: Claude Code (Claude Opus 5.5)
+AI-Assisted Activities:
+  Documentation
+Human role: plan approval, code review, and hands-on testing by Miles Cameron.
+-->
+
 **Status:** Draft 2, for team review. Nothing here is final until we agree on it in the channel.
 **Dates:** _TBD_ → Iteration 2 demo _TBD_
 **Team:** Miles, Duc, Nurzat, Von

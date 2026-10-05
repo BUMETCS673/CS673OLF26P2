@@ -7,6 +7,12 @@ The acceptance examples are the ones under B1 in code/plans/FINALIZE_ITERATION_2
 Each command runs through Flask's CLI runner, the same way as typing it in a terminal.
 """
 
+# AI Utilization: ~100% of this file's code
+# AI Tools Used: Claude Code (Claude Opus 5.5)
+# AI-Assisted Activities:
+#   Unit test creation
+# Human role: plan approval, code review, and hands-on testing by Miles Cameron.
+
 from datetime import timedelta
 
 import pytest

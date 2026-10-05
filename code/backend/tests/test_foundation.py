@@ -3,6 +3,13 @@
 WS1 and WS2 test their endpoints in test_auth.py, test_decks.py, and test_cards.py.
 """
 
+# B1: the deck count in test_seed_is_safe_to_run_twice, now that there are two.
+# AI Utilization: ~100% of that change
+# AI Tools Used: Claude Code (Claude Opus 5.5)
+# AI-Assisted Activities:
+#   Unit test update
+# Human role: plan approval, code review, and hands-on testing by Miles Cameron.
+
 import json
 
 import pytest

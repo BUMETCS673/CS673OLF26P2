@@ -1,3 +1,12 @@
+/*
+ * AI Utilization: ~100% of this file's code
+ * AI Tools Used: Claude Code (Claude Opus 5.5)
+ * AI-Assisted Activities:
+ *   Utility function development
+ *   Documentation
+ * Human role: plan approval, code review, and hands-on testing by Miles Cameron.
+ */
+
 /**
  * The short label under a rating button: "<1m", "6m", "1d", "1.5mo", "100y" (Iteration 2,
  * Step 0b). The backend sends intervals in seconds; this only formats them, and never works

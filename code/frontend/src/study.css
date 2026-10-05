@@ -82,6 +82,14 @@
 
 /* --- F2: card and buttons --------------------------------------------------- */
 
+/*
+ * AI Utilization: ~100% of this section
+ * AI Tools Used: Claude Code (Claude Opus 5.5)
+ * AI-Assisted Activities:
+ *   CSS layout on the style guide's tokens
+ * Human role: plan approval, code review, and hands-on testing by Miles Cameron.
+ */
+
 /* The card is a .panel; this is its layout. */
 .study-card {
   display: flex;

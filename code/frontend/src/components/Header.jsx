@@ -5,6 +5,15 @@
  * clean without App.jsx having to know which route is which.
  */
 
+/*
+ * Step 0c: the design system's class names on the wordmark and the Sign out button.
+ * AI Utilization: ~100% of those edits
+ * AI Tools Used: Claude Code (Claude Opus 5.5)
+ * AI-Assisted Activities:
+ *   Restyling onto the shared design system
+ * Human role: plan approval, code review, and hands-on testing by Miles Cameron.
+ */
+
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 

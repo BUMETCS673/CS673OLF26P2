@@ -7,6 +7,16 @@
  * See "Style guide" and rule 14 in code/plans/FINALIZE_ITERATION_2_PLAN.md.
  */
 
+/*
+ * Step 0c rewrote WS3's stylesheet as this design system.
+ * AI Utilization: ~100% of this file's code
+ * AI Tools Used: Claude Code (Claude Opus 5.5)
+ * AI-Assisted Activities:
+ *   Design system development (tokens and shared components)
+ *   Documentation
+ * Human role: plan approval, code review, and hands-on testing by Miles Cameron.
+ */
+
 /* --- tokens ----------------------------------------------------------------- */
 
 :root {

@@ -9,6 +9,13 @@ app.models, and it never reads the clock: `now` is always passed in, UTC-aware.
 `Card.schedule` converts between a database row and a `CardSchedule`.
 """
 
+# AI Utilization: ~100% of this file's code (preview_intervals() is B3's, with its own note)
+# AI Tools Used: Claude Code (Claude Opus 5.5)
+# AI-Assisted Activities:
+#   Scheduling algorithm implementation (Anki's default scheduler)
+#   Documentation
+# Human role: plan approval, code review, and hands-on testing by Miles Cameron.
+
 import math
 import struct
 from dataclasses import dataclass, replace

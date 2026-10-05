@@ -1,3 +1,9 @@
+// AI Utilization: ~100% of this file's code
+// AI Tools Used: Claude Code (Claude Opus 5.5)
+// AI-Assisted Activities:
+//   Unit test creation
+// Human role: plan approval, code review, and hands-on testing by Miles Cameron.
+
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { createStudyApi } from '../src/api/study.js';

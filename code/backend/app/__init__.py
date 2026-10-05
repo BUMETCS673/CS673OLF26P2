@@ -7,6 +7,13 @@ Everything that needs the app — extensions, blueprints, error handlers, CLI co
 gets attached here, and nowhere else.
 """
 
+# B1: registering time_travel_command in _register_cli().
+# AI Utilization: ~100% of that change
+# AI Tools Used: Claude Code (Claude Opus 5.5)
+# AI-Assisted Activities:
+#   CLI command registration
+# Human role: plan approval, code review, and hands-on testing by Miles Cameron.
+
 import click
 from flask import Flask
 from flask.cli import with_appcontext

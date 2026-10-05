@@ -1,3 +1,12 @@
+/*
+ * Step 0c: the stylesheets' load order, and the comment that explains it.
+ * AI Utilization: ~100% of that change
+ * AI Tools Used: Claude Code (Claude Opus 5.5)
+ * AI-Assisted Activities:
+ *   Design system setup
+ * Human role: plan approval, code review, and hands-on testing by Miles Cameron.
+ */
+
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
