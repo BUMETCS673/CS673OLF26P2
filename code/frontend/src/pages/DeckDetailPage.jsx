@@ -1,5 +1,6 @@
 /*
- * F4: Study now, the due-count badge, and one `now` for every CardRow.
+ * F4: Study now, the due-count badge (refreshed after a card is added or deleted), and one
+ * `now` for every CardRow.
  * AI Utilization: ~100% of those changes
  * AI Tools Used: Devin (Cognition AI)
  * AI-Assisted Activities:
@@ -56,6 +57,14 @@ export function DeckDetailView({ api, deckId, onBack, onStudy, startAdding = fal
     }));
   }
 
+  // due_counts depend on the cards, so refresh the deck after adding or deleting one.
+  // If the request fails, the old counts stay.
+  function refreshDeck() {
+    api.getDeck(deckId)
+      .then((nextDeck) => setResult((current) => ({ ...current, deck: nextDeck })))
+      .catch(() => {});
+  }
+
   useEffect(() => {
     let active = true;
     Promise.all([api.getDeck(deckId), api.listCards(deckId)])
@@ -77,7 +86,7 @@ export function DeckDetailView({ api, deckId, onBack, onStudy, startAdding = fal
           <h1>{deck.name}</h1>{dueSummary && <span className="badge badge-gold due-summary">{dueSummary}</span>}
           {deck.description && <p className="subtitle deck-detail-description">{deck.description}</p>}</div>
           <div className="page-actions">
-            {!adding && <button className="button primary" onClick={() => { setNotice(''); setAdding(true); }}>+ Add card</button>}
+            {!adding && <button className="button secondary" onClick={() => { setNotice(''); setAdding(true); }}>+ Add card</button>}
             {cards.length > 0 && <button className="button primary" onClick={onStudy}>{studyLabel(deck.due_counts)}</button>}</div></div>
         {adding && <section className="card-composer" aria-labelledby="add-card-heading">
           <div className="composer-heading"><div><p className="eyebrow">{cards.length === 0 ? 'Your first flashcard' : 'One more idea'}</p>
@@ -87,6 +96,7 @@ export function DeckDetailView({ api, deckId, onBack, onStudy, startAdding = fal
             onCancel={startAdding ? onBack : () => setAdding(false)} onSave={async (body) => {
             const card = await api.createCard(deck.id, body);
             setCards((items) => [...items, card]);
+            refreshDeck();
             setNotice(startAdding ? 'Card saved. Add another or finish for now.' : 'Card saved. Add another or cancel to return to your cards.');
           }} />
           <p className="composer-note">{notice || 'Your deck is saved. Cards are optional—you can add them anytime.'}</p>
@@ -99,7 +109,8 @@ export function DeckDetailView({ api, deckId, onBack, onStudy, startAdding = fal
             const updated = await api.updateCard(id, body);
             setCards((items) => items.map((item) => item.id === id ? updated : item)); setNotice('Card updated.');
           }} onDelete={async (id) => {
-            await api.deleteCard(id); setCards((items) => items.filter((item) => item.id !== id)); setNotice('Card deleted.');
+            await api.deleteCard(id); setCards((items) => items.filter((item) => item.id !== id)); refreshDeck();
+            setNotice('Card deleted.');
           }} />)}</ul>}
       </>}
   </main>;
