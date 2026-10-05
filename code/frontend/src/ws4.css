@@ -9,6 +9,13 @@
      Restyling onto the shared design system
    Human role: plan approval, code review, and hands-on testing by Miles Cameron. */
 
+/* F4: layout for the due-count badges, the Study buttons, and the card-state badge.
+   AI Utilization: ~100% of these rules
+   AI Tools Used: Devin (Cognition AI)
+   AI-Assisted Activities:
+     UI layout
+   Human role: requirements (F4 in the plan), direction, and review by Nurzat Mukhamedali. */
+
 /* --- headings and counts ----------------------------------------------------- */
 .ws4 .section-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-4); }
 .ws4 .section-heading h2 { margin: 0; font-size: 16px; }
@@ -68,6 +75,13 @@
 .ws4 .flashcard-form textarea:focus-visible { outline: none; }
 .ws4 .flashcard-form .field-hint { text-align: right; font-size: 12px; }
 .ws4 .composer-note { margin: var(--space-3) 0 0; font-size: 13px; color: var(--color-muted); }
+
+/* --- due counts and studying (F4) ------------------------------------------------ */
+.ws4 .page-actions { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+.ws4 .due-summary { margin-bottom: var(--space-2); }
+.ws4 .deck-tile-badges { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: var(--space-2); }
+.ws4 .deck-footer-links { display: flex; align-items: center; gap: var(--space-4); }
+.ws4 .card-row-meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
 
 @media (max-width: 640px) {
   .ws4 .section-heading { align-items: flex-start; }

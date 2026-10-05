@@ -1,18 +1,30 @@
+/*
+ * F4: the due-count badge and the Study button on each tile.
+ * AI Utilization: ~100% of those changes
+ * AI Tools Used: Devin (Cognition AI)
+ * AI-Assisted Activities:
+ *   UI component development
+ * Human role: requirements (F4 in code/plans/FINALIZE_ITERATION_2_PLAN.md), direction,
+ * and review by Nurzat Mukhamedali.
+ */
+
 import React, { useEffect, useState } from 'react';
 import DeckForm from '../components/DeckForm';
 import { useNavigate } from 'react-router-dom';
 import { useDecksApi } from '../api/useDecksApi';
+import { describeDueCounts } from '../study/describeSchedule.js';
 
 export default function DeckListPage() {
   const navigate = useNavigate();
   const decksApi = useDecksApi();
   return <div className="ws4"><DeckListView api={decksApi}
     onOpenDeck={(id) => navigate(`/decks/${id}`)}
+    onStudyDeck={(id) => navigate(`/decks/${id}/study`)}
     onDeckCreated={(id) => navigate(`/decks/${id}`, { state: { startAdding: true } })} />
   </div>;
 }
 
-export function DeckListView({ api, onOpenDeck, onDeckCreated = onOpenDeck }) {
+export function DeckListView({ api, onOpenDeck, onStudyDeck, onDeckCreated = onOpenDeck }) {
   const [revision, setRevision] = useState(0);
   // Decks, the load error and "which request produced them" live in one state tagged
   // with the request it answers, so `loading` is derived instead of being switched on at
@@ -88,10 +100,12 @@ export function DeckListView({ api, onOpenDeck, onDeckCreated = onOpenDeck }) {
             setEditing(null); setNotice('Deck updated.');
           }} /></> : <>
             <div className="deck-tile-top"><span className="deck-icon" aria-hidden="true">▤</span>
-              <span className="card-count">{deck.card_count} {deck.card_count === 1 ? 'card' : 'cards'}</span></div>
+              <div className="deck-tile-badges">{describeDueCounts(deck.due_counts) && <span className="badge badge-gold">{describeDueCounts(deck.due_counts)}</span>}
+                <span className="card-count">{deck.card_count} {deck.card_count === 1 ? 'card' : 'cards'}</span></div></div>
             <h2><button className="deck-title" onClick={() => onOpenDeck(deck.id)}>{deck.name}</button></h2>
             <p className="deck-description">{deck.description || 'A fresh space for something worth remembering.'}</p>
-            <div className="deck-footer"><button className="text-button open-deck" onClick={() => onOpenDeck(deck.id)} aria-label={`Open ${deck.name}`}>Open deck <span aria-hidden="true">↗</span></button>
+            <div className="deck-footer"><div className="deck-footer-links"><button className="text-button open-deck" onClick={() => onOpenDeck(deck.id)} aria-label={`Open ${deck.name}`}>Open deck <span aria-hidden="true">↗</span></button>
+              <button className="text-button" onClick={() => onStudyDeck(deck.id)} aria-label={`Study ${deck.name}`}>Study</button></div>
               <div className="row-actions"><button className="text-button" disabled={deleting === deck.id} onClick={() => { setEditing(deck.id); setCreating(false); }} aria-label={`Edit ${deck.name}`}>Edit</button>
                 <button className="text-button danger" disabled={busy} onClick={() => { setDeleting(deck.id); setDeleteError(''); }} aria-label={`Delete ${deck.name}`}>Delete</button></div></div>
             {deleting === deck.id && <div className="delete-confirmation" role="group" aria-label={`Confirm deleting ${deck.name}`}>
