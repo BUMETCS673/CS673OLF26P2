@@ -279,7 +279,8 @@ Rules 1–9 from the Iteration 1 and Lab 3 plans still apply. Five more:
 13. **No new packages and no schema changes.** That means component tests use React Testing
     Library's `fireEvent`, since `user-event` isn't installed. If you find yourself writing a
     migration, stop and ask in the channel: that's the review-history table, which is
-    [out of scope](#out-of-scope).
+    [out of scope](#out-of-scope). The one exception is test tooling that never ships to
+    users, like `@vitest/coverage-v8` for the CI coverage gate.
 14. **Every page's look comes from `styles.css`.** Use the [style guide](#style-guide)'s tokens
     and shared classes. No hex colors, font names, or one-off buttons anywhere else: a page
     stylesheet like `study.css` or `ws4.css` holds layout, and reaches for `var(--color-…)` when
