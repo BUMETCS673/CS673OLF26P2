@@ -13,11 +13,12 @@ import CardRow from '../src/components/CardRow.jsx';
 afterEach(cleanup);
 
 const card = { id: 7, deck_id: 3, front: 'la biblioteca', back: 'the library' };
+const NOW = Date.parse('2026-10-01T14:00:00Z');
 
 function renderRow(props = {}) {
   return render(
     <ul>
-      <CardRow card={card} index={0} onSave={vi.fn()} onDelete={vi.fn()} {...props} />
+      <CardRow card={card} index={0} onSave={vi.fn()} onDelete={vi.fn()} now={NOW} {...props} />
     </ul>,
   );
 }
@@ -37,4 +38,18 @@ test('clicking Delete asks for confirmation before deleting anything', () => {
 
   expect(screen.getByRole('group', { name: 'Confirm deleting card 1' })).toBeTruthy();
   expect(onDelete).not.toHaveBeenCalled();
+});
+
+// F4: the schedule badge. CardRow takes `now` so every row on the page agrees.
+test('a review card due in 25 days shows "Review · in 25d"', () => {
+  const due = new Date(NOW + 25 * 86_400 * 1000).toISOString();
+  renderRow({ card: { ...card, state: 'review', due_at: due } });
+
+  expect(screen.getByText('Review · in 25d').className).toBe('badge badge-blue');
+});
+
+test('a new card shows "New"', () => {
+  renderRow({ card: { ...card, state: 'new', due_at: null } });
+
+  expect(screen.getByText('New')).toBeTruthy();
 });
