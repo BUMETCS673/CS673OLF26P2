@@ -5,6 +5,15 @@
  * clean without App.jsx having to know which route is which.
  */
 
+/*
+ * Step 0c: the design system's class names on the wordmark and the Sign out button.
+ * AI Utilization: ~100% of those edits
+ * AI Tools Used: Claude Code (Claude Opus 5.5)
+ * AI-Assisted Activities:
+ *   Restyling onto the shared design system
+ * Human role: plan approval, code review, and hands-on testing by Miles Cameron.
+ */
+
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
@@ -29,13 +38,13 @@ export default function Header() {
 
   return (
     <header className="app-header">
-      <Link className="app-brand" to="/decks">
+      <Link className="wordmark" to="/decks">
         Cadence
       </Link>
       <div className="app-header-user">
         {/* display_name is optional in the contract, so fall back to the email. */}
         <span className="app-header-name">{user.display_name || user.email}</span>
-        <button type="button" onClick={handleLogout} disabled={leaving}>
+        <button type="button" className="button ghost" onClick={handleLogout} disabled={leaving}>
           {leaving ? "Signing out…" : "Sign out"}
         </button>
       </div>

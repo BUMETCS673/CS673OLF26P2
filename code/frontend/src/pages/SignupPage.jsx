@@ -5,6 +5,16 @@
  * so this goes straight to the deck list rather than bouncing through the login form.
  */
 
+/*
+ * Step 0c: the wordmark, and the design system's class names on the error message
+ * and the Create account button.
+ * AI Utilization: ~100% of those edits
+ * AI Tools Used: Claude Code (Claude Opus 5.5)
+ * AI-Assisted Activities:
+ *   Restyling onto the shared design system
+ * Human role: plan approval, code review, and hands-on testing by Miles Cameron.
+ */
+
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
@@ -65,11 +75,12 @@ export default function SignupPage() {
 
   return (
     <main className="auth-page">
+      <p className="wordmark">Cadence</p>
       <form className="auth-card" onSubmit={handleSubmit} noValidate>
         <h1>Create your account</h1>
 
         {formError && (
-          <p className="form-error" role="alert">
+          <p className="error-message" role="alert">
             {formError}
           </p>
         )}
@@ -122,7 +133,7 @@ export default function SignupPage() {
           <p className="field-hint">At least {MIN_PASSWORD_LENGTH} characters.</p>
         )}
 
-        <button type="submit" disabled={submitting}>
+        <button className="button primary" type="submit" disabled={submitting}>
           {submitting ? "Creating account…" : "Create account"}
         </button>
 

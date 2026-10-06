@@ -3,6 +3,13 @@
 WS1 and WS2 test their endpoints in test_auth.py, test_decks.py, and test_cards.py.
 """
 
+# B1: the deck count in test_seed_is_safe_to_run_twice, now that there are two.
+# AI Utilization: ~100% of that change
+# AI Tools Used: Claude Code (Claude Opus 5.5)
+# AI-Assisted Activities:
+#   Unit test update
+# Human role: plan approval, code review, and hands-on testing by Miles Cameron.
+
 import json
 
 import pytest
@@ -199,7 +206,9 @@ def test_card_json_matches_the_contract(make_user, make_deck):
 
     payload = deck.cards[0].to_dict()
 
-    assert set(payload) == {"id", "deck_id", "front", "back", "created_at", "updated_at"}
+    assert set(payload) == {
+        "id", "deck_id", "front", "back", "state", "due_at", "created_at", "updated_at",
+    }
     assert payload["deck_id"] == deck.id
 
 
@@ -232,4 +241,4 @@ def test_seed_is_safe_to_run_twice(app, db):
     runner.invoke(seed_command)
 
     assert User.query.filter_by(email=DEMO_EMAIL).count() == 1
-    assert Deck.query.count() == 1
+    assert Deck.query.count() == 2  # Spanish 101 and Travel Spanish (B1)

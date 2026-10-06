@@ -111,3 +111,21 @@ def make_deck(db):
         return deck
 
     return _make_deck
+
+
+@pytest.fixture
+def make_card(db):
+    """Create a card in any scheduling state (Lab 3, Step 0a).
+
+        make_card(deck, state="review", due_at=utcnow() - timedelta(days=3), interval_days=10)
+
+    Any of the six scheduling fields can be passed; the rest keep the model's defaults.
+    """
+
+    def _make_card(deck, front="q", back="a", **schedule):
+        card = Card(deck=deck, front=front, back=back, **schedule)
+        db.session.add(card)
+        db.session.commit()
+        return card
+
+    return _make_card

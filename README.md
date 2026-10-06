@@ -16,11 +16,11 @@ It's aimed at people who need to retain a lot of discrete facts: students in med
 
 ## Features
 
-- **AI deck generation** — supply a topic prompt or source material and review the cards the model proposes, accepting, editing, or discarding each one
-- **Deck management** — create, organize, edit, and delete decks and cards at any time
-- **Spaced repetition scheduling** — per-card performance tracking that schedules each review at the interval where reinforcement is most valuable
-- **Multiple review formats** — reveal-and-grade recall, free-text entry, and multiple choice
-- **Persistent history** — decks, cards, and study progress survive across sessions
+- **Deck management** — create, edit, and delete decks and cards
+- **Study mode** — study a deck one card at a time: reveal the answer, then rate it Again, Hard, Good, or Easy, with each button showing when the card would come back
+- **Spaced repetition scheduling** — Anki's default algorithm schedules each card's next review, and every deck shows what's due
+- **Saved progress** — decks, cards, and each card's schedule are stored in the database and survive refreshes and sign-outs
+- **Planned** — AI deck generation (Iteration 3); typed answers and multiple choice if time allows
 
 ## Tech Stack
 
@@ -31,7 +31,7 @@ React + Vite · Python + Flask + SQLAlchemy · PostgreSQL · Docker · GitHub Ac
 ### Prerequisites
 
 - Docker and Docker Compose
-- _Node and Python versions TBD_
+- Python 3.12 and Node 22, only to run the tests outside Docker
 
 ### Setup
 
@@ -45,7 +45,7 @@ docker compose up --build
 Once the containers are up, create the tables and add some demo data:
 
 ```bash
-docker compose exec backend flask init-db
+docker compose exec backend flask db upgrade
 docker compose exec backend flask seed     # demo@cadence.local / demo1234
 ```
 
@@ -69,24 +69,31 @@ pip install -r requirements.txt
 pytest
 ```
 
+The frontend tests use Vitest:
+
+```bash
+docker compose exec frontend npm test
+```
+
 ## Repository Structure
 
 ```
-docs/     Project documentation — SPPP, SDD, STD, meeting minutes,
+doc/      Project documentation — SPPP, SDD, STD, meeting minutes,
           progress reports, iteration presentations
 code/
+  plans/      Team implementation plans, one per iteration or lab
   frontend/   React client
   backend/    Python API service
 ```
 
 ## Contributing
 
-Branch from `develop` (`feat/`, `fix/`, `chore/`, `doc/`), open a pull request back into `develop`, and merge once CI passes and a teammate has reviewed it. `develop` is released to `main` after validation.
+Branch from `develop` (`feat/`, `fix/`, `test/`, `ci/`, `chore/`, `doc/`), open a pull request back into `develop`, and merge once CI passes and a teammate has reviewed it. `develop` is released to `main` after validation.
 
 ## License
 
-_TBD._ If we build on Anki's codebase, its AGPL-3.0 terms apply to our work; if we implement scheduling independently, we're free to choose. Decision to be made in Iteration 1 design.
+_TBD._ The scheduler was written from Anki's documented rules rather than built on its AGPL-3.0 code, so the choice of license is ours; we haven't picked one yet.
 
 ---
 
-<sub>Built for CS673 Software Engineering, Boston University Metropolitan College, Fall 1 2026 — Team 2: Miles (team lead), Nurzat (requirements), Paul (frontend), Victor (backend), Duc (config/DevOps), Osasenaga (QA).</sub>
+<sub>Built for CS673 Software Engineering, Boston University Metropolitan College, Fall 1 2026 — Team 2: Miles (team lead, security), Nurzat (requirements), Duc (config/DevOps, design & implementation), Osasenaga (QA).</sub>

@@ -1,9 +1,7 @@
 // ESLint 9 flat config. Named .mjs because package.json has no "type": "module".
 //
-// The CI job installs eslint and these plugins with `npm install --no-save`, so they are
-// deliberately absent from package.json: adding them would require regenerating
-// package-lock.json, and `npm ci` (used here and in the Dockerfile) fails when the two
-// disagree. Fold them into devDependencies the next time someone runs npm locally.
+// eslint and these plugins are devDependencies, so `npx eslint .` works on your machine
+// after `npm ci`, the same as in CI.
 
 import js from "@eslint/js";
 import globals from "globals";
@@ -68,15 +66,28 @@ export default [
   },
 
   {
-    // Node's built-in test runner, not a browser: different globals, and test files are
-    // allowed to print.
-    files: ["tests/**/*.{js,mjs}", "*.config.{js,mjs}"],
+    // Tests run under Vitest in Node (component tests in a simulated browser), and config
+    // files run under Node: different globals, and both are allowed to print. Component
+    // tests are .jsx, so JSX parsing and the two rules that let eslint see JSX as a use of
+    // an import are needed here too -- without this block eslint silently skips them.
+    files: ["tests/**/*.{js,mjs,jsx}", "*.config.{js,mjs}"],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: "module",
       globals: { ...globals.node },
+      parserOptions: {
+        ecmaFeatures: { jsx: true },
+      },
+    },
+    plugins: {
+      react,
+    },
+    settings: {
+      react: { version: "detect" },
     },
     rules: {
+      "react/jsx-uses-vars": "error",
+      "react/jsx-uses-react": "error",
       "no-console": "off",
     },
   },

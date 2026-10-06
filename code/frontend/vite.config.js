@@ -26,5 +26,26 @@ export default defineConfig({
       // native ones do; without polling, saving a file doesn't reload the page.
       usePolling: true
     }
+  },
+  test: {
+    // Read only when coverage is on, which CI turns on with --coverage.enabled; the v8
+    // provider is the @vitest/coverage-v8 devDependency. See the "Unit tests with
+    // coverage" step in .github/workflows/ci.yml.
+    //
+    // AI Utilization: ~100% of this block
+    // AI Tools Used: Claude Code (Claude Opus 5.5)
+    // AI-Assisted Activities:
+    //   CI configuration
+    // Human role: direction and review by Duc Anh Nguyen.
+    coverage: {
+      provider: "v8",
+      include: ["src/**"],
+      reporter: ["text", "json-summary"],
+      thresholds: {
+        // Same floor as the backend's --cov-fail-under=90.
+        lines: 90,
+        statements: 90
+      }
+    }
   }
 });

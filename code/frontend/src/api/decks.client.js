@@ -1,29 +1,19 @@
-import { get, post, patch, del } from './client.js';
+/*
+ * Step 0b: moved the transport and the 401 handling from here to request.js.
+ * AI Utilization: ~100% of that refactor
+ * AI Tools Used: Claude Code (Claude Opus 5.5)
+ * AI-Assisted Activities:
+ *   Refactoring
+ * Human role: plan approval, code review, and hands-on testing by Miles Cameron.
+ */
+
 import { createDecksApi } from './decks.js';
+import { requestApi, withSessionExpiry } from './request.js';
 
-// WS3 owns fetch, cookies, serialization and errors. Its helpers add /api.
-function requestDeck(path, { method = 'GET', body } = {}) {
-  const relativePath = path.slice('/api'.length);
-  switch (method) {
-    case 'GET': return get(relativePath);
-    case 'POST': return post(relativePath, body);
-    case 'PATCH': return patch(relativePath, body);
-    case 'DELETE': return del(relativePath);
-    default: throw new Error(`Unsupported deck request method: ${method}`);
-  }
-}
+// WS4's nine operations on WS3's client. The transport and the 401 handling live in
+// request.js, which study.client.js shares.
+export const decksApi = createDecksApi(requestApi);
 
-export const decksApi = createDecksApi(requestDeck);
-
-// Handle expiration for every operation, including saves caught inside forms.
-// Re-throw so a failed mutation never continues along its success path.
 export function createAuthenticatedDecksApi(onUnauthorized) {
-  return createDecksApi(async (path, options) => {
-    try {
-      return await requestDeck(path, options);
-    } catch (error) {
-      if (error.code === 'unauthorized' || error.status === 401) onUnauthorized();
-      throw error;
-    }
-  });
+  return createDecksApi(withSessionExpiry(requestApi, onUnauthorized));
 }
