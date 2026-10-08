@@ -10,9 +10,9 @@ Human role: requirements, every decision in "Decisions we made", and plan approv
 Miles Cameron.
 -->
 
-**Status:** Approved as first draft, finalization pending team approval. Every **Owner** cell
-is blank on purpose; owners are assigned in a follow-up change.
-**Dates:** Thu 8 Oct → submission Tue 13 Oct
+**Status:** Approved as first draft, finalization pending team approval. Owners assigned
+8 Oct.
+**Dates:** Thu 8 Oct → code freeze Sun 11 Oct → documentation Mon 12 Oct → due early Tue 13 Oct
 **Team:** Miles, Duc, Nurzat, Von
 **Builds on:** [ITERATION_1_PLAN.md](ITERATION_1_PLAN.md), [LAB_3_PLAN.md](LAB_3_PLAN.md) and
 [FINALIZE_ITERATION_2_PLAN.md](FINALIZE_ITERATION_2_PLAN.md)
@@ -88,23 +88,23 @@ iteration 3 test cases (Doc-6) are written from them.
 
 | # | Task | Side | Owner | Depends on | Size | Demo needs it? |
 | --- | --- | --- | --- | --- | --- | --- |
-| **0a** | **Backend foundation**: migration 0003, the models, settings, error codes, the AI interface with a working stand-in, both blueprints registered, deploy config | backend | | nothing | M, 4–5 h | 🔴 blocks B1–B4 |
-| **0b** | **Frontend foundation**: the generate API client, the route, `GeneratePage` with its state and placeholder children, `AiBadge` | frontend | | nothing | M, 3–4 h | 🔴 blocks F1–F3 |
-| **B1** | **Prompt builder and cleanup**: the rules Gemini gets, word for word, and the checks on what comes back | backend | | 0a | M, 4 h | 🔴 |
-| **B2** | **Gemini provider**: the real call, error mapping, and `flask ai-smoke` | backend | | 0a; P1 for the smoke run | M, 4 h | 🔴 |
-| **B3** | **Generate endpoint**: `POST /api/decks/:id/generate` | backend | | 0a; merges after B1 | L, 6 h | 🔴 |
-| **B4** | **Accept and reject endpoints** | backend | | 0a | M, 4 h | 🔴 |
-| **F1** | **Generate form**: the three modes, the count, the file picker | frontend | | 0b | M, 5 h | 🔴 |
-| **F2** | **Review list**: Accept, Reject, Accept all, Reject all | frontend | | 0b | M, 4 h | 🔴 |
-| **F3** | **Deck button and AI badges** | frontend | | 0b | S, 2 h | 🔴 |
-| **F4** | **Answer checker**: `checkTypedAnswer()` | frontend | | nothing | S, 2 h | 🔴 |
-| **F5** | **Typed-mode building blocks**: the reducer change, the suggested rating, the mode toggle | frontend | | nothing | M, 4 h | 🔴 |
-| **F6** | **Typed study flow**: typed mode on the study page | frontend | | F4, F5 | M, 5 h | 🔴 |
-| **P1** | **Gemini key and model** | setup | | nothing | S, 1 h | 🔴 |
-| **P2** | **Render account and live site** | setup | | nothing; checkpoint 2 for its day-4 release | M, 2–3 h | 🔴 |
-| **P3** | **README and user stories** | docs | | P2, for the URL | S, 2 h | 🟡 |
-| **P4** | **Release and live check** | QA | | everything above | M, 3 h | 🔴 |
-| **Doc-1 to Doc-10** | The ten documentation deliverables | docs | | see [Documentation tasks](#documentation-tasks) | | |
+| **0a** | **Backend foundation**: migration 0003, the models, settings, error codes, the AI interface with a working stand-in, both blueprints registered, deploy config | backend | Miles | nothing | M, 4–5 h | 🔴 blocks B1–B4 |
+| **0b** | **Frontend foundation**: the generate API client, the route, `GeneratePage` with its state and placeholder children, `AiBadge` | frontend | Miles | nothing | M, 3–4 h | 🔴 blocks F1–F3 |
+| **B1** | **Prompt builder and cleanup**: the rules Gemini gets, word for word, and the checks on what comes back | backend | Duc | 0a | M, 4 h | 🔴 |
+| **B2** | **Gemini provider**: the real call, error mapping, and `flask ai-smoke` | backend | Miles | 0a; P1 for the smoke run | M, 4 h | 🔴 |
+| **B3** | **Generate endpoint**: `POST /api/decks/:id/generate` | backend | Duc | 0a; merges after B1 | L, 6 h | 🔴 |
+| **B4** | **Accept and reject endpoints** | backend | Von | 0a | M, 4 h | 🔴 |
+| **F1** | **Generate form**: the three modes, the count, the file picker | frontend | Miles | 0b | M, 5 h | 🔴 |
+| **F2** | **Review list**: Accept, Reject, Accept all, Reject all | frontend | Duc | 0b | M, 4 h | 🔴 |
+| **F3** | **Deck button and AI badges** | frontend | Von | 0b | S, 2 h | 🔴 |
+| **F4** | **Answer checker**: `checkTypedAnswer()` | frontend | Nurzat | nothing | S, 2 h | 🔴 |
+| **F5** | **Typed-mode building blocks**: the reducer change, the suggested rating, the mode toggle | frontend | Nurzat | nothing | M, 4 h | 🔴 |
+| **F6** | **Typed study flow**: typed mode on the study page | frontend | Nurzat | F4, F5 | M, 5 h | 🔴 |
+| **P1** | **Gemini key and model** | setup | Miles | nothing | S, 1 h | 🔴 |
+| **P2** | **Render account and live site** | setup | Duc | nothing; checkpoint 2 for its early release | M, 2–3 h | 🔴 |
+| **P3** | **README and user stories** | docs | Miles | P2, for the URL | S, 2 h | 🟡 |
+| **P4** | **Release and live check** | QA | All | everything above | M, 3 h | 🔴 |
+| **Doc-1 to Doc-10** | The ten documentation deliverables | docs | see [Documentation tasks](#documentation-tasks) | see [Documentation tasks](#documentation-tasks) | | |
 
 🔴 means the demo or the submission doesn't work without it. 🟡 means it's required but the demo
 runs without it.
@@ -123,11 +123,11 @@ How the tasks wait on each other:
      └── F3   │
 F4 ──┐        │
 F5 ──┴── F6   │   F4 and F5 need nothing; F6 needs both
-P1, P2        │   day 1, no code needed
+P1, P2        │   can start now, no code needed
 everything ───┴── P4 ──── Doc-6 results, Doc-7 to Doc-10
 ```
 
-The two foundation tasks are the only blockers, which is why they land on day 1. After that, four
+The two foundation tasks are the only blockers, which is why they land first, on Thu 8 Oct. After that, four
 tracks run side by side: the AI backend (B1–B4), the AI screens (F1–F3), typed answers (F4–F6), and
 setup (P1–P3). They meet only through the contracts in this plan.
 
@@ -714,7 +714,7 @@ def clean_drafts(raw: object, count: int, existing_fronts: Iterable[str]) -> lis
     """What the provider returned, made safe to show. Raises AIUnavailable when `raw` isn't a list."""
 ```
 
-The stubs let B3 import all three from day 2, and patch them in its tests until B1 merges. B3
+The stubs let B3 import all three from the start, and patch them in its tests until B1 merges. B3
 calls the provider as `get_provider().generate_cards(prompt)`, and its tests patch
 `app.api.generate.get_provider`, the name where it's used.
 
@@ -1031,11 +1031,10 @@ In Python it goes right after the module docstring, and in a test file right aft
 
 Test-first, as before: name each test after its acceptance row, so the list of tests reads like
 the table. Every new file gets an [AI-usage header](#ai-usage-headers) (rule 23).
-The **Owner** lines stay blank until assignments are made.
 
 ### Step 0a — Backend foundation 🔴 blocks B1–B4
 
-**Owner:** · **Roughly:** 4–5 hours · **After:** nothing
+**Owner:** Miles · **Roughly:** 4–5 hours · **After:** nothing
 **Files:** everything 0a owns in [File ownership](#file-ownership), and
 `backend/tests/test_ai_foundation.py`
 
@@ -1099,7 +1098,7 @@ here.
 
 ### Step 0b — Frontend foundation 🔴 blocks F1–F3
 
-**Owner:** · **Roughly:** 3–4 hours · **After:** nothing
+**Owner:** Miles · **Roughly:** 3–4 hours · **After:** nothing
 **Files:** everything 0b owns in [File ownership](#file-ownership), and
 `tests/generate-api.test.mjs`, `tests/generate-client.test.mjs`, `tests/GeneratePage.test.jsx`,
 `tests/AiBadge.test.jsx`, `tests/GenerateForm.test.jsx`, `tests/CandidateList.test.jsx`
@@ -1148,7 +1147,7 @@ here.
 
 ### B1 — Prompt builder and cleanup
 
-**Owner:** · **Roughly:** 4 hours · **After:** 0a
+**Owner:** Duc · **Roughly:** 4 hours · **After:** 0a
 **Files:** `backend/app/ai/prompts.py`, `backend/app/ai/cleanup.py`,
 `backend/tests/test_ai_prompts.py`, `backend/tests/test_ai_cleanup.py`
 
@@ -1192,7 +1191,7 @@ here.
 
 ### B2 — Gemini provider
 
-**Owner:** · **Roughly:** 4 hours · **After:** 0a. The smoke run needs a key (P1)
+**Owner:** Miles · **Roughly:** 4 hours · **After:** 0a. The smoke run needs a key (P1)
 **Files:** `backend/app/ai/provider.py` (only the body of `GeminiProvider.generate_cards()` and
 private helpers), `backend/app/ai/cli.py`, `backend/tests/test_gemini_provider.py`,
 `backend/tests/test_ai_cli.py`
@@ -1263,7 +1262,7 @@ model and the time, never the key.
 
 ### B3 — Generate endpoint
 
-**Owner:** · **Roughly:** 6 hours · **After:** 0a. Merges after B1
+**Owner:** Duc · **Roughly:** 6 hours · **After:** 0a. Merges after B1
 **Files:** `backend/app/api/generate.py`, `backend/tests/test_generate.py`
 
 > *As a learner, I want to ask for cards from a topic, a file, or my own deck, so that I can build
@@ -1343,7 +1342,7 @@ returns a Generation with three pending cards.
 
 ### B4 — Accept and reject endpoints
 
-**Owner:** · **Roughly:** 4 hours · **After:** 0a
+**Owner:** Von · **Roughly:** 4 hours · **After:** 0a
 **Files:** `backend/app/api/generations.py`, `backend/tests/test_generations.py`,
 `backend/tests/test_cards.py` (one test)
 
@@ -1391,7 +1390,7 @@ with `"origin": "ai"`.
 
 ### F1 — Generate form
 
-**Owner:** · **Roughly:** 5 hours · **After:** 0b
+**Owner:** Miles · **Roughly:** 5 hours · **After:** 0b
 **Files:** `src/components/generate/GenerateForm.jsx`, `tests/GenerateForm.test.jsx`, the F1
 section of `src/generate.css`
 
@@ -1444,7 +1443,7 @@ produces a review list.
 
 ### F2 — Review list
 
-**Owner:** · **Roughly:** 4 hours · **After:** 0b
+**Owner:** Duc · **Roughly:** 4 hours · **After:** 0b
 **Files:** `src/components/generate/CandidateList.jsx`, `tests/CandidateList.test.jsx`, the F2
 section of `src/generate.css`
 
@@ -1483,7 +1482,7 @@ leaves two new cards in the deck.
 
 ### F3 — Deck button and AI badges
 
-**Owner:** · **Roughly:** 2 hours · **After:** 0b
+**Owner:** Von · **Roughly:** 2 hours · **After:** 0b
 **Files:** `src/pages/DeckDetailPage.jsx`, `src/components/CardRow.jsx`,
 `src/components/study/StudyCard.jsx`, `tests/DeckDetailView.test.jsx`,
 `tests/DeckDetailPage.test.jsx`, `tests/CardRow.test.jsx`, `tests/StudyCard.test.jsx`
@@ -1518,7 +1517,7 @@ on the deck page and in study.
 
 ### F4 — Answer checker
 
-**Owner:** · **Roughly:** 2 hours · **After:** nothing
+**Owner:** Nurzat · **Roughly:** 2 hours · **After:** nothing
 **Files:** `src/study/typedAnswer.js`, `tests/typedAnswer.test.mjs`
 
 > *As a learner who wants to test exact recall, I want my typed answer checked, so that I get an
@@ -1534,7 +1533,7 @@ on the deck page and in study.
 
 ### F5 — Typed-mode building blocks
 
-**Owner:** · **Roughly:** 4 hours · **After:** nothing
+**Owner:** Nurzat · **Roughly:** 4 hours · **After:** nothing
 **Files:** `src/study/session.js`, `src/components/study/RatingButtons.jsx`,
 `src/components/study/StudyModeToggle.jsx`, `tests/session.test.mjs`,
 `tests/RatingButtons.test.jsx`, `tests/StudyModeToggle.test.jsx`, an F5 section appended to
@@ -1573,7 +1572,7 @@ on the deck page and in study.
 
 ### F6 — Typed study flow
 
-**Owner:** · **Roughly:** 5 hours · **After:** F4 and F5
+**Owner:** Nurzat · **Roughly:** 5 hours · **After:** F4 and F5
 **Files:** `src/pages/StudyPage.jsx`, `src/components/study/TypedAnswer.jsx`,
 `tests/StudyPage.test.jsx`, `tests/TypedAnswer.test.jsx`, an F6 section appended to
 `src/study.css`
@@ -1636,7 +1635,7 @@ be studied in typed mode from the first card to the summary.
 
 ### P1 — Gemini key and model
 
-**Owner:** · **Roughly:** 1 hour, day 1 · **After:** nothing
+**Owner:** Miles · **Roughly:** 1 hour, at the start · **After:** nothing
 **Files:** none, except that P1 may change the default model name in `config.py` and
 `.env.example` (one line each), once 0a has merged
 
@@ -1664,11 +1663,11 @@ has printed a real card.
 
 ### P2 — Render account and live site
 
-**Owner:** · **Roughly:** 2–3 hours, mostly day 1 · **After:** nothing for steps 1–7;
+**Owner:** Duc · **Roughly:** 2–3 hours, mostly at the start · **After:** nothing for steps 1–7;
 checkpoint 2 for step 8
 **Files:** none, except `render.yaml` if step 3 needs its fallback
 
-Do this on day 1 with today's `main`, before any Iteration 3 code exists. Deploy problems are
+Do this first, with today's `main`, before any Iteration 3 code exists. Deploy problems are
 cheapest to find when nothing else is changing. Follow `doc/CICD.md`, "Deploy targets: one-time
 Render setup":
 
@@ -1687,20 +1686,20 @@ Render setup":
 7. **Add the AI settings** in the backend's **Environment** tab: `AI_PROVIDER=gemini`, P1's
    `GEMINI_API_KEY`, and P1's `GEMINI_MODEL`. Settings marked `sync: false` are never filled in
    from `render.yaml`, so this step is always by hand.
-8. **Day 4, the first release.** Once checkpoint 2 passes, open a `develop` → `main` release PR
+8. **The early release.** Once checkpoint 2 passes, before the code freeze, open a `develop` → `main` release PR
    and merge it when it's green and reviewed. Then check the live site: it loads, migration 0003
    ran, and one generation works with the real model. This is the deploy rehearsal: anything
-   Render-specific (the migration, nginx's upload limit, the new package) breaks here, a day
-   before P4, not on it.
+   Render-specific (the migration, nginx's upload limit, the new package) breaks here, before
+   P4, not during it.
 
 **Done when:** the site is live at a public URL, the database's creation date is posted, the AI
-settings are in place, and the day-4 release is running on the live site.
+settings are in place, and the early release is running on the live site.
 
 ---
 
 ### P3 — README and user stories
 
-**Owner:** · **Roughly:** 2 hours · **After:** P2, for the URL
+**Owner:** Miles · **Roughly:** 2 hours · **After:** P2, for the URL
 **Files:** `README.md`, `code/plans/LAB_3_USER_STORIES.md`,
 `code/plans/ITERATION_3_USER_STORIES.md`
 
@@ -1730,7 +1729,7 @@ settings are in place, and the day-4 release is running on the live site.
 
 ### P4 — Release and live check
 
-**Owner:** · **Roughly:** 3 hours · **After:** everything above
+**Owner:** All · **Roughly:** 3 hours · **After:** everything above
 **Files:** none; issues for anything that fails
 
 1. Run [the walkthrough](#the-walkthrough) locally on a fresh database with the stand-in. Every
@@ -1759,16 +1758,16 @@ are updated in place; new ones follow the existing names.
 
 | ID | Deliverable | File | What's new this iteration | Can start | Owner |
 | --- | --- | --- | --- | --- | --- |
-| Doc-1 | Meeting minutes | `doc/CS673_MeetingMinutes_team2.docx` | Each iteration 3 meeting: date, attendees, decisions (A1–A18), action items | Now | |
-| Doc-2 | Progress report | `doc/CS673_ProgressReport_team2.xlsx` | This plan's tasks, owners, status, estimated and actual hours; test counts and coverage from CI's coverage artifacts; the AI-usage share per task, from the headers | Once owners are assigned | |
-| Doc-3 | SPPP | `doc/CS673_SPPP_team2.docx` | Scope: AI generation, typed answers, the live site, multiple choice cut. The AI provider and the no-billing rule. Deployment. The iteration 3 schedule and roles | Now | |
-| Doc-4 | SPPP risk management | `doc/CS673_SPPP_RiskManagement_team2.xlsx` | The rows of [Things that could go wrong](#things-that-could-go-wrong), with likelihood, impact, mitigation, and owner | Now | |
-| Doc-5 | SDD | `doc/CS673_SDD_team2.docx` | The architecture diagram, the data model (`ai_generations`, `cards.origin`), the API (C1–C5), the AI wrapper and its rules (C6, the prompt), typed grading (C8), and deployment | Now | |
-| Doc-6 | STD | `doc/CS673_STD_team2.docx` | Test cases for acceptance criteria 1–8, a summary of each task's automated tests, and P4's results | Cases now; results after P4 | |
-| Doc-7 | Presentation slides | `doc/CS673_presentation3_team2.pptx` | The features, the architecture, the decisions, and what we learned | After P4 | |
-| Doc-8 | Presentation video | `demo/CS673_presentation3_team2.md`, a link to the recording, like iteration 2's | A recording of Doc-7 | After Doc-7 | |
-| Doc-9 | Demo video | `demo/CS673_iteration3demo_team2.mp4` | Both features on the live site with the real model, following the walkthrough | After P4 | |
-| Doc-10 | Code walkthrough video (new) | In `demo/`, with the name agreed in the channel | A tour of the code: one generation from `GenerateForm` through `generate.py`, `prompts.py`, `GeminiProvider` and `cleanup.py` to `ai_generations`, then `CandidateList` and the accept route setting `origin`; the answer checker and the reducer change; how the tests and CI keep it honest. About 10 minutes | After the code merges | |
+| Doc-1 | Meeting minutes | `doc/CS673_MeetingMinutes_team2.docx` | Each iteration 3 meeting: date, attendees, decisions (A1–A18), action items | Now | Nurzat |
+| Doc-2 | Progress report | `doc/CS673_ProgressReport_team2.xlsx` | This plan's tasks, owners, status, estimated and actual hours; test counts and coverage from CI's coverage artifacts; the AI-usage share per task, from the headers | Once owners are assigned | All |
+| Doc-3 | SPPP | `doc/CS673_SPPP_team2.docx` | Scope: AI generation, typed answers, the live site, multiple choice cut. The AI provider and the no-billing rule. Deployment. The iteration 3 schedule and roles | Now | Duc |
+| Doc-4 | SPPP risk management | `doc/CS673_SPPP_RiskManagement_team2.xlsx` | The rows of [Things that could go wrong](#things-that-could-go-wrong), with likelihood, impact, mitigation, and owner | Now | Von |
+| Doc-5 | SDD | `doc/CS673_SDD_team2.docx` | The architecture diagram, the data model (`ai_generations`, `cards.origin`), the API (C1–C5), the AI wrapper and its rules (C6, the prompt), typed grading (C8), and deployment | Now | Miles |
+| Doc-6 | STD | `doc/CS673_STD_team2.docx` | Test cases for acceptance criteria 1–8, a summary of each task's automated tests, and P4's results | Cases now; results after P4 | Von |
+| Doc-7 | Presentation slides | `doc/CS673_presentation3_team2.pptx` | The features, the architecture, the decisions, and what we learned | After P4 | Nurzat |
+| Doc-8 | Presentation video | `demo/CS673_presentation3_team2.md`, a link to the recording, like iteration 2's | A recording of Doc-7 | After Doc-7 | All |
+| Doc-9 | Demo video | `demo/CS673_iteration3demo_team2.mp4` | Both features on the live site with the real model, following the walkthrough | After P4 | Miles |
+| Doc-10 | Code walkthrough video (new) | In `demo/`, with the name agreed in the channel | A tour of the whole app's code, all three iterations: the repo layout, sign-in, decks and cards, the scheduler and study session, AI generation (one request from `GenerateForm` through `generate.py`, `prompts.py`, `GeminiProvider` and `cleanup.py`, then the accept route setting `origin`), typed answers, and how the tests and CI keep it honest | After the code freeze | Duc |
 
 ---
 
@@ -1786,16 +1785,17 @@ One branch per task, off `develop`:
 
 Open a PR into `develop`, get one review, and merge as soon as it's green and reviewed.
 
-| When | What should be true |
-| --- | --- |
-| **Day 1, Thu 8 Oct** | Owners assigned. 🔴 0a and 0b merged by the end of the day. P1's limits and model posted. P2's site live with today's `main`. F4 and F5 can start at once. |
-| **Day 2, Fri 9 Oct** | F4 and F5 merged. B1, B2, B4, F1, F2 and F3 in review. |
-| **Day 3, Sat 10 Oct** | B1, B2, B4, F2 and F3 merged. Checkpoint 3: `ai-smoke` gets a real card. B3 and F6 in review. |
-| **Day 4, Sun 11 Oct** | B3, F1 and F6 merged. Checkpoint 2: the whole flow works locally on the stand-in. P2's first release to `main`, checked on the live site. P3 merged. **Code freeze at the end of the day.** |
-| **Day 5, Mon 12 Oct** | P4: the release, the live check, fixes. Doc-9 and Doc-10 recorded. Doc-6 results in. |
-| **Day 6, Tue 13 Oct** | Doc-7 and Doc-8, the remaining docs, and submission. |
+Only these dates are fixed. In between, each task merges when it's ready, in the order
+[Who's doing what](#whos-doing-what) allows.
 
-Doc-1 to Doc-5 run all week, alongside the code.
+| When | What |
+| --- | --- |
+| **Thu 8 Oct** | Miles implements 0a and 0b, so every other task can start from them. |
+| **Sun 11 Oct, end of day** | **Code freeze.** Everything is merged into `develop`. Anything not merged by then is cut, not squeezed in. |
+| **Mon 12 Oct** | Documentation day: P4's release and live check, and every document that needs the finished code (Doc-6 results, Doc-7 to Doc-10). |
+| **Early Tue 13 Oct** | Due. Plan as if Monday is the last working day. |
+
+Doc-1 to Doc-5 can run alongside the code at any time.
 
 ### Integration checkpoints
 
@@ -1855,20 +1855,20 @@ and step 14 is skipped.
 
 | Risk | What we do about it |
 | --- | --- |
-| Our free Gemini quota is too small for testing plus the demo | Everyone develops on the stand-in (A3). P1 measures the quota on day 1 and picks the model with the most room; teammates use their own keys to test. Record the demo video (Doc-9) on day 5, not at the last minute. |
+| Our free Gemini quota is too small for testing plus the demo | Everyone develops on the stand-in (A3). P1 measures the quota first and picks the model with the most room; teammates use their own keys to test. Record the demo video (Doc-9) on Monday, not at the last minute. |
 | Google's quota or service fails during the live presentation | Set `AI_PROVIDER=fake` on Render; the page keeps working with sample cards, and we say so. Doc-9 is the real-model fallback. |
 | A generation takes longer than 45 seconds | The provider gives up at 45 seconds, under nginx's 60, and the learner sees "Try again in a minute." Smaller counts and shorter files are faster. |
-| 0a or 0b slips | Everything else in its track waits. They're first on day 1, and they're small on purpose. F4, F5, P1 and P2 don't wait for either. |
+| 0a or 0b slips | Everything else in its track waits. Miles does them first, on Thu 8 Oct, and they're small on purpose. F4, F5, P1 and P2 don't wait for either. |
 | Someone needs a contract changed mid-week | Say so in the channel before writing code against the change. The contract owner updates this plan, and every task that uses it agrees. |
 | A JSON column change silently isn't saved | Rule 20, and B4's `expire_all()` test. |
 | nginx rejects uploads in production | 0a's `client_max_body_size 6m`. P4 uploads a real PDF on the live site. |
 | Render rejects `preDeployCommand` on the free tier | P2's step 3: the start-command fallback already written in `render.yaml`. |
-| Iteration 3's code breaks on its first deploy | P2's day-4 release is the rehearsal, a day before P4's final one. The live site keeps serving the last good version until a fix merges. |
+| Iteration 3's code breaks on its first deploy | P2's early release, before the code freeze, is the rehearsal for P4's final one. The live site keeps serving the last good version until a fix merges. |
 | Render deletes the free database | It lasts 30 days from creation. P2 records the date; created this week, it outlasts the course. |
 | The live site sleeps, and the first request is slow | Open it a few minutes before presenting or recording. |
 | The API key leaks into a commit or the channel | Delete the key in AI Studio at once, make a new one, and update Render. Never commit `.env`. |
 | Coverage dips under 90% | Every task adds tests for its own code; 0b's placeholders each have a render test. |
-| Merges pile up on day 4 | The code freeze is the end of day 4. Anything not merged by then is cut from the demo, not squeezed in. |
+| Merges pile up before the freeze | The code freeze is the end of Sunday. Anything not merged by then is cut from the demo, not squeezed in. |
 
 ---
 
@@ -1908,7 +1908,7 @@ that preceded this plan.
 - **A14 — Generated answers are 5 words or fewer,** under the full rule set in
   [the prompt](#the-prompt-what-gemini-receives), so generated cards suit typed mode.
 - **A15 — Two foundation tasks, with stubs and placeholders.** Like WS0 in Iteration 1, and Steps
-  0a and 0b since: shared files are edited once, on day 1, and every other branch starts from
+  0a and 0b since: shared files are edited once, first, and every other branch starts from
   them.
 - **A16 — One owner per file.** [File ownership](#file-ownership) is contract C10. Two CSS files
   take appended sections, and that's the only sharing.
@@ -1918,8 +1918,8 @@ that preceded this plan.
 - **A18 — One set of Render services, deployed from `main` only, released twice.** There's one
   free database per Render account, so there's no separate staging environment. The deploy hooks
   live in the `production` environment only, which is certain to work, because the services
-  follow `main`. To find deploy problems early anyway, P2 releases `develop` to `main` on day 4,
-  and P4 makes the final release on day 5.
+  follow `main`. To find deploy problems early anyway, P2 releases `develop` to `main` before
+  the code freeze, and P4 makes the final release on Monday.
 
 ## Out of scope
 
