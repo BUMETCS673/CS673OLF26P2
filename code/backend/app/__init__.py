@@ -14,6 +14,13 @@ gets attached here, and nowhere else.
 #   CLI command registration
 # Human role: plan approval, code review, and hands-on testing by Miles Cameron.
 
+# Iteration 3, Step 0a: registering ai_smoke_command, and ai_generations in init-db's message.
+# AI Utilization: ~100% of that change
+# AI Tools Used: Claude Code (Claude Opus 5.5)
+# AI-Assisted Activities:
+#   CLI command registration
+# Human role: plan approval, code review, and hands-on testing by Miles Cameron.
+
 import click
 from flask import Flask
 from flask.cli import with_appcontext
@@ -69,11 +76,13 @@ def _register_blueprints(app: Flask) -> None:
 
 
 def _register_cli(app: Flask) -> None:
+    from app.ai.cli import ai_smoke_command
     from app.seed import seed_command, time_travel_command
 
     app.cli.add_command(init_db_command)
     app.cli.add_command(seed_command)
     app.cli.add_command(time_travel_command)
+    app.cli.add_command(ai_smoke_command)
 
 
 @click.command("init-db")
@@ -96,4 +105,4 @@ def init_db_command():
     # `flask db upgrade` on this database would try to create the tables a second time
     # and fail, because Alembic would have no record of what has been applied.
     stamp()
-    click.echo("Tables created: users, decks, cards (stamped at head).")
+    click.echo("Tables created: users, decks, cards, ai_generations (stamped at head).")

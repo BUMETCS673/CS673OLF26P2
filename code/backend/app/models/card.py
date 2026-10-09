@@ -1,5 +1,12 @@
 """The `cards` table."""
 
+# Iteration 3, Step 0a: origin, generation_id, and "origin" in to_dict().
+# AI Utilization: ~100% of that change
+# AI Tools Used: Claude Code (Claude Opus 5.5)
+# AI-Assisted Activities:
+#   Data model development
+# Human role: plan approval, code review, and hands-on testing by Miles Cameron.
+
 from datetime import datetime, timedelta
 
 from app.extensions import db
@@ -33,6 +40,21 @@ class Card(TimestampMixin, db.Model):
     )
     step = db.Column(db.Integer, nullable=False, default=0, server_default="0")
     lapses = db.Column(db.Integer, nullable=False, default=0, server_default="0")
+
+    # "manual" or "ai". Only the accept endpoint sets "ai", and nothing ever changes it
+    # back, an edit included (rule 18, decision A10). Migration 0003's server default
+    # made every card that already existed "manual".
+    origin = db.Column(db.String(16), nullable=False, default="manual", server_default="manual")
+    # The batch an AI card came from. Internal: no response includes it.
+    generation_id = db.Column(
+        db.Integer,
+        # Named, because SQLite's batch mode needs a name to create it, and the name has to
+        # match the migration's for `flask db check` to pass.
+        db.ForeignKey(
+            "ai_generations.id", ondelete="SET NULL", name="fk_cards_generation_id_ai_generations"
+        ),
+        nullable=True,
+    )
 
     deck = db.relationship("Deck", back_populates="cards")
 
@@ -73,6 +95,7 @@ class Card(TimestampMixin, db.Model):
             "back": self.back,
             "state": self.state,
             "due_at": iso(self.due_at),
+            "origin": self.origin,
             "created_at": iso(self.created_at),
             "updated_at": iso(self.updated_at),
         }
