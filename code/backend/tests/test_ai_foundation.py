@@ -18,8 +18,10 @@ when B1 and B2 merge, and this file shouldn't break when they do.
 import pytest
 
 from app.ai.provider import (
+    DECLINED,
     NOT_CONFIGURED,
     QUOTA_USED_UP,
+    TOO_MUCH,
     UNAVAILABLE,
     AIRateLimited,
     AIUnavailable,
@@ -206,6 +208,15 @@ def test_ai_unavailable_defaults_to_the_outage_message():
     assert AIUnavailable(NOT_CONFIGURED).message == NOT_CONFIGURED
 
 
+def test_the_messages_that_dont_say_try_again():
+    """C5's two Gemini messages for failures a retry won't fix (A20)."""
+    assert TOO_MUCH == (
+        "That was too much to turn into cards at once. Ask for fewer cards or use a shorter file."
+    )
+    assert DECLINED == "Gemini declined to write cards from that material."
+    assert AIUnavailable(DECLINED).message == DECLINED
+
+
 def test_the_schema_caps_the_list_at_the_requested_count():
     schema = cards_schema(7)
 
@@ -266,6 +277,23 @@ def test_tests_run_with_the_plans_limits(app):
     can't change what B3's cap tests count to."""
     assert app.config["AI_MAX_CARDS"] == 25
     assert app.config["AI_DAILY_LIMIT"] == 10
+    assert app.config["AI_SITE_DAILY_LIMIT"] == 18
+
+
+def test_the_site_limit_defaults_to_18_and_reads_the_environment(monkeypatch):
+    """Under the free tier's 20 a day for gemini-3.5-flash (A19)."""
+    import importlib
+
+    import app.config
+
+    monkeypatch.delenv("AI_SITE_DAILY_LIMIT", raising=False)
+    assert importlib.reload(app.config).Config.AI_SITE_DAILY_LIMIT == 18
+
+    monkeypatch.setenv("AI_SITE_DAILY_LIMIT", "450")
+    assert importlib.reload(app.config).Config.AI_SITE_DAILY_LIMIT == 450
+
+    monkeypatch.delenv("AI_SITE_DAILY_LIMIT")
+    importlib.reload(app.config)
 
 
 @pytest.mark.parametrize(

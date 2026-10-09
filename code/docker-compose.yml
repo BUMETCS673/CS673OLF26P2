@@ -36,6 +36,7 @@ services:
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_MODEL: ${GEMINI_MODEL:-}
       AI_DAILY_LIMIT: ${AI_DAILY_LIMIT:-10}
+      AI_SITE_DAILY_LIMIT: ${AI_SITE_DAILY_LIMIT:-18}
     volumes:
       - ./backend:/app
     ports:
