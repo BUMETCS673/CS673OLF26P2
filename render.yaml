@@ -83,9 +83,11 @@ services:
     envVars:
       - key: PORT
         value: "8080"
-      # Where nginx forwards /api. Render's blueprint syntax can't prepend "http://" to a
-      # fromService value, so this is set once when the blueprint is created: use the
-      # backend's internal address, http://cadence-backend:5000. Keeping the browser on
-      # one origin is what makes the session cookie work without CORS (decision D4).
+      # Where nginx forwards /api, set once when the blueprint is created: the backend's
+      # public address, https://cadence-backend-....onrender.com, from its service page.
+      # Not the internal http://cadence-backend:5000: free web services can send
+      # private-network traffic but can't receive it (render.com/docs/private-network).
+      # Keeping the browser on one origin is what makes the session cookie work without
+      # CORS (decision D4).
       - key: API_ORIGIN
         sync: false

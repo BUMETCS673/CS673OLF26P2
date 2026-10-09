@@ -67,6 +67,11 @@ class Config:
     GEMINI_API_KEY = _env("GEMINI_API_KEY", "")  # secret: the environment only
     GEMINI_MODEL = _env("GEMINI_MODEL", "gemini-3.5-flash")
     AI_DAILY_LIMIT = int(_env("AI_DAILY_LIMIT", "10"))  # generations per user, rolling 24 h
+    # The whole site's generations, rolling 24 h. Google's free quota is per project: 20 a
+    # day for gemini-3.5-flash, so 18 leaves two for smoke checks on the same key. Best
+    # effort, since a call that fails at Google spends quota without saving a row (A19).
+    # Raise it if GEMINI_MODEL moves to Flash-Lite (500 a day).
+    AI_SITE_DAILY_LIMIT = int(_env("AI_SITE_DAILY_LIMIT", "18"))
     AI_MAX_CARDS = 25  # cards per generate request
 
 
@@ -80,7 +85,8 @@ class TestConfig(Config):
 
     # Rule 16: no test touches the network. The key is blanked too, so a real one in
     # someone's code/.env can't reach a test that switches AI_PROVIDER to "gemini". The
-    # limit is pinned so a value left in .env can't change what the cap tests count to.
+    # limits are pinned so a value left in .env can't change what the cap tests count to.
     AI_PROVIDER = "fake"
     GEMINI_API_KEY = ""
     AI_DAILY_LIMIT = 10
+    AI_SITE_DAILY_LIMIT = 18

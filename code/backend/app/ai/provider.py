@@ -42,6 +42,11 @@ QUOTA_USED_UP = (
     "If it still doesn't work, today's free limit is used up and resets overnight."
 )
 NOT_CONFIGURED = "AI generation isn't set up on this server."
+# Retrying won't help with either of these, so they don't say "try again" (A20). B2 raises them.
+TOO_MUCH = (
+    "That was too much to turn into cards at once. Ask for fewer cards or use a shorter file."
+)
+DECLINED = "Gemini declined to write cards from that material."
 
 
 @dataclass(frozen=True)
