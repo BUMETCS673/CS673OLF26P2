@@ -15,8 +15,8 @@ turns each into the matching error from C5.
 #   AI provider interface and stand-in
 # Human role: plan approval, code review, and hands-on testing by Miles Cameron.
 
-# B2: GeminiProvider.generate_cards() and its private helpers, _log_failure() and
-# _cards_from().
+# B2: GeminiProvider.generate_cards() and its private helpers, _log_failure(),
+# _check_stop() and _cards_from().
 # AI Utilization: ~100% of that code
 # AI Tools Used: Claude Code (Claude Opus 5.5)
 # AI-Assisted Activities:
@@ -154,6 +154,10 @@ class GeminiProvider:
             system_instruction=prompt.system,
             response_mime_type="application/json",
             response_json_schema=cards_schema(prompt.max_cards),
+            # A20: writing cards is simple instruction following, and Gemini 3 models default
+            # to high thinking, which is slower. Never send thinking_budget as well: the two
+            # together are a 400.
+            thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.LOW),
         )
         # One attempt: the SDK doesn't retry unless asked to, and a retry would spend the
         # free quota twice. `from None` drops the SDK error, whose text carries Google's
@@ -173,6 +177,7 @@ class GeminiProvider:
         except (errors.APIError, errors.UnknownApiResponseError, httpx.HTTPError) as error:
             _log_failure(error)
             raise AIUnavailable() from None
+        _check_stop(response)
         return _cards_from(response.text)
 
 
@@ -184,6 +189,36 @@ def _log_failure(error: Exception) -> None:
         getattr(error, "code", None),
         getattr(error, "status", None),
     )
+
+
+# Why a reply stopped, when retrying won't help (A20). Anything else falls through to the text.
+_DECLINED_FINISHES = {
+    types.FinishReason.SAFETY,
+    types.FinishReason.RECITATION,
+    types.FinishReason.BLOCKLIST,
+    types.FinishReason.PROHIBITED_CONTENT,
+    types.FinishReason.SPII,
+}
+
+
+def _check_stop(response) -> None:
+    """AIUnavailable with the right message when Gemini blocked the prompt or cut the reply.
+
+    Checked before the text, in this order: a blocked prompt has no candidates at all, and a
+    reply cut off for length is also invalid JSON, which would get the wrong message.
+    """
+    feedback = getattr(response, "prompt_feedback", None)
+    if feedback is not None and feedback.block_reason:
+        logger.warning("ai_provider outcome=prompt_blocked")
+        raise AIUnavailable(DECLINED)
+    candidates = getattr(response, "candidates", None) or []
+    finish = candidates[0].finish_reason if candidates else None
+    if finish == types.FinishReason.MAX_TOKENS:
+        logger.warning("ai_provider outcome=cut_off")
+        raise AIUnavailable(TOO_MUCH)
+    if finish in _DECLINED_FINISHES:
+        logger.warning("ai_provider outcome=declined finish_reason=%s", finish.value)
+        raise AIUnavailable(DECLINED)
 
 
 def _cards_from(text: str | None) -> list:

@@ -21,7 +21,15 @@ import httpx
 import pytest
 from google.genai import errors, types
 
-from app.ai.provider import AIRateLimited, AIUnavailable, Attachment, GeminiProvider, Prompt
+from app.ai.provider import (
+    DECLINED,
+    TOO_MUCH,
+    AIRateLimited,
+    AIUnavailable,
+    Attachment,
+    GeminiProvider,
+    Prompt,
+)
 
 MODEL = "gemini-test-flash"
 
@@ -29,20 +37,25 @@ MODEL = "gemini-test-flash"
 class FakeModels:
     """Stands in for `client.models`: records each call, then answers as told."""
 
-    def __init__(self, text=None, raises=None):
+    def __init__(self, text=None, raises=None, finish=None, blocked=None):
         self.text = text
         self.raises = raises
+        self.finish = finish
+        self.blocked = blocked
         self.calls = []
 
     def generate_content(self, *, model, contents, config):
         self.calls.append({"model": model, "contents": contents, "config": config})
         if self.raises is not None:
             raise self.raises
-        return SimpleNamespace(text=self.text)
+        # Shaped like the SDK's GenerateContentResponse: a blocked prompt has no candidates.
+        candidates = [] if self.blocked else [SimpleNamespace(finish_reason=self.finish)]
+        feedback = SimpleNamespace(block_reason=self.blocked) if self.blocked else None
+        return SimpleNamespace(text=self.text, candidates=candidates, prompt_feedback=feedback)
 
 
-def _provider(text=None, raises=None):
-    models = FakeModels(text=text, raises=raises)
+def _provider(text=None, raises=None, finish=None, blocked=None):
+    models = FakeModels(text=text, raises=raises, finish=finish, blocked=blocked)
     return GeminiProvider("not-a-real-key", MODEL, client=SimpleNamespace(models=models)), models
 
 
@@ -75,6 +88,65 @@ def test_a_reply_returns_its_cards_and_the_call_carries_the_prompt():
     assert call["config"].system_instruction == prompt.system
     assert call["config"].response_mime_type == "application/json"
     assert call["config"].response_json_schema["properties"]["cards"]["maxItems"] == 4
+
+
+def test_the_call_asks_for_low_thinking_and_no_thinking_budget():
+    """A20. Sending thinking_budget as well would be a 400."""
+    provider, models = _provider(text='{"cards": []}', finish=types.FinishReason.STOP)
+
+    provider.generate_cards(_prompt())
+
+    thinking = models.calls[0]["config"].thinking_config
+    assert thinking.thinking_level == types.ThinkingLevel.LOW
+    assert thinking.thinking_budget is None
+
+
+def test_a_blocked_prompt_is_declined():
+    provider, _ = _provider(text=None, blocked=types.BlockedReason.SAFETY)
+
+    with pytest.raises(AIUnavailable) as raised:
+        provider.generate_cards(_prompt())
+
+    assert raised.value.message == DECLINED == "Gemini declined to write cards from that material."
+
+
+def test_a_reply_cut_off_for_length_is_too_much():
+    """Checked before the text, which is cut-off JSON and would otherwise get UNAVAILABLE."""
+    provider, _ = _provider(text='{"cards": [{"front": "a", "ba', finish=types.FinishReason.MAX_TOKENS)
+
+    with pytest.raises(AIUnavailable) as raised:
+        provider.generate_cards(_prompt())
+
+    assert raised.value.message == TOO_MUCH
+
+
+@pytest.mark.parametrize(
+    "finish",
+    ["SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII"],
+)
+def test_a_reply_stopped_for_safety_or_similar_is_declined(finish):
+    provider, _ = _provider(text=None, finish=types.FinishReason[finish])
+
+    with pytest.raises(AIUnavailable) as raised:
+        provider.generate_cards(_prompt())
+
+    assert raised.value.message == DECLINED
+
+
+def test_a_normal_stop_reads_the_cards():
+    provider, _ = _provider(text='{"cards": []}', finish=types.FinishReason.STOP)
+
+    assert provider.generate_cards(_prompt()) == []
+
+
+def test_stop_logs_carry_no_content(caplog):
+    provider, _ = _provider(text='{"cards": [{"front": "bones of the', finish=types.FinishReason.MAX_TOKENS)
+
+    with caplog.at_level(logging.WARNING), pytest.raises(AIUnavailable):
+        provider.generate_cards(_prompt())
+
+    assert "cut_off" in caplog.text
+    assert "bones of the" not in caplog.text
 
 
 def test_a_pdf_travels_as_a_part_after_the_text():
