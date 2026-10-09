@@ -102,7 +102,7 @@ iteration 3 test cases (Doc-6) are written from them.
 | **F5** | **Typed-mode building blocks**: the reducer change, the suggested rating, the mode toggle | frontend | Nurzat | nothing | M, 4 h | 🔴 |
 | **F6** | **Typed study flow**: typed mode on the study page | frontend | Nurzat | F4, F5 | M, 5 h | 🔴 |
 | **P1** | **Gemini key and model** | setup | Miles | nothing | S, 1 h | 🔴 |
-| **P2** | **Render account and live site** | setup | Duc | nothing; checkpoint 2 for its early release | M, 2–3 h | 🔴 |
+| **P2** | **Render account and live site** | setup | Duc | nothing for setup; all the code merged for its Sunday pre-release | M, 2–3 h | 🔴 |
 | **P3** | **README and user stories** | docs | Miles | P2, for the URL | S, 2 h | 🟡 |
 | **P4** | **Release and live check** | QA | All | everything above | M, 3 h | 🔴 |
 | **Doc-1 to Doc-10** | The ten documentation deliverables | docs | see [Documentation tasks](#documentation-tasks) | see [Documentation tasks](#documentation-tasks) | | |
@@ -839,8 +839,9 @@ the learner can reject it.
 4. Drop the card if its back gives the answer away: `normalize_front(back)` appears in
    `normalize_front(front)` as whole words. "Paris" is found in "Is Paris the capital of
    France?", but "a" isn't found in "What is an atom?" and "2" isn't found in "What is 12 ÷ 6?".
-5. Drop the card if `normalize_front(front)` matches an existing card's, or one already kept from
-   this batch.
+5. Drop the card if `normalize_front(back)` is empty: a back like "?" or "…" survives step 3,
+   but has no answer in it. Then drop it if `normalize_front(front)` matches an existing card's,
+   or one already kept from this batch.
 6. Stop once `count` cards are kept.
 
 ---
@@ -1216,6 +1217,7 @@ here.
 | 12 valid items, count 10 | `clean_drafts` | the first 10 |
 | "Is Paris the capital of France?" / "Paris" | `clean_drafts` | dropped: the front gives the answer away |
 | "What is an atom?" / "a", and "What is 12 ÷ 6?" / "2" | `clean_drafts` | both kept: the back isn't a whole word of the front |
+| a back of "?" or "…" | `clean_drafts` | dropped: it's empty once normalized |
 | every row of C8's examples table | `normalize_front` on both columns | equal exactly where the verdict is "correct" |
 
 **Done when:** the tests pass, ruff is clean, and neither module imports Flask, SQLAlchemy or
@@ -1727,13 +1729,13 @@ has printed a real card.
 
 ### P2 — Render account and live site
 
-**Owner:** Duc · **Roughly:** 2–3 hours, mostly at the start · **After:** nothing for steps 1–7;
-checkpoint 2 for step 8
+**Owner:** Duc · **Roughly:** 2–3 hours · **After:** nothing for steps 1–5; every code task
+merged, on Sun 11 Oct, for steps 6–7
 **Files:** none, except `render.yaml` if step 3 needs its fallback
 
-Do this first, with today's `main`, before any Iteration 3 code exists. Deploy problems are
-cheapest to find when nothing else is changing. Follow `doc/CICD.md`, "Deploy targets: one-time
-Render setup":
+Do steps 1–5 now, so account and setup problems surface early. Steps 6–7 wait for Sunday's
+pre-release, because the live site needs 0a's nginx fix, and that only reaches `main` with the
+release. Follow `doc/CICD.md`, "Deploy targets: one-time Render setup":
 
 1. **Create the blueprint.** Sign in to Render with GitHub, then **New → Blueprint**, and pick the
    repo. It proposes `cadence-db`, `cadence-backend` and `cadence-frontend`, all free.
@@ -1749,19 +1751,19 @@ Render setup":
 5. **Connect CD to production only.** Add the two deploy hooks, as secrets, and `APP_URL`, as a
    variable, to the `production` GitHub environment. Leave `staging` empty, so `develop`'s deploy
    job keeps skipping with its warning (A18). Every green merge to `main` then deploys itself.
-6. **Prove it works.** Open the frontend URL, register an account, create a deck and a card, and
-   post the URL in the channel.
-7. **Add the AI settings** in the backend's **Environment** tab: `AI_PROVIDER=gemini`, P1's
-   `GEMINI_API_KEY`, and P1's `GEMINI_MODEL`. Settings marked `sync: false` are never filled in
-   from `render.yaml`, so this step is always by hand.
-8. **The early release.** Once checkpoint 2 passes, before the code freeze, open a `develop` → `main` release PR
-   and merge it when it's green and reviewed. Then check the live site: it loads, migration 0003
-   ran, and one generation works with the real model. This is the deploy rehearsal: anything
-   Render-specific (the migration, nginx's upload limit, the new package) breaks here, before
-   P4, not during it.
+6. **The pre-release, Sun 11 Oct.** Once every code task has merged, open a `develop` → `main`
+   release PR, code only, with no docs, and merge it when it's green and reviewed. CD deploys
+   it. This is the deploy rehearsal: anything Render-specific (the migration, nginx's proxy and
+   upload settings, the new package) breaks here, while there's still Monday to fix it, not
+   during P4.
+7. **Prove it works.** Add the AI settings in the backend's **Environment** tab:
+   `AI_PROVIDER=gemini`, P1's `GEMINI_API_KEY`, and P1's `GEMINI_MODEL`. Settings marked
+   `sync: false` are never filled in from `render.yaml`, so this is always by hand. Then open the
+   frontend URL, register an account, create a deck and a card, check that migration 0003 ran,
+   run one generation with the real model, and post the URL in the channel.
 
-**Done when:** the site is live at a public URL, the database's creation date is posted, the AI
-settings are in place, and the early release is running on the live site.
+**Done when:** the database's creation date is posted, and after the pre-release the site is
+live at a public URL with the AI settings in place and one real generation done.
 
 ---
 
@@ -1859,7 +1861,7 @@ Only these dates are fixed. In between, each task merges when it's ready, in the
 | When | What |
 | --- | --- |
 | **Thu 8 Oct** | Miles implements 0a and 0b, so every other task can start from them. |
-| **Sun 11 Oct, end of day** | **Code freeze.** Everything is merged into `develop`. Anything not merged by then is cut, not squeezed in. |
+| **Sun 11 Oct, end of day** | **Code freeze.** Everything is merged into `develop`. Anything not merged by then is cut, not squeezed in. Then P2's pre-release, code only, to `main` and the live site. |
 | **Mon 12 Oct** | Documentation day: P4's release and live check, and every document that needs the finished code (Doc-6 results, Doc-7 to Doc-10). |
 | **Early Tue 13 Oct** | Due. Plan as if Monday is the last working day. |
 
@@ -1932,7 +1934,7 @@ and step 14 is skipped.
 | A JSON column change silently isn't saved | Rule 20, and B4's `expire_all()` test. |
 | nginx rejects uploads in production | 0a's `client_max_body_size 6m`. P4 uploads a real PDF on the live site. |
 | Render rejects `preDeployCommand` on the free tier | P2's step 3: the start-command fallback already written in `render.yaml`. |
-| Iteration 3's code breaks on its first deploy | P2's early release, before the code freeze, is the rehearsal for P4's final one. The live site keeps serving the last good version until a fix merges. |
+| Iteration 3's code breaks on its first deploy | P2's pre-release at the code freeze is the rehearsal for P4's final one, with Monday left to fix it. The live site keeps serving the last good version until a fix merges. |
 | Render deletes the free database | It lasts 30 days from creation. P2 records the date; created this week, it outlasts the course. |
 | The live site sleeps, and the first request is slow | Open it a few minutes before presenting or recording. |
 | The API key leaks into a commit or the channel | Delete the key in AI Studio at once, make a new one, and update Render. Never commit `.env`. |
@@ -1987,8 +1989,9 @@ that preceded this plan.
 - **A18 — One set of Render services, deployed from `main` only, released twice.** There's one
   free database per Render account, so there's no separate staging environment. The deploy hooks
   live in the `production` environment only, which is certain to work, because the services
-  follow `main`. To find deploy problems early anyway, P2 releases `develop` to `main` before
-  the code freeze, and P4 makes the final release on Monday.
+  follow `main`. To find deploy problems early anyway, P2 sets up Render now, pre-releases
+  `develop` to `main` (code only) once all the code is in on Sunday, and P4 makes the final
+  release, with the docs, on Monday.
 - **A19 — A site-wide daily cap of 18, best effort.** Google's free quota is per project, so a
   per-user cap alone lets two learners use up the whole site's day. `AI_SITE_DAILY_LIMIT`
   counts every user's generations in the last 24 hours. It can't count calls that failed at
