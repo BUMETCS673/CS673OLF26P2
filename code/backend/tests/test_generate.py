@@ -500,6 +500,11 @@ def test_one_log_line_with_no_user_content(client, deck, caplog):
     assert "Sample" not in caplog.text
 
 
+def test_the_app_logs_at_info_outside_debug(app):
+    assert not app.debug
+    assert app.logger.isEnabledFor(logging.INFO)
+
+
 def test_a_failure_is_logged_with_its_outcome(client, deck, provider, caplog):
     caplog.set_level(logging.INFO)
     provider(fail_with=AIUnavailable())

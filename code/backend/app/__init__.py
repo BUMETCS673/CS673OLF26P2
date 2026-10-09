@@ -21,6 +21,15 @@ gets attached here, and nowhere else.
 #   CLI command registration
 # Human role: plan approval, code review, and hands-on testing by Miles Cameron.
 
+# Iteration 3, B3: the app logger's level, so the generate route's log line reaches gunicorn.
+# AI Utilization: ~100% of that change
+# AI Tools Used: Claude Code (Claude Opus 5.5)
+# AI-Assisted Activities:
+#   Logging configuration
+# Human role: plan review, code review, and CI verification by Duc Anh Nguyen.
+
+import logging
+
 import click
 from flask import Flask
 from flask.cli import with_appcontext
@@ -34,6 +43,9 @@ from app.extensions import db, login_manager, migrate
 def create_app(config_object: type = Config) -> Flask:
     app = Flask(__name__)  # app/config.py loads code/.env at import time
     app.config.from_object(config_object)
+    # Without a level, Flask's logger drops info outside debug mode, and with it the
+    # generate route's one line per request (rule 17).
+    app.logger.setLevel(logging.INFO)
 
     # Flask 3 reads this off `app.json`, not the config -- a JSON_SORT_KEYS entry in
     # config.py is silently ignored. Off, so responses come back in the order the API
