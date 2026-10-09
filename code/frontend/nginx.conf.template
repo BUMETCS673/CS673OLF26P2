@@ -28,6 +28,11 @@ server {
         # A cold free-tier backend can take a while to wake up.
         proxy_connect_timeout 30s;
         proxy_read_timeout    60s;
+
+        # nginx's default is 1 MB, which would refuse a file upload for AI generation
+        # before Flask ever saw it. 6 MB fits a 4 MB file once it's base64 in JSON.
+        # Flask still holds every other route to 1 MB (MAX_CONTENT_LENGTH).
+        client_max_body_size 6m;
     }
 
     # Vite fingerprints these filenames, so a given URL's contents never change.

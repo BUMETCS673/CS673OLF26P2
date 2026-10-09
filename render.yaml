@@ -60,6 +60,16 @@ services:
         value: "1"
       - key: PORT
         value: "5000"
+      # AI card generation, with the real model. Set AI_PROVIDER to "fake" in the
+      # dashboard to fall back to sample cards if Google's quota runs out mid-demo.
+      - key: AI_PROVIDER
+        value: gemini
+      # sync: false means Render never fills these in from this file: enter them by hand
+      # in the backend's Environment tab. The key is a secret; it never goes in the repo.
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        sync: false
 
   - type: web
     name: cadence-frontend

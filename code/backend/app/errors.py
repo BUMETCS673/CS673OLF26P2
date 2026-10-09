@@ -16,6 +16,13 @@ Any endpoint that takes a request body reads it with `json_object()` below, rath
 than calling `request.get_json()` itself.
 """
 
+# Iteration 3, Step 0a: 429 rate_limited and 503 ai_unavailable.
+# AI Utilization: ~100% of that change
+# AI Tools Used: Claude Code (Claude Opus 5.5)
+# AI-Assisted Activities:
+#   API error contract
+# Human role: plan approval, code review, and hands-on testing by Miles Cameron.
+
 from flask import jsonify, request
 from werkzeug.exceptions import HTTPException
 
@@ -28,7 +35,9 @@ STATUS_CODES = {
     405: "method_not_allowed",
     409: "conflict",
     422: "validation_error",
+    429: "rate_limited",      # Iteration 3 (C5): our daily cap, or Google's free limit
     500: "internal_error",
+    503: "ai_unavailable",    # Iteration 3 (C5): the AI didn't answer, or has no key
 }
 
 # Statuses Werkzeug raises that the contract has no code for. Rather than invent one
