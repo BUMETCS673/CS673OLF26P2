@@ -157,14 +157,16 @@ failing until it is done. So the pipeline is green in the meantime.
    `cadence-db`, `cadence-backend` and `cadence-frontend`, all on the free tier.
 
 2. **Fill in `API_ORIGIN`.** The blueprint marks it `sync: false`, so Render asks for it.
-   Set it to the backend's internal address:
+   Set it to the backend's public address, copied from the backend service's page:
 
    ```
-   http://cadence-backend:5000
+   https://cadence-backend-....onrender.com
    ```
 
-   This is what nginx forwards `/api` to. Getting it wrong means the site loads but every
-   API call 502s.
+   This is what nginx forwards `/api` to. Don't use the internal
+   `http://cadence-backend:5000`: free web services can send private-network traffic but
+   can't receive it ([Render docs](https://render.com/docs/private-network)). Getting it
+   wrong means the site loads but every API call fails.
 
 3. **Copy the deploy hooks.** For each of `cadence-backend` and `cadence-frontend`:
    **Settings → Deploy Hook → Copy**. Each is a URL containing a secret key — treat it
