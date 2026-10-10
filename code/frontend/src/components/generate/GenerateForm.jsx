@@ -66,7 +66,8 @@ export default function GenerateForm({ cardCount, busy, error, onGenerate }) {
   const [file, setFile] = useState(null);
   const [reading, setReading] = useState(null);
   const [errors, setErrors] = useState({});
-  // Each choice of file gets a number, so a slow read can't overwrite a later choice.
+  // Each choice of file, and each change of mode, gets a number, so a slow read can't
+  // overwrite a later choice.
   const latestChoice = useRef(0);
 
   const suggestLocked = cardCount < SUGGEST_MIN_CARDS;
@@ -75,6 +76,16 @@ export default function GenerateForm({ cardCount, busy, error, onGenerate }) {
   const invalid = (field) => Boolean(errors[field]) || error?.field === field;
   const setError = (field, message) => setErrors((current) => ({ ...current, [field]: message }));
   const clearError = (field) => setErrors(({ [field]: _cleared, ...rest }) => rest);
+
+  function chooseMode(value) {
+    setMode(value);
+    // The file input exists only in file mode, and comes back empty, so the file goes with
+    // it: the form never sends a file it no longer shows. A read still running is dropped.
+    latestChoice.current += 1;
+    setFile(null);
+    setReading(null);
+    clearError('file');
+  }
 
   function chooseFile(event) {
     const chosen = event.target.files?.[0];
@@ -148,7 +159,7 @@ export default function GenerateForm({ cardCount, busy, error, onGenerate }) {
       <div className="generate-mode-options">
         {MODES.map(([value, label]) => <label key={value} className="generate-mode">
           <input type="radio" name={`${id}-mode`} value={value} checked={mode === value}
-            disabled={value === 'suggest' && suggestLocked} onChange={() => setMode(value)} />
+            disabled={value === 'suggest' && suggestLocked} onChange={() => chooseMode(value)} />
           <span>{label}</span>
         </label>)}
       </div>

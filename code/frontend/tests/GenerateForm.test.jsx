@@ -385,6 +385,40 @@ test('switching modes keeps what was typed', () => {
   expect(screen.getByLabelText('Topic').value).toBe('Cells');
 });
 
+test('a file chosen before switching modes is not sent, since the input comes back empty', async () => {
+  const { onGenerate } = renderForm();
+  await chooseFile(textFile('# Hi', 'notes.md'));
+
+  fireEvent.click(radio('Write a prompt'));
+  fireEvent.click(radio('Upload a file'));
+  generate();
+
+  expect(onGenerate).not.toHaveBeenCalled();
+  expect(screen.getByText('Choose a PDF, TXT or MD file.')).toBeTruthy();
+});
+
+test('a read still running when the mode changes is dropped', () => {
+  const held = [];
+  vi.spyOn(globalThis.FileReader.prototype, 'readAsDataURL').mockImplementation(function hold() {
+    held.push(this);
+  });
+  const { onGenerate } = renderForm();
+  fireEvent.click(radio('Upload a file'));
+  fireEvent.change(screen.getByLabelText('File'), { target: { files: [textFile('# Hi', 'notes.md')] } });
+
+  fireEvent.click(radio('Write a prompt'));
+  expect(generateButton().disabled).toBe(false);
+  fireEvent.click(radio('Upload a file'));
+  act(() => {
+    Object.defineProperty(held[0], 'result', { value: `data:text/markdown;base64,${btoa('# Hi')}` });
+    held[0].onload();
+  });
+  generate();
+
+  expect(onGenerate).not.toHaveBeenCalled();
+  expect(screen.getByText('Choose a PDF, TXT or MD file.')).toBeTruthy();
+});
+
 // --- busy and errors from the server ------------------------------------------------
 
 test('while busy, Generate is disabled and the status says to wait', () => {
