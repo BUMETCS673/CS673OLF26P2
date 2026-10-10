@@ -157,21 +157,26 @@ failing until it is done. So the pipeline is green in the meantime.
    `cadence-db`, `cadence-backend` and `cadence-frontend`, all on the free tier.
 
 2. **Fill in `API_ORIGIN`.** The blueprint marks it `sync: false`, so Render asks for it.
-   Set it to the backend's internal address:
+   Set it to the backend's public address, copied from the backend service's page, with
+   nothing after `.onrender.com`: no trailing slash and no path.
 
    ```
-   http://cadence-backend:5000
+   https://cadence-backend-....onrender.com
    ```
 
-   This is what nginx forwards `/api` to. Getting it wrong means the site loads but every
-   API call 502s.
+   This is what nginx forwards `/api` to. Don't use the internal
+   `http://cadence-backend:5000`: free web services can send private-network traffic but
+   can't receive it ([Render docs](https://render.com/docs/private-network)). And don't
+   add a trailing slash: when `proxy_pass` has a path, even just `/`, nginx swaps the
+   `/api/` prefix for it, so the backend gets `/health` instead of `/api/health`. Either
+   mistake means the site loads but every API call fails.
 
 3. **Copy the deploy hooks.** For each of `cadence-backend` and `cadence-frontend`:
    **Settings → Deploy Hook → Copy**. Each is a URL containing a secret key — treat it
    like a password and never paste it into an issue or a commit.
 
 4. **Create the GitHub Environments.** Repo **Settings → Environments → New environment**,
-   named exactly `staging` and `production`. In each, add two secrets:
+   named exactly `staging` and `production`. In `production` only, add two secrets:
 
    | Secret | Value |
    |---|---|
@@ -187,12 +192,16 @@ failing until it is done. So the pipeline is green in the meantime.
    `APP_URL` is what the post-deploy health poll checks. Leave it unset and the deploy
    still runs, just unverified.
 
+   Leave `staging` empty. There is one set of Render services, and it's production, so
+   `develop`'s deploy job skips with a warning instead of deploying every merge to the
+   live site. Only a green merge to `main` deploys.
+
 5. **Gate production.** On the `production` environment, add a **required reviewer**, so
    a deploy to main waits for a human. Recommended for the final iteration.
 
-Doing it twice — separate Render services for staging and production — is the fuller
-setup. A single set of services pointed at by both environments is fine for a semester
-project; say so in the progress report either way.
+Doing it twice — separate Render services for staging and production, with the staging
+hooks in the `staging` environment — is the fuller setup. One set of services, deployed
+from `main` only, is fine for a semester project; say so in the progress report either way.
 
 ### Free-tier behaviour worth knowing
 
