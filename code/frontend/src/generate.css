@@ -40,6 +40,113 @@
 
 /* --- F1: form --------------------------------------------------------------- */
 
+/*
+ * AI Utilization: ~100% of this section
+ * AI Tools Used: Claude Code (Claude Opus 5.5)
+ * AI-Assisted Activities:
+ *   CSS layout on the style guide's tokens
+ * Human role: plan approval, code review, and hands-on testing by Miles Cameron.
+ */
+
+.generate-modes {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+/* Styled like the other fields' labels. */
+.generate-modes legend {
+  margin: 0 0 var(--space-2);
+  padding: 0;
+  font: 600 13px/1.4 var(--font-body);
+  color: var(--color-text);
+}
+
+/* The three modes as one segmented control: a bordered pill, with the chosen option on
+   the soft primary tint. */
+.generate-mode-options {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface);
+}
+
+.generate-mode {
+  position: relative;
+  margin: 0;
+}
+
+/* The radio stays in the page for the keyboard and screen readers; its label is what
+   shows. */
+.generate-mode input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+}
+
+.generate-mode span {
+  display: block;
+  padding: var(--space-2) var(--space-4);
+  border-radius: 999px;
+  font: 600 14px/1.4 var(--font-body);
+  white-space: nowrap;
+  color: var(--color-muted);
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.generate-mode input:checked + span {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+/* The usual focus ring, on the label, since the radio itself is invisible. */
+.generate-mode input:focus-visible + span {
+  outline: 3px solid var(--color-gold-strong);
+  outline-offset: 2px;
+}
+
+.generate-mode input:disabled + span {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.generate-count {
+  max-width: 120px;
+}
+
+.generate-status {
+  min-height: 1.4em;
+  margin: var(--space-3) 0 0;
+  font-size: 14px;
+  color: var(--color-muted);
+}
+
+.generate-privacy {
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+
+@media (max-width: 640px) {
+  /* Stacked, the options read as a list rather than a pill. */
+  .generate-mode-options {
+    display: flex;
+    flex-direction: column;
+    border-radius: var(--radius);
+  }
+
+  .generate-mode span {
+    border-radius: var(--radius-control);
+  }
+}
+
 
 /* --- F2: review list -------------------------------------------------------- */
 
