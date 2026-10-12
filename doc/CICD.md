@@ -200,7 +200,7 @@ from `main` only, is fine for a semester project; say so in the progress report 
   deployment takes ~30 seconds. That is why CD's health poll allows 10 minutes before
   giving up — it is not a hung deploy.
 - Free Postgres instances **expire after 30 days**.
-- Migrations run automatically: the backend's `dockerCommand` in `render.yaml` runs
+- Migrations run automatically: the backend image's start command (the `prod` stage's `CMD`) runs
   `flask db upgrade` before starting gunicorn. This is safe only with a single instance. A failed migration means gunicorn
   never starts, so the health check fails and the old version keeps serving. Every wake
   from sleep re-runs the upgrade, which is a no-op once the database is at head.
