@@ -116,3 +116,30 @@ test('if refreshing the deck fails, the card is still added and the old counts s
   await vi.waitFor(() => expect(getDeck).toHaveBeenCalledTimes(2));
   expect(screen.getByText('All caught up')).toBeTruthy();
 });
+
+// ---- F3 (Iteration 3): the Generate with AI button ----------------------------------
+// AI Utilization: 90% | AI Tools Used: Claude | AI-Assisted Activities: unit test creation
+// Human role: checked against F3's acceptance examples and opened the PR, by Osasenaga Von Okunbor.
+
+test('a deck with no cards still shows "Generate with AI", which calls onGenerate', async () => {
+  const api = {
+    getDeck: vi.fn().mockResolvedValue(DECK),
+    listCards: vi.fn().mockResolvedValue([]),
+  };
+  const onGenerate = vi.fn();
+  render(<DeckDetailView api={api} deckId="2" onBack={vi.fn()} onStudy={vi.fn()} onGenerate={onGenerate} />);
+
+  const button = await screen.findByRole('button', { name: 'Generate with AI' });
+  expect(button.className).toBe('button secondary');
+  fireEvent.click(button);
+
+  expect(onGenerate).toHaveBeenCalledTimes(1);
+});
+
+test('"Generate with AI" sits beside "+ Add card" on a deck with cards', async () => {
+  renderDetail();
+
+  const generate = await screen.findByRole('button', { name: 'Generate with AI' });
+  const add = screen.getByRole('button', { name: '+ Add card' });
+  expect(generate.parentElement).toBe(add.parentElement);
+});

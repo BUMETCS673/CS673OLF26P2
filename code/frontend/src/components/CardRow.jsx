@@ -1,4 +1,14 @@
 /*
+ * F3 (Iteration 3): the AI badge when card.origin is 'ai'.
+ * AI Utilization: 90%
+ * AI Tools Used: Claude
+ * AI-Assisted Activities:
+ *   - UI component development
+ * Human role: checked against F3 in code/plans/ITERATION_3_PLAN.md, ran the tests, and
+ * opened the PR, by Osasenaga Von Okunbor.
+ */
+
+/*
  * F4: the schedule badge and the `now` prop.
  * AI Utilization: ~100% of those changes
  * AI Tools Used: Devin (Cognition AI)
@@ -9,6 +19,7 @@
  */
 
 import React, { useState } from 'react';
+import AiBadge from './AiBadge.jsx';
 import CardForm from './CardForm';
 import { describeSchedule } from '../study/describeSchedule.js';
 
@@ -28,7 +39,8 @@ export default function CardRow({ card, index, onSave, onDelete, now }) {
 
   return <li className="card-row">
     <div className="card-row-heading"><div className="card-row-meta"><span className="eyebrow">Card {String(index + 1).padStart(2, '0')}</span>
-      <span className="badge badge-blue">{describeSchedule(card, now)}</span></div>
+      <span className="badge badge-blue">{describeSchedule(card, now)}</span>
+      {card.origin === 'ai' && <AiBadge />}</div>
       {!editing && !confirming && <div className="row-actions">
         <button className="text-button" onClick={() => setEditing(true)} aria-label={`Edit card ${index + 1}`}>Edit</button>
         <button className="text-button danger" onClick={() => setConfirming(true)} aria-label={`Delete card ${index + 1}`}>Delete</button>

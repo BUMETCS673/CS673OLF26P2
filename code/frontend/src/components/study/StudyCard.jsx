@@ -1,4 +1,14 @@
 /*
+ * F3 (Iteration 3): the AI badge when card.origin is 'ai'.
+ * AI Utilization: 90%
+ * AI Tools Used: Claude
+ * AI-Assisted Activities:
+ *   - UI component development
+ * Human role: checked against F3 in code/plans/ITERATION_3_PLAN.md, ran the tests, and
+ * opened the PR, by Osasenaga Von Okunbor.
+ */
+
+/*
  * AI Utilization: ~100% of this file's code
  * AI Tools Used: Claude Code (Claude Opus 5.5)
  * AI-Assisted Activities:
@@ -21,11 +31,14 @@
  * code/plans/FINALIZE_ITERATION_2_PLAN.md.
  */
 
+import AiBadge from '../AiBadge.jsx';
+
 const STATE_LABELS = { new: 'New', learning: 'Learning', relearning: 'Relearning', review: 'Review' };
 
 export default function StudyCard({ card, revealed }) {
   return <section className="panel study-card" aria-label="Flashcard">
     <span className="badge badge-blue">{STATE_LABELS[card.state] ?? card.state}</span>
+    {card.origin === 'ai' && <AiBadge />}
     <p className="study-card-front">{card.front}</p>
     {/* Polite: the back is announced when it appears, without interrupting. */}
     <div className="study-card-answer" aria-live="polite">

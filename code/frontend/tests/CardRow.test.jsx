@@ -53,3 +53,23 @@ test('a new card shows "New"', () => {
 
   expect(screen.getByText('New')).toBeTruthy();
 });
+
+// ---- F3 (Iteration 3): the AI badge -----------------------------------------------
+// AI Utilization: 90% | AI Tools Used: Claude | AI-Assisted Activities: unit test creation
+// Human role: checked against F3's acceptance examples and opened the PR, by Osasenaga Von Okunbor.
+
+test('an AI card shows "AI-generated" beside its schedule badge', () => {
+  renderRow({ card: { ...card, state: 'new', due_at: null, origin: 'ai' } });
+
+  const ai = screen.getByText('AI-generated');
+  expect(ai.className).toBe('badge badge-ai');
+  expect(ai.parentElement).toBe(screen.getByText('New').parentElement);
+});
+
+test('a manual card, or one with no origin, has no AI badge', () => {
+  const { rerender } = renderRow({ card: { ...card, origin: 'manual' } });
+  expect(screen.queryByText('AI-generated')).toBeNull();
+
+  rerender(<ul><CardRow card={card} index={0} onSave={vi.fn()} onDelete={vi.fn()} now={NOW} /></ul>);
+  expect(screen.queryByText('AI-generated')).toBeNull();
+});

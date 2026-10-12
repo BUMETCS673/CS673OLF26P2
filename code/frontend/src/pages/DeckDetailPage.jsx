@@ -9,6 +9,16 @@
  * and review by Nurzat Mukhamedali.
  */
 
+/*
+ * F3 (Iteration 3): the Generate with AI button and onGenerate.
+ * AI Utilization: 90%
+ * AI Tools Used: Claude
+ * AI-Assisted Activities:
+ *   - UI component development
+ * Human role: checked against F3 in code/plans/ITERATION_3_PLAN.md, ran the tests, and
+ * opened the PR, by Osasenaga Von Okunbor.
+ */
+
 import React, { useEffect, useState } from 'react';
 import CardForm from '../components/CardForm';
 import CardRow from '../components/CardRow';
@@ -34,10 +44,11 @@ function RoutedDeckDetail({ id, location, navigate }) {
     }
   }, [location, navigate]);
   return <DeckDetailView api={decksApi} deckId={id} startAdding={startAdding}
-    onBack={() => navigate('/decks')} onStudy={() => navigate(`/decks/${id}/study`)} />;
+    onBack={() => navigate('/decks')} onStudy={() => navigate(`/decks/${id}/study`)}
+    onGenerate={() => navigate(`/decks/${id}/generate`)} />;
 }
 
-export function DeckDetailView({ api, deckId, onBack, onStudy, startAdding = false }) {
+export function DeckDetailView({ api, deckId, onBack, onStudy, onGenerate, startAdding = false }) {
   const [revision, setRevision] = useState(0);
   // Deck, cards and the load error in one state tagged with the request that produced
   // them, so `loading` is derived rather than switched on at the top of the effect --
@@ -87,6 +98,7 @@ export function DeckDetailView({ api, deckId, onBack, onStudy, startAdding = fal
           {deck.description && <p className="subtitle deck-detail-description">{deck.description}</p>}</div>
           <div className="page-actions">
             {!adding && <button className="button secondary" onClick={() => { setNotice(''); setAdding(true); }}>+ Add card</button>}
+            <button className="button secondary" onClick={onGenerate}>Generate with AI</button>
             {cards.length > 0 && <button className="button primary" onClick={onStudy}>{studyLabel(deck.due_counts)}</button>}</div></div>
         {adding && <section className="card-composer" aria-labelledby="add-card-heading">
           <div className="composer-heading"><div><p className="eyebrow">{cards.length === 0 ? 'Your first flashcard' : 'One more idea'}</p>
