@@ -6,26 +6,23 @@
  * AI-Assisted Activities:
  *   Refactoring
  * Human role: plan approval, code review, and hands-on testing by Miles Cameron.
+ *
+ * Iteration 3 refactor: requestApi() passes straight to client.js's request(), and
+ * createAuthenticatedApi() and pathId() replace the per-API client files and helpers.
+ * AI Utilization: ~100% of that change
+ * AI Tools Used: Claude Code (Claude Opus 5.5)
+ * AI-Assisted Activities:
+ *   Refactoring
+ * Human role: plan approval and code review by Duc Anh Nguyen.
  */
 
-import { get, post, patch, del } from './client.js';
+import { request } from './client.js';
 
-// The transport the endpoint modules (decks.js, study.js) are built on. They write full
-// /api/... paths; WS3's client owns fetch, cookies, serialization and errors, and its
-// helpers add /api themselves, so it comes off here.
-export function requestApi(path, { method = 'GET', body } = {}) {
-  const relativePath = path.slice('/api'.length);
-  switch (method) {
-    case 'GET': return get(relativePath);
-    case 'POST': return post(relativePath, body);
-    case 'PATCH': return patch(relativePath, body);
-    case 'DELETE': return del(relativePath);
-    default: throw new Error(`Unsupported request method: ${method}`);
-  }
+// The API factories build full /api paths; client.js adds the /api prefix itself.
+export function requestApi(path, options) {
+  return request(path.slice('/api'.length), options);
 }
 
-// Handle expiration for every operation, including saves caught inside forms.
-// Re-throw so a failed mutation never continues along its success path.
 export function withSessionExpiry(request, onUnauthorized) {
   return async (path, options) => {
     try {
@@ -36,3 +33,10 @@ export function withSessionExpiry(request, onUnauthorized) {
     }
   };
 }
+
+// createApi is one of the factories (createDecksApi, createStudyApi, createGenerateApi).
+export function createAuthenticatedApi(createApi, onUnauthorized) {
+  return createApi(withSessionExpiry(requestApi, onUnauthorized));
+}
+
+export const pathId = (value) => encodeURIComponent(value);

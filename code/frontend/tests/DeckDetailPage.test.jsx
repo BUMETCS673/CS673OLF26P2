@@ -147,7 +147,8 @@ test('deleting a card asks first, then removes it', async () => {
 
 test('on /decks/2, clicking "Generate with AI" goes to /decks/2/generate', async () => {
   vi.resetModules();
-  vi.doMock('../src/api/useDecksApi', () => ({ useDecksApi: () => fakeApi([]) }));
+  const api = fakeApi([]);
+  vi.doMock('../src/api/useApi', () => ({ useApi: () => api }));
   const { default: DeckDetailPage } = await import('../src/pages/DeckDetailPage.jsx');
   const { MemoryRouter, Route, Routes } = await import('react-router-dom');
 
@@ -162,5 +163,5 @@ test('on /decks/2, clicking "Generate with AI" goes to /decks/2/generate', async
   fireEvent.click(await screen.findByRole('button', { name: 'Generate with AI' }));
 
   expect(await screen.findByText('Generate page for deck 2')).toBeTruthy();
-  vi.doUnmock('../src/api/useDecksApi');
+  vi.doUnmock('../src/api/useApi');
 });

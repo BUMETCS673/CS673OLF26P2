@@ -30,6 +30,13 @@ A request that fails at the provider saves nothing, so it doesn't count toward e
 #   Input validation and daily caps
 #   Documentation
 # Human role: plan review, code review, and CI verification by Duc Anh Nguyen.
+#
+# Iteration 3 refactor: the prompt and focus checks moved to app/api/validation.py.
+# AI Utilization: ~100% of that change
+# AI Tools Used: Claude Code (Claude Opus 5.5)
+# AI-Assisted Activities:
+#   Refactoring
+# Human role: plan approval and code review by Duc Anh Nguyen.
 
 import base64
 import binascii
@@ -44,6 +51,7 @@ from app.ai.cleanup import clean_drafts
 from app.ai.prompts import build_prompt
 from app.ai.provider import AIRateLimited, AIUnavailable, Attachment, CardDraft, get_provider
 from app.api.decks import own_deck_or_404
+from app.api.validation import optional_text, required_text
 from app.errors import ApiError, json_object, validation_error
 from app.extensions import db
 from app.models import AiGeneration, Card, utcnow
@@ -82,16 +90,6 @@ def _valid_count(body: dict) -> int:
     if type(count) is not int or not 1 <= count <= limit:
         raise validation_error(f"count must be a whole number from 1 to {limit}.", "count")
     return count
-
-
-def _valid_prompt(body: dict) -> str:
-    prompt = body.get("prompt")
-    prompt = prompt.strip() if isinstance(prompt, str) else ""
-    if not prompt:
-        raise validation_error("prompt is required.", "prompt")
-    if len(prompt) > PROMPT_MAX:
-        raise validation_error(f"prompt must be at most {PROMPT_MAX} characters.", "prompt")
-    return prompt
 
 
 def _valid_file(body: dict) -> tuple[str, str | None, Attachment | None]:
@@ -134,18 +132,6 @@ def _valid_file(body: dict) -> tuple[str, str | None, Attachment | None]:
     return file["name"], text, None
 
 
-def _valid_focus(body: dict) -> str | None:
-    focus = body.get("focus")
-    if focus is None:
-        return None
-    if not isinstance(focus, str):
-        raise validation_error("focus must be text.", "focus")
-    focus = focus.strip()
-    if len(focus) > FOCUS_MAX:
-        raise validation_error(f"focus must be at most {FOCUS_MAX} characters.", "focus")
-    return focus or None
-
-
 def _check_daily_caps() -> None:
     """The learner's cap, then the site's. Best effort: only saved generations count (A19)."""
     since = utcnow() - CAP_WINDOW
@@ -181,10 +167,10 @@ def generate(deck_id):
     count = _valid_count(body)
     prompt = file_name = file_text = attachment = focus = None
     if mode == "prompt":
-        prompt = _valid_prompt(body)
+        prompt = required_text(body.get("prompt"), "prompt", PROMPT_MAX)
     elif mode == "file":
         file_name, file_text, attachment = _valid_file(body)
-        focus = _valid_focus(body)
+        focus = optional_text(body.get("focus"), "focus", FOCUS_MAX)
     elif mode == "suggest" and deck.card_count < SUGGEST_MIN_CARDS:
         raise validation_error(
             "Suggest more content needs at least 10 cards in the deck.", "mode"

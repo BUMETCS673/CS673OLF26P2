@@ -5,12 +5,22 @@
  *   UI page development
  *   Documentation
  * Human role: plan approval, code review, and hands-on testing by Miles Cameron.
+ *
+ * Iteration 3 refactor: loading through useLoad(), useApi() and DeckLoadError.
+ * AI Utilization: ~100% of that change
+ * AI Tools Used: Claude Code (Claude Opus 5.5)
+ * AI-Assisted Activities:
+ *   Refactoring
+ * Human role: plan approval and code review by Duc Anh Nguyen.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useDecksApi } from '../api/useDecksApi';
-import { useGenerateApi } from '../api/useGenerateApi';
+import { createDecksApi } from '../api/decks.js';
+import { createGenerateApi } from '../api/generate.js';
+import { useApi } from '../api/useApi.js';
+import DeckLoadError from '../components/DeckLoadError.jsx';
+import { useLoad } from '../hooks/useLoad.js';
 import CandidateList from '../components/generate/CandidateList.jsx';
 import GenerateForm from '../components/generate/GenerateForm.jsx';
 import '../generate.css';
@@ -25,8 +35,8 @@ import '../generate.css';
 export default function GeneratePage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const decksApi = useDecksApi();
-  const generateApi = useGenerateApi();
+  const decksApi = useApi(createDecksApi);
+  const generateApi = useApi(createGenerateApi);
   // Both hooks memoize on the session, so this only changes when the session does.
   const api = useMemo(() => ({ getDeck: decksApi.getDeck, ...generateApi }), [decksApi, generateApi]);
   // key={id}: a different deck mounts a fresh view, as on the study page.
@@ -45,14 +55,9 @@ export default function GeneratePage() {
  *   onExit  () => void, back to the deck page
  */
 export function GenerateView({ api, deckId, onExit }) {
-  // Each load of the deck has a number, and Try again and Generate more both bump it.
-  // The result is tagged with the load it answers, so "loading" is derived, as on the
-  // study page.
-  const [load, setLoad] = useState(0);
-  const [result, setResult] = useState({ key: null, deck: null, error: null });
-  const loading = result.key !== load;
-  const { deck, error } = result;
-  const reload = useCallback(() => setLoad((count) => count + 1), []);
+  // Try again and Generate more both reload the deck.
+  const load = useCallback(() => api.getDeck(deckId), [api, deckId]);
+  const { data: deck, error, loading, reload } = useLoad(load);
 
   const [generation, setGeneration] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -61,14 +66,6 @@ export function GenerateView({ api, deckId, onExit }) {
   // Rule 21: one generate request at a time, because every one spends real quota. `busy`
   // disables the button, but a second click can land before React re-renders.
   const generating = useRef(false);
-
-  useEffect(() => {
-    let active = true;
-    api.getDeck(deckId)
-      .then((nextDeck) => { if (active) setResult({ key: load, deck: nextDeck, error: null }); })
-      .catch((err) => { if (active) setResult({ key: load, deck: null, error: err }); });
-    return () => { active = false; };
-  }, [api, deckId, load]);
 
   const generate = useCallback(async (body) => {
     if (generating.current) return;
@@ -125,19 +122,7 @@ export function GenerateView({ api, deckId, onExit }) {
   }
 
   if (error) {
-    const notFound = error.code === 'not_found';
-    return <main className="page">
-      <section className="state-panel">
-        <h1>Unable to generate cards</h1>
-        <p className="error-message" role="alert">
-          {notFound ? 'This deck could not be found.' : error.message || 'Could not load this deck.'}
-        </p>
-        <div className="form-actions">
-          {!notFound && <button type="button" className="button primary" onClick={reload}>Try again</button>}
-          <button type="button" className="button secondary" onClick={onExit}>Back to deck</button>
-        </div>
-      </section>
-    </main>;
+    return <DeckLoadError title="Unable to generate cards" error={error} onRetry={reload} onExit={onExit} />;
   }
 
   return <main className="page generate-page">

@@ -14,12 +14,22 @@
  *   UI page development
  * Human role: requirements (F6 in code/plans/ITERATION_3_PLAN.md), direction, and review by
  * Nurzat Mukhamedali.
+ *
+ * Iteration 3 refactor: loading through useLoad(), useApi() and DeckLoadError.
+ * AI Utilization: ~100% of that change
+ * AI Tools Used: Claude Code (Claude Opus 5.5)
+ * AI-Assisted Activities:
+ *   Refactoring
+ * Human role: plan approval and code review by Duc Anh Nguyen.
  */
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useDecksApi } from '../api/useDecksApi';
-import { useStudyApi } from '../api/useStudyApi';
+import { createDecksApi } from '../api/decks.js';
+import { createStudyApi } from '../api/study.js';
+import { useApi } from '../api/useApi.js';
+import DeckLoadError from '../components/DeckLoadError.jsx';
+import { useLoad } from '../hooks/useLoad.js';
 import RatingButtons from '../components/study/RatingButtons.jsx';
 import SessionSummary from '../components/study/SessionSummary.jsx';
 import StudyCard from '../components/study/StudyCard.jsx';
@@ -40,8 +50,8 @@ import '../study.css';
 export default function StudyPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const decksApi = useDecksApi();
-  const studyApi = useStudyApi();
+  const decksApi = useApi(createDecksApi);
+  const studyApi = useApi(createStudyApi);
   // Both hooks memoize on the session, so this only changes when the session does.
   const api = useMemo(() => ({ getDeck: decksApi.getDeck, ...studyApi }), [decksApi, studyApi]);
   // key={id}: a different deck mounts a fresh view, as on DeckDetailPage.
@@ -60,31 +70,16 @@ export default function StudyPage() {
  *   now     () => number, in milliseconds. Defaults to Date.now; tests pass a fixed clock.
  */
 export function StudyView({ api, deckId, onExit, now = Date.now }) {
-  // Each load has a number. Try again and Study more both bump it, which fetches again,
-  // and the session is keyed on it, so Study more mounts a new session with a fresh
-  // reducer instead of needing a "restart" action.
-  const [load, setLoad] = useState(0);
-  // The result is tagged with the load it answers, so "loading" is derived rather than
-  // switched on at the top of the effect (as in DeckListPage).
-  const [result, setResult] = useState({ key: null, deck: null, due: null, error: null });
-  const loading = result.key !== load;
-  const { deck, due, error } = result;
-  const reload = useCallback(() => setLoad((count) => count + 1), []);
+  // Try again and Study more both reload. The session is keyed on the revision, so Study
+  // more mounts a new session with a fresh reducer instead of needing a "restart" action.
+  const load = useCallback(
+    () => Promise.all([api.getDeck(deckId), api.getDueCards(deckId)]),
+    [api, deckId],
+  );
+  const { data, error, loading, revision, reload } = useLoad(load);
   // 'flashcard' or 'typed'. It lives here, above the keyed session, so Study more keeps it;
   // a new page load starts in flashcard mode (decision A13).
   const [mode, setMode] = useState('flashcard');
-
-  useEffect(() => {
-    let active = true;
-    Promise.all([api.getDeck(deckId), api.getDueCards(deckId)])
-      .then(([nextDeck, nextDue]) => {
-        if (active) setResult({ key: load, deck: nextDeck, due: nextDue, error: null });
-      })
-      .catch((err) => {
-        if (active) setResult({ key: load, deck: null, due: null, error: err });
-      });
-    return () => { active = false; };
-  }, [api, deckId, load]);
 
   if (loading) {
     return <main className="page">
@@ -93,22 +88,11 @@ export function StudyView({ api, deckId, onExit, now = Date.now }) {
   }
 
   if (error) {
-    const notFound = error.code === 'not_found';
-    return <main className="page">
-      <section className="state-panel">
-        <h1>Unable to study this deck</h1>
-        <p className="error-message" role="alert">
-          {notFound ? 'This deck could not be found.' : error.message || 'Could not load this deck.'}
-        </p>
-        <div className="form-actions">
-          {!notFound && <button type="button" className="button primary" onClick={reload}>Try again</button>}
-          <button type="button" className="button secondary" onClick={onExit}>Back to deck</button>
-        </div>
-      </section>
-    </main>;
+    return <DeckLoadError title="Unable to study this deck" error={error} onRetry={reload} onExit={onExit} />;
   }
 
-  return <StudySession key={load} api={api} deck={deck} due={due} now={now}
+  const [deck, due] = data;
+  return <StudySession key={revision} api={api} deck={deck} due={due} now={now}
     mode={mode} onModeChange={setMode} onExit={onExit} onStudyMore={reload} />;
 }
 
