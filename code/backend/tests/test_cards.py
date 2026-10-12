@@ -214,3 +214,27 @@ def test_delete_someone_elses_card_is_404(client, make_user, login_as, make_deck
     assert res.status_code == 404
     # Ask the database directly (not the cached copy) that the card still exists.
     assert Card.query.filter_by(id=card_id).count() == 1
+
+
+# ---- origin (Iteration 3, B4) ------------------------------------------------
+# AI Utilization: 90% | AI Tools Used: Claude | AI-Assisted Activities: unit test creation
+
+
+def test_origin_can_only_be_set_by_accepting_a_suggestion(
+    client, make_user, login_as, make_deck, make_card
+):
+    me = _login(make_user, login_as)
+    deck = make_deck(me)
+
+    # Creating a card that claims to be AI still gives a manual card
+    made = client.post(
+        f"/api/decks/{deck.id}/cards", json={"front": "q", "back": "a", "origin": "ai"}
+    )
+    assert made.status_code == 201
+    assert made.get_json()["origin"] == "manual"
+
+    # Editing an AI card can't turn it manual
+    ai_card = make_card(deck, front="q2", back="a2", origin="ai")
+    edited = client.patch(f"/api/cards/{ai_card.id}", json={"back": "b2", "origin": "manual"})
+    assert edited.status_code == 200
+    assert edited.get_json()["origin"] == "ai"
