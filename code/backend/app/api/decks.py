@@ -25,6 +25,14 @@ logged-in user, so someone else's deck answers 404, never 403.
 #   Documentation
 # Human role: requirements (B2 in code/plans/FINALIZE_ITERATION_2_PLAN.md), direction,
 # and review by Nurzat Mukhamedali.
+#
+# Iteration 3 refactor: own_deck_or_404() is now the only copy; cards.py and generate.py
+# import it instead of each defining their own.
+# AI Utilization: ~100% of that change
+# AI Tools Used: Claude Code (Claude Opus 5.5)
+# AI-Assisted Activities:
+#   Refactoring
+# Human role: plan approval, code review, and hands-on testing by Miles Cameron.
 
 from flask import Blueprint, jsonify
 from flask_login import current_user, login_required
@@ -41,7 +49,8 @@ NAME_MAX = 120
 DESCRIPTION_MAX = 1000
 
 
-def _own_deck_or_404(deck_id: int) -> Deck:
+def own_deck_or_404(deck_id: int) -> Deck:
+    """The logged-in user's deck, or 404. The card and generate routes use it too."""
     deck = Deck.query.filter_by(id=deck_id, user_id=current_user.id).first()
     if deck is None:
         raise not_found("Deck not found")
@@ -148,14 +157,14 @@ def create_deck():
 @decks_bp.get("/<int:deck_id>")
 @login_required
 def get_deck(deck_id):
-    return jsonify(_deck_json(_own_deck_or_404(deck_id), utcnow())), 200
+    return jsonify(_deck_json(own_deck_or_404(deck_id), utcnow())), 200
 
 
 @decks_bp.get("/<int:deck_id>/due")
 @login_required
 def get_due_cards(deck_id):
     """Return this deck's learning, due review, and new cards for a session."""
-    _own_deck_or_404(deck_id)
+    own_deck_or_404(deck_id)
     now = utcnow()
     conditions = _due_conditions(now)
     cards = Card.query.filter_by(deck_id=deck_id)
@@ -186,7 +195,7 @@ def get_due_cards(deck_id):
 @decks_bp.patch("/<int:deck_id>")
 @login_required
 def update_deck(deck_id):
-    deck = _own_deck_or_404(deck_id)
+    deck = own_deck_or_404(deck_id)
     body = json_object()
 
     # Validate everything before changing anything.
@@ -206,7 +215,7 @@ def update_deck(deck_id):
 @decks_bp.delete("/<int:deck_id>")
 @login_required
 def delete_deck(deck_id):
-    deck = _own_deck_or_404(deck_id)
+    deck = own_deck_or_404(deck_id)
     # The database cascade removes the deck's cards.
     db.session.delete(deck)
     db.session.commit()

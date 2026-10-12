@@ -43,9 +43,10 @@ from sqlalchemy import func, select
 from app.ai.cleanup import clean_drafts
 from app.ai.prompts import build_prompt
 from app.ai.provider import AIRateLimited, AIUnavailable, Attachment, CardDraft, get_provider
-from app.errors import ApiError, json_object, not_found, validation_error
+from app.api.decks import own_deck_or_404
+from app.errors import ApiError, json_object, validation_error
 from app.extensions import db
-from app.models import AiGeneration, Card, Deck, utcnow
+from app.models import AiGeneration, Card, utcnow
 
 generate_bp = Blueprint("generate", __name__)
 
@@ -65,13 +66,6 @@ FILE_TYPES = (PDF, "text/plain", "text/markdown")
 
 UNSUPPORTED_FILE = "Only PDF, TXT and MD files are supported. Save other documents as a PDF first."
 SITE_CAP = "AI generation has hit today's limit for the whole site. Try again later."
-
-
-def _own_deck_or_404(deck_id: int) -> Deck:
-    deck = Deck.query.filter_by(id=deck_id, user_id=current_user.id).first()
-    if deck is None:
-        raise not_found("Deck not found")
-    return deck
 
 
 def _valid_mode(body: dict) -> str:
@@ -180,7 +174,7 @@ def generate(deck_id):
     # Before anything reads the body. Flask 3.1 lets one route raise its own limit.
     request.max_content_length = BODY_MAX
 
-    deck = _own_deck_or_404(deck_id)
+    deck = own_deck_or_404(deck_id)
     body = json_object()
 
     mode = _valid_mode(body)

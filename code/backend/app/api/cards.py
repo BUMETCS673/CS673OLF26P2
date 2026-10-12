@@ -30,6 +30,7 @@ from datetime import datetime
 from flask import Blueprint, jsonify
 from flask_login import current_user, login_required
 
+from app.api.decks import own_deck_or_404
 from app.errors import conflict, json_object, not_found, validation_error
 from app.extensions import db
 from app.models import Card, Deck, utcnow
@@ -38,13 +39,6 @@ from app.scheduler import LEARN_AHEAD, CardSchedule, CardState, Rating, answer_c
 cards_bp = Blueprint("cards", __name__)
 
 TEXT_MAX = 2000
-
-
-def _own_deck_or_404(deck_id: int) -> Deck:
-    deck = Deck.query.filter_by(id=deck_id, user_id=current_user.id).first()
-    if deck is None:
-        raise not_found("Deck not found")
-    return deck
 
 
 def _own_card_or_404(card_id: int) -> Card:
@@ -86,7 +80,7 @@ def _is_due(schedule: CardSchedule, now: datetime) -> bool:
 @cards_bp.get("/decks/<int:deck_id>/cards")
 @login_required
 def list_cards(deck_id):
-    deck = _own_deck_or_404(deck_id)
+    deck = own_deck_or_404(deck_id)
     cards = Card.query.filter_by(deck_id=deck.id).order_by(Card.id).all()
     return jsonify([card.to_dict() for card in cards]), 200
 
@@ -94,7 +88,7 @@ def list_cards(deck_id):
 @cards_bp.post("/decks/<int:deck_id>/cards")
 @login_required
 def create_card(deck_id):
-    deck = _own_deck_or_404(deck_id)
+    deck = own_deck_or_404(deck_id)
     body = json_object()
     front = _valid_text(body, "front")
     back = _valid_text(body, "back")
