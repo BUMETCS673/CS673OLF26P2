@@ -12,6 +12,9 @@ databases:
     databaseName: cadence
     user: cadence
     plan: free
+    # Same region as both web services: Render's internal hostnames only resolve within
+    # one region, and an unset region defaults to Oregon.
+    region: ohio
     # Keep this equal to the version in docker-compose.yml and in ci.yml's postgres
     # service. Testing on one major and deploying on another reintroduces exactly the
     # gap the sqlite/postgres test matrix was added to close. If Render doesn't offer 18
