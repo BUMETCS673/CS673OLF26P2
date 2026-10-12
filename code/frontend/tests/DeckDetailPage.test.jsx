@@ -155,7 +155,7 @@ test('on /decks/2, clicking "Generate with AI" goes to /decks/2/generate', async
     <MemoryRouter initialEntries={['/decks/2']}>
       <Routes>
         <Route path="/decks/:id" element={<DeckDetailPage />} />
-        <Route path="/decks/:id/generate" element={<p>Generate page for deck 2</p>} />
+        <Route path="/decks/2/generate" element={<p>Generate page for deck 2</p>} />
       </Routes>
     </MemoryRouter>,
   );

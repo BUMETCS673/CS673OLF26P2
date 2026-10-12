@@ -37,8 +37,11 @@ const STATE_LABELS = { new: 'New', learning: 'Learning', relearning: 'Relearning
 
 export default function StudyCard({ card, revealed }) {
   return <section className="panel study-card" aria-label="Flashcard">
-    <span className="badge badge-blue">{STATE_LABELS[card.state] ?? card.state}</span>
-    {card.origin === 'ai' && <AiBadge />}
+    {/* One line, so the AI label sits beside the state rather than under it. */}
+    <div>
+      <span className="badge badge-blue">{STATE_LABELS[card.state] ?? card.state}</span>
+      {card.origin === 'ai' && <>{' '}<AiBadge /></>}
+    </div>
     <p className="study-card-front">{card.front}</p>
     {/* Polite: the back is announced when it appears, without interrupting. */}
     <div className="study-card-answer" aria-live="polite">
