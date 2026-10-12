@@ -210,10 +210,9 @@ from `main` only, is fine for a semester project; say so in the progress report 
   giving up — it is not a hung deploy.
 - Free Postgres instances **expire after 30 days**. Diarise it; when it happens, create a
   new one and update `DATABASE_URL`. Do not let this bite during the final demo.
-- Migrations run automatically. `preDeployCommand: flask db upgrade` in `render.yaml`
-  applies them after the image builds and before traffic moves to the new version — a
-  failed migration leaves the old version serving rather than breaking the site. No manual
-  Render shell step.
+- Migrations run automatically: the backend's `dockerCommand` in `render.yaml` runs
+  `flask db upgrade` before starting gunicorn. A failed migration fails the health check,
+  so the old version keeps serving.
 
 ## Branch protection
 
