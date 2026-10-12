@@ -24,6 +24,13 @@ rescheduled early (decision L7 in code/plans/LAB_3_PLAN.md).
 #   API endpoint development
 #   Documentation
 # Human role: plan approval, code review, and hands-on testing by Miles Cameron.
+#
+# Iteration 3 refactor: the text checks moved to app/api/validation.py.
+# AI Utilization: ~100% of that change
+# AI Tools Used: Claude Code (Claude Opus 5.5)
+# AI-Assisted Activities:
+#   Refactoring
+# Human role: plan approval and code review by Duc Anh Nguyen.
 
 from datetime import datetime
 
@@ -31,6 +38,7 @@ from flask import Blueprint, jsonify
 from flask_login import current_user, login_required
 
 from app.api.decks import own_deck_or_404
+from app.api.validation import required_text
 from app.errors import conflict, json_object, not_found, validation_error
 from app.extensions import db
 from app.models import Card, Deck, utcnow
@@ -50,18 +58,6 @@ def _own_card_or_404(card_id: int) -> Card:
     if card is None:
         raise not_found("Card not found")
     return card
-
-
-def _valid_text(body: dict, field: str) -> str:
-    value = body.get(field)
-    if not isinstance(value, str) or not value.strip():
-        raise validation_error(f"{field} is required", field=field)
-    value = value.strip()
-    if len(value) > TEXT_MAX:
-        raise validation_error(
-            f"{field} must be at most {TEXT_MAX} characters", field=field
-        )
-    return value
 
 
 def _is_due(schedule: CardSchedule, now: datetime) -> bool:
@@ -90,8 +86,8 @@ def list_cards(deck_id):
 def create_card(deck_id):
     deck = own_deck_or_404(deck_id)
     body = json_object()
-    front = _valid_text(body, "front")
-    back = _valid_text(body, "back")
+    front = required_text(body.get("front"), "front", TEXT_MAX)
+    back = required_text(body.get("back"), "back", TEXT_MAX)
 
     card = Card(deck_id=deck.id, front=front, back=back)
     db.session.add(card)
@@ -106,8 +102,8 @@ def update_card(card_id):
     body = json_object()
 
     # Validate everything before changing anything.
-    new_front = _valid_text(body, "front") if "front" in body else None
-    new_back = _valid_text(body, "back") if "back" in body else None
+    new_front = required_text(body["front"], "front", TEXT_MAX) if "front" in body else None
+    new_back = required_text(body["back"], "back", TEXT_MAX) if "back" in body else None
 
     if new_front is not None:
         card.front = new_front
