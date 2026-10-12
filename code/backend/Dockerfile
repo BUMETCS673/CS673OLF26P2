@@ -51,5 +51,14 @@ USER appuser
 # Shell form because hosts (Render, Fly, Cloud Run) assign the port at runtime through
 # $PORT and the value has to be expanded then, not at build time. `exec` replaces the
 # shell so gunicorn is PID 1 and still receives SIGTERM on shutdown.
+#
+# Migrations run before gunicorn starts, because Render's pre-deploy command is paid-only.
+# Safe only with a single instance. A failed upgrade means gunicorn never starts, so the
+# previous deploy keeps serving. Each wake from sleep re-runs it, a no-op at head.
+#
+# AI Utilization: ~100% of this change
+# AI Tools Used: Claude Code (Claude Opus 5.5)
+# AI-Assisted Activities: moving the migration into the image's start command
+# Human role: diagnosed from the Render deploy log, reviewed the change
 ENV PORT=5000
-CMD ["sh", "-c", "exec gunicorn --bind 0.0.0.0:${PORT} --workers 2 --threads 4 --access-logfile - wsgi:app"]
+CMD ["sh", "-c", "flask db upgrade && exec gunicorn --bind 0.0.0.0:${PORT} --workers 2 --threads 4 --access-logfile - wsgi:app"]
