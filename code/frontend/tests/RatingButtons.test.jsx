@@ -63,3 +63,46 @@ test('each button names its keyboard shortcut, 1 to 4 in order', () => {
   expect(screen.getAllByRole('button').map((button) => button.getAttribute('aria-keyshortcuts')))
     .toEqual(['1', '2', '3', '4']);
 });
+
+// F5 (Iteration 3): the optional `suggested` prop, as C9 in code/plans/ITERATION_3_PLAN.md.
+// The tests above are Iteration 2's and run unchanged.
+//
+// AI Utilization: ~100% of the tests below
+// AI Tools Used: Devin (Cognition AI)
+// AI-Assisted Activities:
+//   Unit test creation
+// Human role: acceptance examples (F5 in the plan), direction, and review by Nurzat Mukhamedali.
+
+test('suggested="good": Good has the class, a name ending ", suggested", and focus; the others none', () => {
+  render(<RatingButtons intervals={NEW_CARD_INTERVALS} disabled={false} onRate={vi.fn()} suggested="good" />);
+
+  const good = screen.getByRole('button', { name: /^Good/ });
+  expect(good.classList.contains('rating-suggested')).toBe(true);
+  expect(good.getAttribute('aria-label')).toBe('Good, 10m, suggested');
+  expect(good.ownerDocument.activeElement).toBe(good);
+  expect(good.querySelector('.rating-suggested-tag').textContent).toBe('Suggested');
+
+  for (const name of ['Again', 'Hard', 'Easy']) {
+    const other = screen.getByRole('button', { name: new RegExp(`^${name}`) });
+    expect(other.classList.contains('rating-suggested')).toBe(false);
+    expect(other.getAttribute('aria-label')).not.toMatch(/suggested$/);
+    expect(other.ownerDocument.activeElement).not.toBe(other);
+    expect(other.querySelector('.rating-suggested-tag')).toBeNull();
+  }
+});
+
+test('without suggested: no button is marked or focused', () => {
+  render(<RatingButtons intervals={NEW_CARD_INTERVALS} disabled={false} onRate={vi.fn()} />);
+
+  expect(names()).toEqual(['Again, 1m', 'Hard, 6m', 'Good, 10m', 'Easy, 4d']);
+  for (const button of screen.getAllByRole('button')) {
+    expect(button.classList.contains('rating-suggested')).toBe(false);
+    expect(button.ownerDocument.activeElement).not.toBe(button);
+  }
+});
+
+test('suggested="again" with no intervals: the name is "Again, suggested"', () => {
+  render(<RatingButtons disabled={false} onRate={vi.fn()} suggested="again" />);
+
+  expect(names()).toEqual(['Again, suggested', 'Hard', 'Good', 'Easy']);
+});

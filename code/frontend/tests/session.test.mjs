@@ -115,3 +115,53 @@ test('a card showing, skipped: the next card shows, and the counts do not change
   assert.equal(next.revealed, false);
   assert.deepEqual(next.counts, { again: 0, hard: 0, good: 0, easy: 0 });
 });
+
+// F5 (Iteration 3): the `answer` field, as C9 in code/plans/ITERATION_3_PLAN.md. One test per
+// session row of F5's acceptance table.
+//
+// AI Utilization: ~100% of the tests below
+// AI Tools Used: Devin (Cognition AI)
+// AI-Assisted Activities:
+//   Unit test creation
+// Human role: acceptance examples (F5 in the plan), direction, and review by Nurzat Mukhamedali.
+
+const GRADED = { typed: 'el aeropuerto', verdict: 'correct', suggestedRating: 'good' };
+const revealWith = (state, graded) => deepFreeze(sessionReducer(state, { type: 'reveal', answer: graded }));
+
+test('initSession: answer is null', () => {
+  assert.equal(start({ new: [newCard(1)] }).answer, null);
+});
+
+test('a card showing, reveal with an answer: revealed, and answer is that object', () => {
+  const state = revealWith(start({ new: [newCard(1)] }), GRADED);
+  assert.equal(state.revealed, true);
+  assert.deepEqual(state.answer, GRADED);
+});
+
+test('a card showing, reveal with no answer: answer is null', () => {
+  const state = reveal(start({ new: [newCard(1)] }));
+  assert.equal(state.revealed, true);
+  assert.equal(state.answer, null);
+});
+
+test('an answer stored, answered: the next card shows with answer null', () => {
+  const state = revealWith(start({ review: [reviewCard(1), reviewCard(2)] }), GRADED);
+  const next = answer(state, 'good', reviewCard(1, 25 * 24 * 60));
+  assert.equal(next.current.id, 2);
+  assert.equal(next.revealed, false);
+  assert.equal(next.answer, null);
+});
+
+test('an answer stored, skipped: the next card shows with answer null', () => {
+  const state = revealWith(start({ review: [reviewCard(1), reviewCard(2)] }), GRADED);
+  const next = skip(state);
+  assert.equal(next.current.id, 2);
+  assert.equal(next.answer, null);
+});
+
+test('the last card answered with an answer stored: finished, with answer null', () => {
+  const state = revealWith(start({ review: [reviewCard(1)] }), GRADED);
+  const next = answer(state, 'good', reviewCard(1, 25 * 24 * 60));
+  assert.equal(next.finished, true);
+  assert.equal(next.answer, null);
+});

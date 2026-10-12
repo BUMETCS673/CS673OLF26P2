@@ -8,6 +8,7 @@
  *     main: Card[],            // review cards, then new cards, in the order they'll show
  *     current: Card | null,    // the card showing, taken out of whichever queue it was in
  *     revealed: boolean,       // whether the current card's answer is showing
+ *     answer: { typed, verdict, suggestedRating } | null,  // typed mode's graded answer (F5)
  *     finished: boolean,       // nothing left to show in this session
  *     counts: { again, hard, good, easy },  // answers given this session, per rating
  *     nextLearningDue: string | null,       // when finished: due_at of the next learning card
@@ -35,7 +36,7 @@ function insertByDue(queue, card) {
  */
 function pickNext(state, now) {
   const { learning, main, lastAnsweredId } = state;
-  const showing = { ...state, revealed: false, finished: false, nextLearningDue: null };
+  const showing = { ...state, revealed: false, answer: null, finished: false, nextLearningDue: null };
 
   if (learning.length > 0 && dueMs(learning[0]) <= now) {
     return { ...showing, current: learning[0], learning: learning.slice(1) };
@@ -52,6 +53,7 @@ function pickNext(state, now) {
     ...state,
     current: null,
     revealed: false,
+    answer: null,
     finished: true,
     nextLearningDue: learning.length > 0 ? learning[0].due_at : null,
   };
@@ -64,6 +66,7 @@ export function initSession({ due, now }) {
     main: [...due.review, ...due.new],
     current: null,
     revealed: false,
+    answer: null,
     finished: false,
     counts: Object.fromEntries(RATINGS.map((rating) => [rating, 0])),
     nextLearningDue: null,
@@ -72,11 +75,17 @@ export function initSession({ due, now }) {
   return pickNext(state, now);
 }
 
-/** Handles `reveal`, `answered`, and `skipped`. Never mutates `state`. */
+/**
+ * Handles `reveal`, `answered`, and `skipped`. Never mutates `state`. In typed mode, `reveal`
+ * carries the graded answer, { typed, verdict, suggestedRating } (C9 in
+ * code/plans/ITERATION_3_PLAN.md); in flashcard mode it carries none, and `answer` is null.
+ */
 export function sessionReducer(state, action) {
   switch (action.type) {
     case 'reveal':
-      return state.current && !state.revealed ? { ...state, revealed: true } : state;
+      return state.current && !state.revealed
+        ? { ...state, revealed: true, answer: action.answer ?? null }
+        : state;
 
     case 'answered': {
       if (!state.current || !state.revealed) return state;
