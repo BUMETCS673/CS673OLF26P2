@@ -1,8 +1,9 @@
+import { pathId as id } from './request.js';
+
 // WS4: inject WS3's shared client here. Pages never call fetch themselves.
 // request(path, { method, body }) must return parsed JSON (or undefined for 204)
 // and reject with an Error carrying the API's code and message.
 export function createDecksApi(request) {
-  const id = (value) => encodeURIComponent(value);
   return {
     listDecks: () => request('/api/decks'),
     createDeck: (body) => request('/api/decks', { method: 'POST', body }),

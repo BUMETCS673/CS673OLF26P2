@@ -25,12 +25,28 @@ logged-in user, so someone else's deck answers 404, never 403.
 #   Documentation
 # Human role: requirements (B2 in code/plans/FINALIZE_ITERATION_2_PLAN.md), direction,
 # and review by Nurzat Mukhamedali.
+#
+# Iteration 3 refactor: own_deck_or_404() is now the only copy; cards.py and generate.py
+# import it instead of each defining their own.
+# AI Utilization: ~100% of that change
+# AI Tools Used: Claude Code (Claude Opus 5.5)
+# AI-Assisted Activities:
+#   Refactoring
+# Human role: plan approval, code review, and hands-on testing by Miles Cameron.
+#
+# Iteration 3 refactor: the text checks moved to app/api/validation.py.
+# AI Utilization: ~100% of that change
+# AI Tools Used: Claude Code (Claude Opus 5.5)
+# AI-Assisted Activities:
+#   Refactoring
+# Human role: plan approval and code review by Duc Anh Nguyen.
 
 from flask import Blueprint, jsonify
 from flask_login import current_user, login_required
 from sqlalchemy import and_, case, func, select
 
-from app.errors import json_object, not_found, validation_error
+from app.api.validation import optional_text, required_text
+from app.errors import json_object, not_found
 from app.extensions import db
 from app.models import Card, Deck, utcnow
 from app.scheduler import LEARN_AHEAD, NEW_CARDS_PER_SESSION, REVIEWS_PER_SESSION, CardState
@@ -41,36 +57,17 @@ NAME_MAX = 120
 DESCRIPTION_MAX = 1000
 
 
-def _own_deck_or_404(deck_id: int) -> Deck:
+def own_deck_or_404(deck_id: int) -> Deck:
+    """The logged-in user's deck, or 404. The card and generate routes use it too."""
     deck = Deck.query.filter_by(id=deck_id, user_id=current_user.id).first()
     if deck is None:
         raise not_found("Deck not found")
     return deck
 
 
-def _valid_name(value) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise validation_error("name is required", field="name")
-    value = value.strip()
-    if len(value) > NAME_MAX:
-        raise validation_error(
-            f"name must be at most {NAME_MAX} characters", field="name"
-        )
-    return value
-
-
-def _valid_description(value):
-    # description is optional and may be cleared with null.
-    if value is None:
-        return None
-    if not isinstance(value, str):
-        raise validation_error("description must be a string", field="description")
-    if len(value) > DESCRIPTION_MAX:
-        raise validation_error(
-            f"description must be at most {DESCRIPTION_MAX} characters",
-            field="description",
-        )
-    return value
+def _valid_description(value) -> str | None:
+    # Optional, kept as sent, and cleared with null.
+    return optional_text(value, "description", DESCRIPTION_MAX, strip=False)
 
 
 def _due_conditions(now):
@@ -136,7 +133,7 @@ def list_decks():
 @login_required
 def create_deck():
     body = json_object()
-    name = _valid_name(body.get("name"))
+    name = required_text(body.get("name"), "name", NAME_MAX)
     description = _valid_description(body.get("description"))
 
     deck = Deck(user_id=current_user.id, name=name, description=description)
@@ -148,14 +145,14 @@ def create_deck():
 @decks_bp.get("/<int:deck_id>")
 @login_required
 def get_deck(deck_id):
-    return jsonify(_deck_json(_own_deck_or_404(deck_id), utcnow())), 200
+    return jsonify(_deck_json(own_deck_or_404(deck_id), utcnow())), 200
 
 
 @decks_bp.get("/<int:deck_id>/due")
 @login_required
 def get_due_cards(deck_id):
     """Return this deck's learning, due review, and new cards for a session."""
-    _own_deck_or_404(deck_id)
+    own_deck_or_404(deck_id)
     now = utcnow()
     conditions = _due_conditions(now)
     cards = Card.query.filter_by(deck_id=deck_id)
@@ -186,13 +183,13 @@ def get_due_cards(deck_id):
 @decks_bp.patch("/<int:deck_id>")
 @login_required
 def update_deck(deck_id):
-    deck = _own_deck_or_404(deck_id)
+    deck = own_deck_or_404(deck_id)
     body = json_object()
 
     # Validate everything before changing anything.
     updates = {}
     if "name" in body:
-        updates["name"] = _valid_name(body["name"])
+        updates["name"] = required_text(body["name"], "name", NAME_MAX)
     if "description" in body:
         updates["description"] = _valid_description(body["description"])
 
@@ -206,7 +203,7 @@ def update_deck(deck_id):
 @decks_bp.delete("/<int:deck_id>")
 @login_required
 def delete_deck(deck_id):
-    deck = _own_deck_or_404(deck_id)
+    deck = own_deck_or_404(deck_id)
     # The database cascade removes the deck's cards.
     db.session.delete(deck)
     db.session.commit()

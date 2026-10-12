@@ -15,6 +15,12 @@ Create Date: 2026-09-26 22:26:00.000000
 
 """
 
+# AI Utilization: ~100% of this file's code
+# AI Tools Used: Claude Code (Claude Opus 5.5)
+# AI-Assisted Activities:
+#   Database migration
+# Human role: plan approval, code review, and hands-on testing by Miles Cameron.
+
 import sqlalchemy as sa
 from alembic import op
 

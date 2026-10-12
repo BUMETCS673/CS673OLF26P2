@@ -1,8 +1,15 @@
 """Application settings, read from the environment.
 
-Nothing secret is written down here. `SECRET_KEY` and `DATABASE_URL` come from the
-environment (docker-compose passes them in; see `code/.env.example`).
+Nothing secret is written down here. `SECRET_KEY`, `DATABASE_URL` and `GEMINI_API_KEY`
+come from the environment (docker-compose passes them in; see `code/.env.example`).
 """
+
+# Iteration 3, Step 0a: _env() and the AI settings.
+# AI Utilization: ~100% of that change
+# AI Tools Used: Claude Code (Claude Opus 5.5)
+# AI-Assisted Activities:
+#   Configuration
+# Human role: plan approval, code review, and hands-on testing by Miles Cameron.
 
 import os
 
@@ -25,6 +32,16 @@ def _database_url() -> str:
     return url
 
 
+def _env(name: str, default: str) -> str:
+    """The environment variable `name`, or `default` when it's unset or blank.
+
+    docker-compose passes `${GEMINI_MODEL:-}` through as an empty string when .env
+    doesn't set it. Read with a plain `os.environ.get(name, default)`, that empty string
+    is "present", and it would replace the default rather than fall back to it.
+    """
+    return (os.environ.get(name) or "").strip() or default
+
+
 class Config:
     # Signs the session cookie. The fallback only exists so `docker compose up` works
     # out of the box; anything deployed anywhere must set this in the environment.
@@ -44,11 +61,32 @@ class Config:
     # naming the field, rather than a blunt "too large" on a legitimate mistake.
     MAX_CONTENT_LENGTH = 1024 * 1024  # 1 MB
 
+    # AI card generation (Iteration 3). Nothing reads these at startup, so the app boots
+    # without a key; generating answers 503 until one is set. See app/ai/provider.py.
+    AI_PROVIDER = _env("AI_PROVIDER", "gemini")  # or "fake": sample cards, no Google
+    GEMINI_API_KEY = _env("GEMINI_API_KEY", "")  # secret: the environment only
+    GEMINI_MODEL = _env("GEMINI_MODEL", "gemini-3.5-flash")
+    AI_DAILY_LIMIT = int(_env("AI_DAILY_LIMIT", "10"))  # generations per user, rolling 24 h
+    # The whole site's generations, rolling 24 h. Google's free quota is per project: 20 a
+    # day for gemini-3.5-flash, so 18 leaves two for smoke checks on the same key. Best
+    # effort, since a call that fails at Google spends quota without saving a row (A19).
+    # Raise it if GEMINI_MODEL moves to Flash-Lite (500 a day).
+    AI_SITE_DAILY_LIMIT = int(_env("AI_SITE_DAILY_LIMIT", "18"))
+    AI_MAX_CARDS = 25  # cards per generate request
+
 
 class TestConfig(Config):
-    """Used by `tests/conftest.py`. Keeps tests off the real database."""
+    """Used by `tests/conftest.py`. Keeps tests off the real database, and off Google."""
 
     TESTING = True
     SQLALCHEMY_DATABASE_URI = os.environ.get("TEST_DATABASE_URL", "sqlite://")
     SECRET_KEY = "test-secret"
     WTF_CSRF_ENABLED = False
+
+    # Rule 16: no test touches the network. The key is blanked too, so a real one in
+    # someone's code/.env can't reach a test that switches AI_PROVIDER to "gemini". The
+    # limits are pinned so a value left in .env can't change what the cap tests count to.
+    AI_PROVIDER = "fake"
+    GEMINI_API_KEY = ""
+    AI_DAILY_LIMIT = 10
+    AI_SITE_DAILY_LIMIT = 18

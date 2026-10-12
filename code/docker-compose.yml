@@ -30,6 +30,13 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/cadence}
       SECRET_KEY: ${SECRET_KEY:-dev-secret-change-me}
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-0}
+      # AI card generation: the stand-in unless .env says "gemini" and has a key. A blank
+      # GEMINI_MODEL falls back to the default in app/config.py.
+      AI_PROVIDER: ${AI_PROVIDER:-fake}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-}
+      AI_DAILY_LIMIT: ${AI_DAILY_LIMIT:-10}
+      AI_SITE_DAILY_LIMIT: ${AI_SITE_DAILY_LIMIT:-18}
     volumes:
       - ./backend:/app
     ports:

@@ -42,3 +42,21 @@ test('a badge names the card state', () => {
     expect(screen.getByText(label)).toBeTruthy();
   }
 });
+
+// ---- F3 (Iteration 3): the AI badge -----------------------------------------------
+// AI Utilization: 90% | AI Tools Used: Claude | AI-Assisted Activities: unit test creation
+// Human role: checked against F3's acceptance examples and opened the PR, by Osasenaga Von Okunbor.
+
+test('an AI card, not revealed, shows "AI-generated" and still hides the back', () => {
+  render(<StudyCard card={{ ...card, origin: 'ai' }} revealed={false} />);
+
+  expect(screen.getByText('AI-generated').className).toBe('badge badge-ai');
+  expect(screen.getByText('Learning')).toBeTruthy();
+  expect(screen.queryByText('la maleta')).toBeNull();
+});
+
+test('a manual card has no AI badge', () => {
+  render(<StudyCard card={{ ...card, origin: 'manual' }} revealed />);
+
+  expect(screen.queryByText('AI-generated')).toBeNull();
+});

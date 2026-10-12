@@ -1,6 +1,9 @@
 import { afterEach, test, vi } from 'vitest';
 import assert from 'node:assert/strict';
-import { decksApi, createAuthenticatedDecksApi } from '../src/api/decks.client.js';
+import { createDecksApi } from '../src/api/decks.js';
+import { createAuthenticatedApi, requestApi } from '../src/api/request.js';
+
+const decksApi = createDecksApi(requestApi);
 
 // Each test replaces fetch with a spy; put the real one back afterwards.
 afterEach(() => { vi.restoreAllMocks(); });
@@ -49,7 +52,7 @@ test('WS3 validation and auth errors reach WS4 unchanged', async () => {
 
 test('expired sessions notify auth and reject all nine deck/card operations', async () => {
   let expirations = 0;
-  const api = createAuthenticatedDecksApi(() => { expirations += 1; });
+  const api = createAuthenticatedApi(createDecksApi, () => { expirations += 1; });
   vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(JSON.stringify({
     error: { code: 'unauthorized', message: 'Authentication required.' },
   }), { status: 401 }));
@@ -72,7 +75,7 @@ test('expired sessions notify auth and reject all nine deck/card operations', as
 
 test('ordinary failures and successful requests preserve the signed-in session', async () => {
   let expirations = 0;
-  const api = createAuthenticatedDecksApi(() => { expirations += 1; });
+  const api = createAuthenticatedApi(createDecksApi, () => { expirations += 1; });
   vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response('[]', { status: 200 }));
   assert.deepEqual(await api.listDecks(), []);
   globalThis.fetch.mockImplementation(async () => new Response(null, { status: 204 }));

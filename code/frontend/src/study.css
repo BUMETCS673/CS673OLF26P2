@@ -284,3 +284,135 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* --- F5 (Iteration 3): suggested rating and mode toggle ----------------------------- */
+
+/*
+ * AI Utilization: ~100% of this section
+ * AI Tools Used: Devin (Cognition AI)
+ * AI-Assisted Activities:
+ *   CSS layout on the style guide's tokens
+ * Human role: direction and review by Nurzat Mukhamedali.
+ */
+
+/* The suggested rating is boxed in the primary color; focus adds the usual gold ring. */
+.rating-button.rating-suggested {
+  border: 2px solid var(--color-primary);
+}
+
+.rating-suggested-tag {
+  font: 600 10px/1.2 var(--font-body);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-primary);
+}
+
+/* The same segmented control as the generate page's mode choice. */
+.study-mode-toggle {
+  display: inline-flex;
+  gap: var(--space-1);
+  margin: 0;
+  padding: var(--space-1);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface);
+}
+
+.study-mode {
+  position: relative;
+  margin: 0;
+}
+
+/* The radio stays in the page for the keyboard and screen readers; its label is what shows. */
+.study-mode input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+}
+
+.study-mode span {
+  display: block;
+  padding: var(--space-1) var(--space-3);
+  border-radius: 999px;
+  font: 600 13px/1.4 var(--font-body);
+  white-space: nowrap;
+  color: var(--color-muted);
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.study-mode input:checked + span {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.study-mode input:focus-visible + span {
+  outline: 3px solid var(--color-gold-strong);
+  outline-offset: 2px;
+}
+
+/* --- F6 (Iteration 3): typed mode -------------------------------------------------- */
+
+/*
+ * AI Utilization: ~100% of this section
+ * AI Tools Used: Devin (Cognition AI)
+ * AI-Assisted Activities:
+ *   CSS layout on the style guide's tokens
+ * Human role: direction and review by Nurzat Mukhamedali.
+ */
+
+/* The mode toggle beside the cards-left count. */
+.study-heading-side {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+}
+
+.typed-answer {
+  margin-bottom: var(--space-4);
+}
+
+.typed-answer label {
+  display: block;
+  margin-bottom: var(--space-2);
+  font: 600 13px/1.4 var(--font-body);
+}
+
+/* The box takes the full width under the card, with Check beside it. */
+.typed-answer-row {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.typed-answer-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.typed-answer-graded {
+  text-align: center;
+}
+
+.typed-verdict {
+  margin: 0;
+  font: 700 18px/1.3 var(--font-heading);
+}
+
+.typed-verdict.correct { color: var(--color-primary); }
+.typed-verdict.incorrect { color: var(--color-danger); }
+
+.typed-typed {
+  margin: var(--space-1) 0 0;
+  overflow-wrap: anywhere;
+  color: var(--color-muted);
+}
+
+@media (max-width: 640px) {
+  .study-heading-side {
+    justify-content: flex-start;
+  }
+}

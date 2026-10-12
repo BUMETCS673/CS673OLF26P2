@@ -140,3 +140,28 @@ test('deleting a card asks first, then removes it', async () => {
   expect(api.deleteCard).toHaveBeenCalledWith(7);
   expect(screen.getByText('Card deleted.')).toBeTruthy();
 });
+
+// ---- F3 (Iteration 3): the page wrapper routes Generate with AI ---------------------
+// AI Utilization: 90% | AI Tools Used: Claude | AI-Assisted Activities: unit test creation
+// Human role: checked against F3's acceptance examples and opened the PR, by Osasenaga Von Okunbor.
+
+test('on /decks/2, clicking "Generate with AI" goes to /decks/2/generate', async () => {
+  vi.resetModules();
+  const api = fakeApi([]);
+  vi.doMock('../src/api/useApi', () => ({ useApi: () => api }));
+  const { default: DeckDetailPage } = await import('../src/pages/DeckDetailPage.jsx');
+  const { MemoryRouter, Route, Routes } = await import('react-router-dom');
+
+  render(
+    <MemoryRouter initialEntries={['/decks/2']}>
+      <Routes>
+        <Route path="/decks/:id" element={<DeckDetailPage />} />
+        <Route path="/decks/2/generate" element={<p>Generate page for deck 2</p>} />
+      </Routes>
+    </MemoryRouter>,
+  );
+  fireEvent.click(await screen.findByRole('button', { name: 'Generate with AI' }));
+
+  expect(await screen.findByText('Generate page for deck 2')).toBeTruthy();
+  vi.doUnmock('../src/api/useApi');
+});

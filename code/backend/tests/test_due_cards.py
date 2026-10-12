@@ -1,5 +1,12 @@
 """Story 2 acceptance tests: serve a deck's due cards (Lab 3)."""
 
+# AI Utilization: ~100% of this file's code
+# AI Tools Used: OpenAI Codex
+# AI-Assisted Activities:
+#   API test creation (from the Story 2 acceptance criteria)
+# Human role: directed the red and green phases, and confirmed the tests failed before the
+# code and passed after, locally and in Docker, by Nurzat Mukhamedali.
+
 from datetime import timedelta
 
 from app.models.base import iso, utcnow

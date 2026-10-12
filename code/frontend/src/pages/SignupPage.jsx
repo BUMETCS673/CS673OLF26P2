@@ -15,10 +15,21 @@
  * Human role: plan approval, code review, and hands-on testing by Miles Cameron.
  */
 
+/*
+ * Iteration 3 refactor: the submit flow and fields through useAuthForm() and AuthField.
+ * AI Utilization: ~100% of that change
+ * AI Tools Used: Claude Code (Claude Opus 5.5)
+ * AI-Assisted Activities:
+ *   Refactoring
+ * Human role: plan approval and code review by Duc Anh Nguyen.
+ */
+
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { useAuth } from "../auth/AuthContext";
+import AuthField from "../auth/AuthField";
+import { useAuthForm } from "../auth/useAuthForm";
 import {
   MAX_DISPLAY_NAME_LENGTH,
   MAX_EMAIL_LENGTH,
@@ -36,42 +47,25 @@ export default function SignupPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
-  const [fieldErrors, setFieldErrors] = useState({});
-  const [formError, setFormError] = useState(null);
-  const [submitting, setSubmitting] = useState(false);
 
-  async function handleSubmit(event) {
-    event.preventDefault();
-
-    const errors = {};
-    const emailError = validateEmail(email);
-    const passwordError = validatePassword(password);
-    const displayNameError = validateDisplayName(displayName);
-    if (emailError) errors.email = emailError;
-    if (passwordError) errors.password = passwordError;
-    if (displayNameError) errors.display_name = displayNameError;
-
-    setFieldErrors(errors);
-    setFormError(null);
-    if (Object.keys(errors).length > 0) return;
-
-    setSubmitting(true);
-    try {
+  const { fieldErrors, formError, submitting, handleSubmit } = useAuthForm({
+    validate() {
+      const errors = {};
+      const emailError = validateEmail(email);
+      const passwordError = validatePassword(password);
+      const displayNameError = validateDisplayName(displayName);
+      if (emailError) errors.email = emailError;
+      if (passwordError) errors.password = passwordError;
+      if (displayNameError) errors.display_name = displayNameError;
+      return errors;
+    },
+    async submit() {
       await register({ email: email.trim(), password, displayName });
       navigate("/decks", { replace: true });
-    } catch (err) {
-      if (err.code === "conflict") {
-        // The email is taken -- that belongs next to the email field, not in a banner.
-        setFieldErrors({ email: err.message });
-      } else if (err.code === "validation_error" && err.field) {
-        setFieldErrors({ [err.field]: err.message });
-      } else {
-        setFormError(err.message);
-      }
-    } finally {
-      setSubmitting(false);
-    }
-  }
+    },
+    // The email is taken -- that belongs next to the email field, not in a banner.
+    errorFields: { conflict: "email" },
+  });
 
   return (
     <main className="auth-page">
@@ -85,53 +79,42 @@ export default function SignupPage() {
           </p>
         )}
 
-        <label htmlFor="email">Email</label>
-        <input
+        <AuthField
           id="email"
-          name="email"
+          label="Email"
           type="email"
           autoComplete="email"
           maxLength={MAX_EMAIL_LENGTH}
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          aria-invalid={Boolean(fieldErrors.email)}
+          error={fieldErrors.email}
           disabled={submitting}
         />
-        {fieldErrors.email && <p className="field-error">{fieldErrors.email}</p>}
 
-        <label htmlFor="display_name">
-          Display name <span className="optional">(optional)</span>
-        </label>
-        <input
+        <AuthField
           id="display_name"
-          name="display_name"
+          label={<>Display name <span className="optional">(optional)</span></>}
           type="text"
           autoComplete="nickname"
           maxLength={MAX_DISPLAY_NAME_LENGTH}
           value={displayName}
           onChange={(e) => setDisplayName(e.target.value)}
-          aria-invalid={Boolean(fieldErrors.display_name)}
+          error={fieldErrors.display_name}
           disabled={submitting}
         />
-        {fieldErrors.display_name && <p className="field-error">{fieldErrors.display_name}</p>}
 
-        <label htmlFor="password">Password</label>
-        <input
+        <AuthField
           id="password"
-          name="password"
+          label="Password"
           type="password"
           autoComplete="new-password"
           maxLength={MAX_PASSWORD_LENGTH}
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          aria-invalid={Boolean(fieldErrors.password)}
+          error={fieldErrors.password}
+          hint={`At least ${MIN_PASSWORD_LENGTH} characters.`}
           disabled={submitting}
         />
-        {fieldErrors.password ? (
-          <p className="field-error">{fieldErrors.password}</p>
-        ) : (
-          <p className="field-hint">At least {MIN_PASSWORD_LENGTH} characters.</p>
-        )}
 
         <button className="button primary" type="submit" disabled={submitting}>
           {submitting ? "Creating account…" : "Create account"}

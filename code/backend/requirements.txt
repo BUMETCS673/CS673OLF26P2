@@ -9,3 +9,5 @@ Flask-Login==0.6.3
 psycopg2-binary==2.9.13
 python-dotenv==1.2.3
 pytest==9.1.1
+# Gemini, for AI card generation (Iteration 3, A5). Only app/ai/provider.py imports it.
+google-genai==2.29.0

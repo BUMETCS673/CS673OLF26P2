@@ -146,6 +146,7 @@ def test_due_cards_still_have_every_card_field(client, make_user, login_as, make
         "back",
         "state",
         "due_at",
+        "origin",  # Iteration 3, Step 0a (C1)
         "created_at",
         "updated_at",
         "intervals",

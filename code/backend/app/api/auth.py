@@ -16,6 +16,14 @@ Security notes, matching the plan's "Security basics":
     wrong, so nobody can use this endpoint to discover which emails have accounts
 """
 
+# Iteration 3 refactor: the required and optional string checks moved to
+# app/api/validation.py.
+# AI Utilization: ~100% of that change
+# AI Tools Used: Claude Code (Claude Opus 5.5)
+# AI-Assisted Activities:
+#   Refactoring
+# Human role: plan approval and code review by Duc Anh Nguyen.
+
 import re
 
 from flask import Blueprint, jsonify
@@ -23,6 +31,7 @@ from flask_login import current_user, login_required, login_user, logout_user
 from sqlalchemy.exc import IntegrityError
 from werkzeug.security import check_password_hash, generate_password_hash
 
+from app.api.validation import optional_text, required_text
 from app.errors import conflict, json_object, unauthorized, validation_error
 from app.extensions import db
 from app.models import User
@@ -56,9 +65,9 @@ def register():
     body = json_object()
     # Still needed even though the model normalizes on assignment: this value is also
     # used for the duplicate lookup below, and a query compares the string as given.
-    email = User.normalize_email(_required_string(body, "email"))
-    password = _required_string(body, "password", strip=False)
-    display_name = _optional_string(body, "display_name", MAX_DISPLAY_NAME_LENGTH)
+    email = User.normalize_email(required_text(body.get("email"), "email"))
+    password = required_text(body.get("password"), "password", strip=False)
+    display_name = optional_text(body.get("display_name"), "display_name", MAX_DISPLAY_NAME_LENGTH)
 
     _validate_email(email)
     _validate_password(password)
@@ -89,8 +98,8 @@ def login():
     body = json_object()
     # Not redundant with the model's validator -- that one only applies to what gets
     # written. This goes into a query, so without it MILES@BU.EDU finds nobody.
-    email = User.normalize_email(_required_string(body, "email"))
-    password = _required_string(body, "password", strip=False)
+    email = User.normalize_email(required_text(body.get("email"), "email"))
+    password = required_text(body.get("password"), "password", strip=False)
 
     if len(password) > MAX_PASSWORD_LENGTH:
         # No stored password can be longer than the cap, so this can't be anyone's --
@@ -128,40 +137,11 @@ def me():
 # checks are here because the frontend can be bypassed and is never the real defense.
 
 
-def _required_string(body: dict, field: str, strip: bool = True) -> str:
-    value = body.get(field)
-    if value is None:
-        raise validation_error(f"{field} is required.", field=field)
-    if not isinstance(value, str):
-        raise validation_error(f"{field} must be text.", field=field)
-    if strip:
-        value = value.strip()
-    if not value:
-        raise validation_error(f"{field} is required.", field=field)
-    return value
-
-
-def _optional_string(body: dict, field: str, max_length: int) -> str | None:
-    value = body.get(field)
-    if value is None:
-        return None
-    if not isinstance(value, str):
-        raise validation_error(f"{field} must be text.", field=field)
-    value = value.strip()
-    if not value:
-        return None
-    if len(value) > max_length:
-        raise validation_error(
-            f"{field} must be {max_length} characters or fewer.", field=field
-        )
-    return value
-
-
 def _validate_email(email: str) -> None:
     # Length first, so the pattern below never runs against an unbounded string.
     if len(email) > MAX_EMAIL_LENGTH:
         raise validation_error(
-            f"email must be {MAX_EMAIL_LENGTH} characters or fewer.", field="email"
+            f"email must be at most {MAX_EMAIL_LENGTH} characters.", field="email"
         )
     if not EMAIL_PATTERN.match(email):
         raise validation_error("email must look like name@example.com.", field="email")
@@ -175,7 +155,7 @@ def _validate_password(password: str) -> None:
         )
     if len(password) > MAX_PASSWORD_LENGTH:
         raise validation_error(
-            f"password must be {MAX_PASSWORD_LENGTH} characters or fewer.",
+            f"password must be at most {MAX_PASSWORD_LENGTH} characters.",
             field="password",
         )
     if not password.strip():
