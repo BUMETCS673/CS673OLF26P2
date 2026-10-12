@@ -152,7 +152,7 @@ setup (P1–P3). They meet only through the contracts in this plan.
 | File | What's there |
 | --- | --- |
 | `backend/app/errors.py` | `ApiError`, the status → code table, `json_object()`, `not_found()`, `validation_error()` |
-| `backend/app/api/cards.py` | `_own_deck_or_404()` and `_own_card_or_404()`: the ownership pattern to copy |
+| `backend/app/api/decks.py`, `cards.py` | `own_deck_or_404()`, the one deck ownership check, to import; and `_own_card_or_404()`, the pattern to copy for other rows |
 | `backend/app/models/card.py` | `Card.to_dict()` and `to_study_dict(now)`, which spreads `to_dict()`, so a field added to one reaches both |
 | `backend/app/models/deck.py` | `card_count`, counted in SQL: what B3 uses for the 10-card rule |
 | `backend/migrations/versions/…_0002_card_scheduling.py` | a hand-written migration using `batch_alter_table`: the pattern 0003 follows |
@@ -1324,7 +1324,7 @@ model and the time, never the key.
 1. **First line of the route:** `request.max_content_length = 6 * 1024 * 1024`. It has to come
    before anything reads the body. Flask 3.1 lets one route raise its own limit, and every other
    route keeps the 1 MB from `MAX_CONTENT_LENGTH`.
-2. Ownership, with the same `_own_deck_or_404()` pattern as `cards.py`.
+2. Ownership, with `own_deck_or_404()` imported from `decks.py`.
 3. `json_object()`, then each field in C2's order. Decode `file.data` with
    `base64.b64decode(data, validate=True)`. Check PDFs by their first bytes, and decode text with
    `utf-8-sig`, so a byte-order mark doesn't count against it.

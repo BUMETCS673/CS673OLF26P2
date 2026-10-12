@@ -1,3 +1,10 @@
+// AI Utilization: ~100% of this file's code
+// AI Tools Used: Claude Code (Claude Opus 5.5)
+// AI-Assisted Activities:
+//   Unit test creation (red first, from Story 3's acceptance examples)
+// Human role: checked every Given/When/Then row in the plan had a test before opening the
+// PR, by Duc Anh Nguyen.
+
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { initSession, sessionReducer } from '../src/study/session.js';
