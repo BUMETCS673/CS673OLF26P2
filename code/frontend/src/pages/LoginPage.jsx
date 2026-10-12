@@ -16,10 +16,21 @@
  * Human role: plan approval, code review, and hands-on testing by Miles Cameron.
  */
 
+/*
+ * Iteration 3 refactor: the submit flow and fields through useAuthForm() and AuthField.
+ * AI Utilization: ~100% of that change
+ * AI Tools Used: Claude Code (Claude Opus 5.5)
+ * AI-Assisted Activities:
+ *   Refactoring
+ * Human role: plan approval and code review by Duc Anh Nguyen.
+ */
+
 import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { useAuth } from "../auth/AuthContext";
+import AuthField from "../auth/AuthField";
+import { useAuthForm } from "../auth/useAuthForm";
 
 export default function LoginPage() {
   const { login } = useAuth();
@@ -28,40 +39,24 @@ export default function LoginPage() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [fieldErrors, setFieldErrors] = useState({});
-  const [formError, setFormError] = useState(null);
-  const [submitting, setSubmitting] = useState(false);
 
   // Where they were headed before ProtectedRoute sent them here, if anywhere.
   const destination = location.state?.from?.pathname ?? "/decks";
 
-  async function handleSubmit(event) {
-    event.preventDefault();
-
-    const errors = {};
-    if (!email.trim()) errors.email = "Email is required.";
-    if (!password) errors.password = "Password is required.";
-
-    setFieldErrors(errors);
-    setFormError(null);
-    if (Object.keys(errors).length > 0) return;
-
-    setSubmitting(true);
-    try {
+  // A 401, the usual failure, goes in the banner and says nothing about which half of
+  // the pair was wrong -- that's deliberate on the backend, so don't dress it up.
+  const { fieldErrors, formError, submitting, handleSubmit } = useAuthForm({
+    validate() {
+      const errors = {};
+      if (!email.trim()) errors.email = "Email is required.";
+      if (!password) errors.password = "Password is required.";
+      return errors;
+    },
+    async submit() {
       await login({ email: email.trim(), password });
       navigate(destination, { replace: true });
-    } catch (err) {
-      if (err.code === "validation_error" && err.field) {
-        setFieldErrors({ [err.field]: err.message });
-      } else {
-        // Covers the 401, which is the usual one and says nothing about which half of
-        // the pair was wrong -- that's deliberate on the backend, so don't dress it up.
-        setFormError(err.message);
-      }
-    } finally {
-      setSubmitting(false);
-    }
-  }
+    },
+  });
 
   return (
     <main className="auth-page">
@@ -75,31 +70,27 @@ export default function LoginPage() {
           </p>
         )}
 
-        <label htmlFor="email">Email</label>
-        <input
+        <AuthField
           id="email"
-          name="email"
+          label="Email"
           type="email"
           autoComplete="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          aria-invalid={Boolean(fieldErrors.email)}
+          error={fieldErrors.email}
           disabled={submitting}
         />
-        {fieldErrors.email && <p className="field-error">{fieldErrors.email}</p>}
 
-        <label htmlFor="password">Password</label>
-        <input
+        <AuthField
           id="password"
-          name="password"
+          label="Password"
           type="password"
           autoComplete="current-password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          aria-invalid={Boolean(fieldErrors.password)}
+          error={fieldErrors.password}
           disabled={submitting}
         />
-        {fieldErrors.password && <p className="field-error">{fieldErrors.password}</p>}
 
         <button className="button primary" type="submit" disabled={submitting}>
           {submitting ? "Signing in…" : "Sign in"}

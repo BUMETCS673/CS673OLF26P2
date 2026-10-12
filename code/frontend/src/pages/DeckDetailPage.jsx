@@ -19,11 +19,23 @@
  * opened the PR, by Osasenaga Von Okunbor.
  */
 
-import React, { useEffect, useState } from 'react';
+/*
+ * Iteration 3 refactor: loading through useLoad(), useApi() and deckLoadMessage().
+ * AI Utilization: ~100% of that change
+ * AI Tools Used: Claude Code (Claude Opus 5.5)
+ * AI-Assisted Activities:
+ *   Refactoring
+ * Human role: plan approval and code review by Duc Anh Nguyen.
+ */
+
+import React, { useCallback, useEffect, useState } from 'react';
 import CardForm from '../components/CardForm';
 import CardRow from '../components/CardRow';
+import { deckLoadMessage } from '../components/deckLoadMessage.js';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { useDecksApi } from '../api/useDecksApi';
+import { createDecksApi } from '../api/decks.js';
+import { useApi } from '../api/useApi.js';
+import { useLoad } from '../hooks/useLoad.js';
 import { describeDueCounts } from '../study/describeSchedule.js';
 
 export default function DeckDetailPage() {
@@ -34,7 +46,7 @@ export default function DeckDetailPage() {
 }
 
 function RoutedDeckDetail({ id, location, navigate }) {
-  const decksApi = useDecksApi();
+  const decksApi = useApi(createDecksApi);
   // Consume the setup flag once. Back/Forward must not replay first-card setup.
   const [startAdding] = useState(Boolean(location.state?.startAdding));
   useEffect(() => {
@@ -49,20 +61,21 @@ function RoutedDeckDetail({ id, location, navigate }) {
 }
 
 export function DeckDetailView({ api, deckId, onBack, onStudy, onGenerate, startAdding = false }) {
-  const [revision, setRevision] = useState(0);
-  // Deck, cards and the load error in one state tagged with the request that produced
-  // them, so `loading` is derived rather than switched on at the top of the effect --
-  // see the same comment in DeckListPage. The page is mounted with key={id}, so a
-  // different deck remounts this component rather than re-running the effect.
-  const [result, setResult] = useState({ key: null, deck: null, cards: [], error: '', now: 0 });
-  const requestKey = `${deckId}#${revision}`;
-  const loading = result.key !== requestKey;
-  const { deck, cards, error, now } = result;
+  // The page is mounted with key={id}, so a different deck remounts this component rather
+  // than loading again in place. `now` is taken once per load, for every CardRow.
+  const load = useCallback(
+    () => Promise.all([api.getDeck(deckId), api.listCards(deckId)])
+      .then(([deck, cards]) => ({ deck, cards, now: Date.now() })),
+    [api, deckId],
+  );
+  const { data, error: loadError, loading, reload, setData } = useLoad(load);
+  const { deck = null, cards = [], now = 0 } = data ?? {};
+  const error = loadError ? deckLoadMessage(loadError) : '';
   const [adding, setAdding] = useState(startAdding);
   const [notice, setNotice] = useState('');
 
   function setCards(update) {
-    setResult((current) => ({
+    setData((current) => ({
       ...current,
       cards: typeof update === 'function' ? update(current.cards) : update,
     }));
@@ -72,17 +85,9 @@ export function DeckDetailView({ api, deckId, onBack, onStudy, onGenerate, start
   // If the request fails, the old counts stay.
   function refreshDeck() {
     api.getDeck(deckId)
-      .then((nextDeck) => setResult((current) => ({ ...current, deck: nextDeck })))
+      .then((nextDeck) => setData((current) => ({ ...current, deck: nextDeck })))
       .catch(() => {});
   }
-
-  useEffect(() => {
-    let active = true;
-    Promise.all([api.getDeck(deckId), api.listCards(deckId)])
-      .then(([nextDeck, nextCards]) => { if (active) setResult({ key: requestKey, deck: nextDeck, cards: nextCards, error: '', now: Date.now() }); })
-      .catch((err) => { if (active) setResult({ key: requestKey, deck: null, cards: [], now: 0, error: err.code === 'not_found' ? 'This deck could not be found.' : err.message || 'Could not load this deck.' }); });
-    return () => { active = false; };
-  }, [api, deckId, requestKey]);
 
   const dueSummary = deck && describeDueCounts(deck.due_counts);
 
@@ -91,7 +96,7 @@ export function DeckDetailView({ api, deckId, onBack, onStudy, onGenerate, start
     <p className="sr-only" role="status">{notice}</p>
     {loading ? <div className="state-panel" role="status">Loading your cards…</div>
       : error ? <div className="state-panel"><h1>Unable to open deck</h1><p className="error-message" role="alert">{error}</p>
-        <button className="button secondary" onClick={() => setRevision((n) => n + 1)}>Try again</button></div>
+        <button className="button secondary" onClick={reload}>Try again</button></div>
       : deck && <>
         <div className="page-heading"><div><p className="eyebrow">Your deck · {cards.length} {cards.length === 1 ? 'card' : 'cards'}</p>
           <h1>{deck.name}</h1>{dueSummary && <span className="badge badge-gold due-summary">{dueSummary}</span>}

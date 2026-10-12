@@ -6,17 +6,26 @@
  *   UI component development
  * Human role: requirements (F4 in code/plans/FINALIZE_ITERATION_2_PLAN.md), direction,
  * and review by Nurzat Mukhamedali.
+ *
+ * Iteration 3 refactor: loading through useLoad() and useApi().
+ * AI Utilization: ~100% of that change
+ * AI Tools Used: Claude Code (Claude Opus 5.5)
+ * AI-Assisted Activities:
+ *   Refactoring
+ * Human role: plan approval and code review by Duc Anh Nguyen.
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import DeckForm from '../components/DeckForm';
 import { useNavigate } from 'react-router-dom';
-import { useDecksApi } from '../api/useDecksApi';
+import { createDecksApi } from '../api/decks.js';
+import { useApi } from '../api/useApi.js';
+import { useLoad } from '../hooks/useLoad.js';
 import { describeDueCounts } from '../study/describeSchedule.js';
 
 export default function DeckListPage() {
   const navigate = useNavigate();
-  const decksApi = useDecksApi();
+  const decksApi = useApi(createDecksApi);
   return <div className="ws4"><DeckListView api={decksApi}
     onOpenDeck={(id) => navigate(`/decks/${id}`)}
     onStudyDeck={(id) => navigate(`/decks/${id}/study`)}
@@ -25,15 +34,11 @@ export default function DeckListPage() {
 }
 
 export function DeckListView({ api, onOpenDeck, onStudyDeck, onDeckCreated = onOpenDeck }) {
-  const [revision, setRevision] = useState(0);
-  // Decks, the load error and "which request produced them" live in one state tagged
-  // with the request it answers, so `loading` is derived instead of being switched on at
-  // the top of the effect. A synchronous setState there costs an extra render pass every
-  // time `revision` changes, which is what react-hooks/set-state-in-effect flags.
-  const [result, setResult] = useState({ key: null, decks: [], error: '' });
-  const requestKey = String(revision);
-  const loading = result.key !== requestKey;
-  const { decks, error } = result;
+  const load = useCallback(() => api.listDecks(), [api]);
+  // setDecks edits the loaded list in place, with the same shape as a useState setter.
+  const { data, error: loadError, loading, reload, setData: setDecks } = useLoad(load);
+  const decks = data ?? [];
+  const error = loadError ? loadError.message || 'Could not load your decks.' : '';
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState(null);
   const [deleting, setDeleting] = useState(null);
@@ -41,21 +46,6 @@ export function DeckListView({ api, onOpenDeck, onStudyDeck, onDeckCreated = onO
   const [deleteError, setDeleteError] = useState('');
   const [notice, setNotice] = useState('');
 
-  // Local edits to the loaded list -- same shape as a useState setter, so the handlers
-  // below read the way they did before the list moved inside `result`.
-  function setDecks(update) {
-    setResult((current) => ({
-      ...current,
-      decks: typeof update === 'function' ? update(current.decks) : update,
-    }));
-  }
-
-  useEffect(() => {
-    let active = true;
-    api.listDecks().then((nextDecks) => { if (active) setResult({ key: requestKey, decks: nextDecks, error: '' }); })
-      .catch((err) => { if (active) setResult({ key: requestKey, decks: [], error: err.message || 'Could not load your decks.' }); });
-    return () => { active = false; };
-  }, [api, requestKey]);
 
   async function remove(deck) {
     setBusy(true); setDeleteError('');
@@ -86,7 +76,7 @@ export function DeckListView({ api, onOpenDeck, onStudyDeck, onDeckCreated = onO
     </section>}
     {loading ? <div className="state-panel" role="status">Loading your decks…</div>
       : error ? <div className="state-panel"><p role="alert" className="error-message">{error}</p>
-        <button className="button secondary" onClick={() => setRevision((n) => n + 1)}>Try again</button></div>
+        <button className="button secondary" onClick={reload}>Try again</button></div>
       : decks.length === 0 ? !creating && <section className="empty-state"><div className="empty-icon" aria-hidden="true">▤</div>
         <h2>Your first deck starts here</h2><p>Give a topic a home, then add the things you want to remember.</p>
         <button className="button primary" onClick={() => setCreating(true)}>Create your first deck</button>

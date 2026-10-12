@@ -6,7 +6,8 @@
 
 import { afterEach, test, vi } from 'vitest';
 import assert from 'node:assert/strict';
-import { createAuthenticatedGenerateApi } from '../src/api/generate.client.js';
+import { createGenerateApi } from '../src/api/generate.js';
+import { createAuthenticatedApi } from '../src/api/request.js';
 
 // Each test replaces fetch with a spy; put the real one back afterwards.
 afterEach(() => { vi.restoreAllMocks(); });
@@ -32,7 +33,7 @@ const GENERATION = {
 
 test('generate is a POST to /api/decks/:id/generate with the session cookie and the body', async () => {
   const calls = mockFetch(() => json(GENERATION, 201));
-  const api = createAuthenticatedGenerateApi(() => {});
+  const api = createAuthenticatedApi(createGenerateApi, () => {});
   const body = { mode: 'prompt', count: 1, prompt: 'Capitals' };
 
   assert.deepEqual(await api.generate(3, body), GENERATION);
@@ -46,7 +47,7 @@ test('generate is a POST to /api/decks/:id/generate with the session cookie and 
 
 test('acceptCards and rejectCards POST the indexes to the generation', async () => {
   const calls = mockFetch(() => json(GENERATION));
-  const api = createAuthenticatedGenerateApi(() => {});
+  const api = createAuthenticatedApi(createGenerateApi, () => {});
 
   await api.acceptCards(7, [0, 2]);
   await api.rejectCards(7, [1]);
@@ -59,7 +60,7 @@ test('acceptCards and rejectCards POST the indexes to the generation', async () 
 
 test('a 429 rejects with code rate_limited and keeps the learner signed in', async () => {
   let expirations = 0;
-  const api = createAuthenticatedGenerateApi(() => { expirations += 1; });
+  const api = createAuthenticatedApi(createGenerateApi, () => { expirations += 1; });
   mockFetch(() => apiError(429, 'rate_limited', 'You have reached the limit.'));
 
   await assert.rejects(api.generate(3, { mode: 'suggest', count: 5 }), {
@@ -70,7 +71,7 @@ test('a 429 rejects with code rate_limited and keeps the learner signed in', asy
 
 test('a 401 signs the learner out and still rejects, for every operation', async () => {
   let expirations = 0;
-  const api = createAuthenticatedGenerateApi(() => { expirations += 1; });
+  const api = createAuthenticatedApi(createGenerateApi, () => { expirations += 1; });
   mockFetch(() => apiError(401, 'unauthorized', 'Authentication required.'));
 
   await assert.rejects(api.generate(3, { mode: 'suggest', count: 5 }), { status: 401, code: 'unauthorized' });

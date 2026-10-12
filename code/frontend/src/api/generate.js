@@ -7,12 +7,13 @@
  * Human role: plan approval, code review, and hands-on testing by Miles Cameron.
  */
 
+import { pathId as id } from './request.js';
+
 // AI card generation's three endpoints: generate a batch (B3), then accept or reject its
 // cards (B4). Built like createStudyApi, so it can be tested without fetch: request(path,
 // { method, body }) must return parsed JSON and reject with an Error carrying the API's
 // code and message. See C7 in code/plans/ITERATION_3_PLAN.md.
 export function createGenerateApi(request) {
-  const id = (value) => encodeURIComponent(value);
   return {
     generate: (deckId, body) =>
       request(`/api/decks/${id(deckId)}/generate`, { method: 'POST', body }),

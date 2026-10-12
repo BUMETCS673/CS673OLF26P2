@@ -6,7 +6,8 @@
 
 import { afterEach, test, vi } from 'vitest';
 import assert from 'node:assert/strict';
-import { createAuthenticatedStudyApi } from '../src/api/study.client.js';
+import { createStudyApi } from '../src/api/study.js';
+import { createAuthenticatedApi } from '../src/api/request.js';
 
 // Each test replaces fetch with a spy; put the real one back afterwards.
 afterEach(() => { vi.restoreAllMocks(); });
@@ -27,7 +28,7 @@ function mockFetch(respond) {
 test('getDueCards is a GET to /api/decks/:id/due with the session cookie', async () => {
   const due = { learning: [], review: [], new: [{ id: 9, state: 'new', due_at: null }] };
   const calls = mockFetch(() => json(due));
-  const api = createAuthenticatedStudyApi(() => {});
+  const api = createAuthenticatedApi(createStudyApi, () => {});
 
   assert.deepEqual(await api.getDueCards(3), due);
   assert.equal(calls.length, 1);
@@ -39,7 +40,7 @@ test('getDueCards is a GET to /api/decks/:id/due with the session cookie', async
 test('reviewCard is a POST to /api/cards/:id/review with the rating as JSON', async () => {
   const saved = { id: 9, state: 'learning', due_at: '2026-10-01T14:10:00Z' };
   const calls = mockFetch(() => json(saved));
-  const api = createAuthenticatedStudyApi(() => {});
+  const api = createAuthenticatedApi(createStudyApi, () => {});
 
   assert.deepEqual(await api.reviewCard(9, 'good'), saved);
   assert.equal(calls[0].url, '/api/cards/9/review');
@@ -51,7 +52,7 @@ test('reviewCard is a POST to /api/cards/:id/review with the rating as JSON', as
 
 test('a 409 rejects with code conflict and keeps the learner signed in', async () => {
   let expirations = 0;
-  const api = createAuthenticatedStudyApi(() => { expirations += 1; });
+  const api = createAuthenticatedApi(createStudyApi, () => { expirations += 1; });
   mockFetch(() => apiError(409, 'conflict', "Card isn't due yet"));
 
   await assert.rejects(api.reviewCard(9, 'good'), { status: 409, code: 'conflict' });
@@ -60,7 +61,7 @@ test('a 409 rejects with code conflict and keeps the learner signed in', async (
 
 test('a 401 signs the learner out and still rejects, for both operations', async () => {
   let expirations = 0;
-  const api = createAuthenticatedStudyApi(() => { expirations += 1; });
+  const api = createAuthenticatedApi(createStudyApi, () => { expirations += 1; });
   mockFetch(() => apiError(401, 'unauthorized', 'Authentication required.'));
 
   await assert.rejects(api.getDueCards(3), { status: 401, code: 'unauthorized' });
