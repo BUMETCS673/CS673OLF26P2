@@ -26,13 +26,13 @@ What runs, when, and what to do when it goes red.
           CI  --- passes --->  CD
                                 |
                                 +-- publish   SHA-tagged images to GHCR
-                                +-- deploy    Render staging, then poll /api/health
+                                +-- deploy    skips with a warning (no staging services)
             |
             v
    merge develop to main
             |
             v
-          CI ---> CD ---> Render production
+          CI ---> CD ---> Render production, then poll /api/health
 ```
 
 Three workflows:
@@ -50,8 +50,10 @@ start on a commit whose tests were still running or had already failed.
 
 | Branch | Environment | Deploys to |
 |---|---|---|
-| `develop` | `staging` | Render staging services |
-| `main` | `production` | Render production services |
+| `develop` | `staging` | nothing: the environment is empty, so deploy skips with a warning |
+| `main` | `production` | the one set of Render services |
+
+There is one set of Render services, deployed from `main` only.
 
 Images land in GHCR either way, tagged three ways — the commit SHA (what a rollback
 pins to), the environment name, and `latest` (only ever `main`).
@@ -86,8 +88,9 @@ Frontend:
 ```sh
 cd code/frontend
 npm ci
+npm test
 npm run build
-npx eslint .                # needs the lint tooling installed, see below
+npx eslint .
 ```
 
 ### Database migrations
@@ -126,25 +129,6 @@ control without recreating it:
 ```sh
 flask db stamp 0001_initial_schema
 ```
-
-### A note on the eslint dependencies
-
-`eslint.config.mjs` imports plugins that are **not** in `package.json`. CI installs them
-with `npm install --no-save`, because adding them properly would require regenerating
-`package-lock.json`, and `npm ci` — used by CI and by the frontend Dockerfile — fails
-when `package.json` and the lockfile disagree.
-
-To lint locally, or to fix this properly:
-
-```sh
-cd code/frontend
-npm install --save-dev eslint@9.39.0 @eslint/js@9.39.0 globals@16.5.0 \
-  eslint-plugin-react@7.37.5 eslint-plugin-react-hooks@7.1.0 \
-  eslint-plugin-react-refresh@0.4.24
-```
-
-Commit the updated `package.json` **and** `package-lock.json`, then delete the
-"Install lint tooling" step from `ci.yml`.
 
 ## Deploy targets: one-time Render setup
 
@@ -196,8 +180,15 @@ failing until it is done. So the pipeline is green in the meantime.
    `develop`'s deploy job skips with a warning instead of deploying every merge to the
    live site. Only a green merge to `main` deploys.
 
-5. **Gate production.** On the `production` environment, add a **required reviewer**, so
-   a deploy to main waits for a human. Recommended for the final iteration.
+5. **Set the AI settings.** On `cadence-backend`'s **Environment** tab, set
+   `GEMINI_API_KEY` and `GEMINI_MODEL` (`gemini-3.5-flash`). Both are `sync: false`, so
+   they are always entered by hand and never stored in the repo. `AI_PROVIDER` comes from
+   `render.yaml` as `gemini`. To fall back to sample cards, set
+   `AI_PROVIDER=fake`. To switch to `gemini-3.5-flash-lite`, set `GEMINI_MODEL` and raise
+   `AI_SITE_DAILY_LIMIT`.
+
+The `production` environment has no required reviewer, so a green merge to `main`
+deploys without a second approval.
 
 Doing it twice — separate Render services for staging and production, with the staging
 hooks in the `staging` environment — is the fuller setup. One set of services, deployed
@@ -208,11 +199,13 @@ from `main` only, is fine for a semester project; say so in the progress report 
 - Free web services **sleep after 15 minutes idle**. The first request to a cold
   deployment takes ~30 seconds. That is why CD's health poll allows 10 minutes before
   giving up — it is not a hung deploy.
-- Free Postgres instances **expire after 30 days**. Diarise it; when it happens, create a
-  new one and update `DATABASE_URL`. Do not let this bite during the final demo.
+- Free Postgres instances **expire after 30 days**.
 - Migrations run automatically: the backend's `dockerCommand` in `render.yaml` runs
-  `flask db upgrade` before starting gunicorn. A failed migration fails the health check,
-  so the old version keeps serving.
+  `flask db upgrade` before starting gunicorn. This is safe only with a single instance. A failed migration means gunicorn
+  never starts, so the health check fails and the old version keeps serving. Every wake
+  from sleep re-runs the upgrade, which is a no-op once the database is at head.
+- Gemini's free tier allows **20 requests a day** for the whole project. The site caps
+  itself at 18 (`AI_SITE_DAILY_LIMIT`) and each user at 10, in a rolling 24 hours.
 
 ## Branch protection
 
@@ -220,61 +213,26 @@ CI only actually protects anything once merges are blocked on it. `ci-ok` is the
 check to require — job names change whenever the pipeline is restructured, which either
 silently un-requires them or wedges the branch, but that name never does.
 
-> **Run this at merge time, not later.** `develop` currently requires `Backend tests` and
-> `Frontend build`, the job names from the old `ci.yml`. This PR renames them, so the
-> moment it lands those two contexts stop being reported — and a required check that
-> never reports is pending forever. Every PR into `develop` would be unmergeable until an
-> admin runs the command below. Check what is required now with:
->
-> ```sh
-> gh api repos/BUMETCS673/CS673OLF26P2/branches/develop/protection \
->   --jq '.required_status_checks.contexts'
-> ```
+`main` and `develop` are protected in two places.
 
-Run these once, with a repo admin's `gh` login:
+The repository ruleset **ruleset-1** (Settings → Rules → Rulesets) applies to both
+branches:
 
-```sh
-for branch in develop main; do
-  gh api --method PUT \
-    "repos/BUMETCS673/CS673OLF26P2/branches/$branch/protection" \
-    --input - <<'JSON'
-{
-  "required_status_checks": {
-    "strict": true,
-    "contexts": ["CI passed"]
-  },
-  "enforce_admins": false,
-  "required_pull_request_reviews": {
-    "required_approving_review_count": 1,
-    "dismiss_stale_reviews": true,
-    "require_code_owner_reviews": false
-  },
-  "restrictions": null,
-  "allow_force_pushes": false,
-  "allow_deletions": false,
-  "required_conversation_resolution": true
-}
-JSON
-done
-```
+- `CI passed`, the `ci-ok` job's display name, is the one required status check. The
+  branch doesn't have to be up to date with its base first (`strict` is off).
+- A pull request with one approving review. Pushing after an approval dismisses it.
+- No force-pushes and no deletion.
 
-What each setting buys:
+Classic branch protection on both branches adds one rule the ruleset doesn't have:
+review conversations must be resolved before merging.
 
-- `"contexts": ["CI passed"]` — the `ci-ok` job's display name. Merges wait for it.
-- `strict: true` — the branch must be up to date with its base first. Catches the case
-  where two PRs pass separately and break once combined.
-- `required_approving_review_count: 1` — someone other than the author reads it.
-- `dismiss_stale_reviews` — pushing after an approval re-requests review.
-- `enforce_admins: false` — leaves an escape hatch for a genuinely stuck merge. Set it to
-  `true` if the team would rather not have one.
-- `allow_force_pushes: false` / `allow_deletions: false` — history on the shared branches
-  stays intact.
-
-Check it took:
+Check what's in place:
 
 ```sh
+gh api repos/BUMETCS673/CS673OLF26P2/rulesets --jq '.[] | "\(.id) \(.name) \(.enforcement)"'
+gh api repos/BUMETCS673/CS673OLF26P2/rulesets/<id> --jq '.rules[] | .type'
 gh api repos/BUMETCS673/CS673OLF26P2/branches/develop/protection \
-  --jq '{checks: .required_status_checks.contexts, reviews: .required_pull_request_reviews.required_approving_review_count}'
+  --jq '{reviews: .required_pull_request_reviews.required_approving_review_count, conversations: .required_conversation_resolution.enabled}'
 ```
 
 ## When CI goes red
@@ -293,7 +251,8 @@ gh api repos/BUMETCS673/CS673OLF26P2/branches/develop/protection \
 | Docker, "Scan backend/frontend image" | Trivy found a fixable HIGH/CRITICAL CVE in a base image or dependency | bump the base image tag or the dependency; unfixable ones are already ignored |
 | **Migrations, "flask db check"** | a model changed without a matching migration | `cd code/backend && FLASK_APP=wsgi.py flask db migrate -m "what changed"`, read the generated file, commit it |
 | Migrations, "downgrade to base and back up" | a migration's `downgrade()` is wrong or incomplete | fix `downgrade()` in the migration file |
-| CD, deploy skipped | Render hooks not set | the setup section above — this is a warning, not a failure |
+| Docker and both backend test jobs fail together, with `toomanyrequests` or 429 in the log | Docker Hub's anonymous pull limit | re-run the failed jobs |
+| CD, deploy skipped | expected on `develop`, whose `staging` environment is empty; on `main`, the Render hooks aren't set | on `main`, the setup section above — this is a warning, not a failure |
 | CD, health poll timed out | Render build failed, or a cold start took over 10 minutes | Render dashboard → the service → Events |
 
 ## Rolling back
@@ -318,10 +277,10 @@ Worth being able to defend in the progress report:
 - **No end-to-end browser tests.** The Docker job proves the stack boots and the API
   answers, but nothing drives the UI. Playwright covering signup → create deck → add card
   is the next thing worth adding.
-- **Action versions pinned to major tags** (`actions/checkout@v4`), not SHAs. Dependabot
+- **Action versions pinned to major tags** (`actions/checkout@v7`), not SHAs. Dependabot
   tracks the majors. SHA pinning is the stricter supply-chain posture and costs little if
   the team wants it.
-- **`ruff format` is advisory, not a gate.** It would rewrite 11 of the backend's 20
+- **`ruff format` is advisory, not a gate.** It would rewrite many of the backend's
   files, all cosmetic, and it collapses the aligned end-of-line comments used throughout
   (see the `parametrize` lists in `tests/test_auth.py`). `ruff check` — the half that
   finds actual problems — *is* blocking. To make formatting blocking: run `ruff format .`
