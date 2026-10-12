@@ -284,3 +284,195 @@ test('Study more on the summary fetches again and starts a new session', async (
   expect(api.getDueCards).toHaveBeenCalledTimes(2);
   expect(screen.getByRole('button', { name: 'Show answer' })).toBeTruthy();
 });
+
+// F6 (Iteration 3): typed mode on the study page. One test per acceptance example under F6
+// in code/plans/ITERATION_3_PLAN.md, with the same fake `api` and fixed clock as above.
+//
+// AI Utilization: ~100% of the tests below
+// AI Tools Used: Devin (Cognition AI)
+// AI-Assisted Activities:
+//   Unit test creation
+// Human role: acceptance examples (F6 in the plan), direction, and review by Nurzat Mukhamedali.
+
+const mode = (name) => screen.getByRole('radio', { name });
+const answerBox = () => screen.queryByLabelText('Your answer');
+const focused = () => screen.getByRole('main').ownerDocument.activeElement;
+
+async function startTyped(api = fakeApi()) {
+  renderView(api);
+  await screen.findByText('the airport');
+  fireEvent.click(mode('Typed answer'));
+  return api;
+}
+
+function submitTyped(text) {
+  fireEvent.change(answerBox(), { target: { value: text } });
+  // jsdom doesn't turn Enter into a submit, so submit the form the way the browser would.
+  fireEvent.submit(answerBox().form);
+}
+
+test('typed mode: the page loads with "Flashcard" checked and Show answer showing', async () => {
+  renderView();
+  await screen.findByText('the airport');
+
+  expect(mode('Flashcard').checked).toBe(true);
+  expect(screen.getByRole('button', { name: 'Show answer' })).toBeTruthy();
+  expect(answerBox()).toBeNull();
+});
+
+test('typed mode: choosing "Typed answer" shows a focused box, no Show answer, and no back', async () => {
+  await startTyped();
+
+  expect(answerBox()).toBeTruthy();
+  expect(focused()).toBe(answerBox());
+  expect(screen.queryByRole('button', { name: 'Show answer' })).toBeNull();
+  expect(screen.queryByText('el aeropuerto')).toBeNull();
+  expect(screen.getByText('Press Enter to check')).toBeTruthy();
+});
+
+test('typed mode, the airport card: "El Aeropuerto." + Enter is Correct, Good suggested and focused, nothing saved yet', async () => {
+  const api = await startTyped();
+
+  submitTyped('El Aeropuerto.');
+
+  expect(screen.getByText('Correct')).toBeTruthy();
+  expect(screen.getByText('el aeropuerto')).toBeTruthy();
+  expect(screen.getByText('You typed: El Aeropuerto.')).toBeTruthy();
+  const good = ratingButton('Good');
+  expect(good.classList.contains('rating-suggested')).toBe(true);
+  expect(good.getAttribute('aria-label')).toMatch(/, suggested$/);
+  expect(focused()).toBe(good);
+  expect(api.reviewCard).not.toHaveBeenCalled();
+  expect(screen.getByText('Press Enter to accept the suggestion, or 1–4 to choose')).toBeTruthy();
+});
+
+test('typed mode, the same: Enter again saves Good once', async () => {
+  const api = await startTyped();
+  submitTyped('El Aeropuerto.');
+
+  // Enter on a focused button is a click; jsdom doesn't make that translation itself.
+  fireEvent.click(focused());
+
+  expect(await screen.findByText('the song')).toBeTruthy();
+  expect(api.reviewCard).toHaveBeenCalledTimes(1);
+  expect(api.reviewCard).toHaveBeenCalledWith(AIRPORT.id, 'good');
+});
+
+test('typed mode: "el aeropuerta" + Check is Incorrect, with Again suggested', async () => {
+  await startTyped();
+
+  fireEvent.change(answerBox(), { target: { value: 'el aeropuerta' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Check' }));
+
+  expect(screen.getByText('Incorrect')).toBeTruthy();
+  expect(ratingButton('Again').classList.contains('rating-suggested')).toBe(true);
+  expect(ratingButton('Good').classList.contains('rating-suggested')).toBe(false);
+  expect(focused()).toBe(ratingButton('Again'));
+});
+
+test('typed mode, graded with Again suggested: clicking Easy saves easy', async () => {
+  const api = await startTyped();
+  submitTyped('el aeropuerta');
+
+  fireEvent.click(ratingButton('Easy'));
+
+  expect(await screen.findByText('the song')).toBeTruthy();
+  expect(api.reviewCard).toHaveBeenCalledWith(AIRPORT.id, 'easy');
+});
+
+test('typed mode: submitting blank is Incorrect, with Again suggested', async () => {
+  await startTyped();
+
+  submitTyped('');
+
+  expect(screen.getByText('Incorrect')).toBeTruthy();
+  expect(ratingButton('Again').classList.contains('rating-suggested')).toBe(true);
+});
+
+test('typed mode, the box focused: Space types a space and reveals nothing', async () => {
+  await startTyped();
+
+  const notPrevented = fireEvent.keyDown(answerBox(), { key: ' ' });
+
+  expect(notPrevented).toBe(true);
+  expect(screen.queryByText('el aeropuerto')).toBeNull();
+  expect(ratingButton('Good')).toBeNull();
+});
+
+test('typed mode, focus elsewhere: Space reveals nothing either', async () => {
+  await startTyped();
+
+  press(' ');
+
+  expect(screen.queryByText('el aeropuerto')).toBeNull();
+  expect(answerBox()).toBeTruthy();
+});
+
+test('flashcard mode, right after clicking the toggle: Space reveals the answer', async () => {
+  await startTyped();
+  fireEvent.click(mode('Flashcard'));
+
+  fireEvent.keyDown(mode('Flashcard'), { key: ' ' });
+
+  expect(screen.getByText('el aeropuerto')).toBeTruthy();
+  expect(ratingButton('Good')).toBeTruthy();
+});
+
+test('graded in typed mode, then "Flashcard": the buttons and suggestion stay; the next card has Show answer', async () => {
+  await startTyped();
+  submitTyped('El Aeropuerto.');
+
+  fireEvent.click(mode('Flashcard'));
+
+  expect(ratingButton('Good').classList.contains('rating-suggested')).toBe(true);
+  expect(screen.getByText('Correct')).toBeTruthy();
+  fireEvent.click(ratingButton('Good'));
+
+  expect(await screen.findByText('the song')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Show answer' })).toBeTruthy();
+  expect(answerBox()).toBeNull();
+});
+
+test('typed mode, the summary showing: Study more starts the new session still in typed mode', async () => {
+  // The rated card comes back as learning beyond the learn-ahead window, so the summary
+  // offers Study more.
+  const reviewCard = vi.fn().mockResolvedValue(
+    { ...AIRPORT, state: 'learning', due_at: iso(NOW + 30 * MINUTE) });
+  const api = fakeApi({ reviewCard });
+  api.getDueCards.mockResolvedValueOnce(due({ review: [AIRPORT] }))
+    .mockResolvedValueOnce(due({ fresh: [SONG] }));
+  await startTyped(api);
+  submitTyped('el aeropuertx');
+  fireEvent.click(ratingButton('Again'));
+
+  fireEvent.click(await screen.findByRole('button', { name: 'Study more' }));
+
+  expect(await screen.findByText('the song')).toBeTruthy();
+  expect(answerBox()).toBeTruthy();
+  expect(mode('Typed answer').checked).toBe(true);
+});
+
+test('typed mode, a card rated: the next card shows with its box empty and focused', async () => {
+  await startTyped();
+  submitTyped('el aeropuerto');
+
+  fireEvent.click(ratingButton('Good'));
+
+  expect(await screen.findByText('the song')).toBeTruthy();
+  expect(answerBox().value).toBe('');
+  expect(focused()).toBe(answerBox());
+});
+
+test('typed mode: the same card back as learning gets a fresh, empty box', async () => {
+  const reviewCard = vi.fn().mockResolvedValue({ ...SONG, state: 'learning', due_at: iso(NOW + 10 * MINUTE) });
+  renderView(fakeApi({ dueCards: due({ fresh: [SONG] }), reviewCard }));
+  await screen.findByText('the song');
+  fireEvent.click(mode('Typed answer'));
+  submitTyped('la cancion');
+
+  fireEvent.click(ratingButton('Again'));
+
+  await vi.waitFor(() => expect(answerBox()).toBeTruthy());
+  expect(answerBox().value).toBe('');
+  expect(screen.queryByText('Incorrect')).toBeNull();
+});
