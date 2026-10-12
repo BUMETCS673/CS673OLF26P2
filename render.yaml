@@ -34,11 +34,8 @@ services:
     # deploy on its own every push.
     autoDeploy: false
     healthCheckPath: /api/health
-    # Render's pre-deploy command is paid-only, so migrations run as the backend starts.
-    # Safe only because the free tier runs one instance; with several, each would race
-    # to migrate on boot. A failed upgrade means gunicorn never starts, so the previous
-    # deploy keeps serving. Each wake from sleep re-runs it, a no-op at head.
-    dockerCommand: sh -c "flask db upgrade && exec gunicorn --bind 0.0.0.0:$PORT --workers 2 --threads 4 --access-logfile - wsgi:app"
+    # Migrations run as the backend starts: the prod stage's CMD in the Dockerfile runs
+    # `flask db upgrade` before gunicorn. Safe only because the free tier runs one instance.
     envVars:
       - key: DATABASE_URL
         fromDatabase:
