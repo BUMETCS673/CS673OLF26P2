@@ -284,3 +284,71 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* --- F5 (Iteration 3): suggested rating and mode toggle ----------------------------- */
+
+/*
+ * AI Utilization: ~100% of this section
+ * AI Tools Used: Devin (Cognition AI)
+ * AI-Assisted Activities:
+ *   CSS layout on the style guide's tokens
+ * Human role: direction and review by Nurzat Mukhamedali.
+ */
+
+/* The suggested rating is boxed in the primary color; focus adds the usual gold ring. */
+.rating-button.rating-suggested {
+  border: 2px solid var(--color-primary);
+}
+
+.rating-suggested-tag {
+  font: 600 10px/1.2 var(--font-body);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-primary);
+}
+
+/* The same segmented control as the generate page's mode choice. */
+.study-mode-toggle {
+  display: inline-flex;
+  gap: var(--space-1);
+  margin: 0;
+  padding: var(--space-1);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface);
+}
+
+.study-mode {
+  position: relative;
+  margin: 0;
+}
+
+/* The radio stays in the page for the keyboard and screen readers; its label is what shows. */
+.study-mode input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+}
+
+.study-mode span {
+  display: block;
+  padding: var(--space-1) var(--space-3);
+  border-radius: 999px;
+  font: 600 13px/1.4 var(--font-body);
+  white-space: nowrap;
+  color: var(--color-muted);
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.study-mode input:checked + span {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.study-mode input:focus-visible + span {
+  outline: 3px solid var(--color-gold-strong);
+  outline-offset: 2px;
+}
