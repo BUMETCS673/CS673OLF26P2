@@ -6,6 +6,14 @@
  *   Documentation
  * Human role: requirements (F1 in code/plans/FINALIZE_ITERATION_2_PLAN.md), direction,
  * and review by Duc Anh Nguyen.
+ *
+ * Iteration 3, F6: typed mode.
+ * AI Utilization: ~100% of that change
+ * AI Tools Used: Devin (Cognition AI)
+ * AI-Assisted Activities:
+ *   UI page development
+ * Human role: requirements (F6 in code/plans/ITERATION_3_PLAN.md), direction, and review by
+ * Nurzat Mukhamedali.
  */
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
@@ -15,8 +23,11 @@ import { useStudyApi } from '../api/useStudyApi';
 import RatingButtons from '../components/study/RatingButtons.jsx';
 import SessionSummary from '../components/study/SessionSummary.jsx';
 import StudyCard from '../components/study/StudyCard.jsx';
+import StudyModeToggle from '../components/study/StudyModeToggle.jsx';
+import TypedAnswer from '../components/study/TypedAnswer.jsx';
 import { RATINGS } from '../study/constants.js';
 import { initSession, sessionReducer } from '../study/session.js';
+import { checkTypedAnswer } from '../study/typedAnswer.js';
 import '../study.css';
 
 /**
@@ -59,6 +70,9 @@ export function StudyView({ api, deckId, onExit, now = Date.now }) {
   const loading = result.key !== load;
   const { deck, due, error } = result;
   const reload = useCallback(() => setLoad((count) => count + 1), []);
+  // 'flashcard' or 'typed'. It lives here, above the keyed session, so Study more keeps it;
+  // a new page load starts in flashcard mode (decision A13).
+  const [mode, setMode] = useState('flashcard');
 
   useEffect(() => {
     let active = true;
@@ -95,15 +109,20 @@ export function StudyView({ api, deckId, onExit, now = Date.now }) {
   }
 
   return <StudySession key={load} api={api} deck={deck} due={due} now={now}
-    onExit={onExit} onStudyMore={reload} />;
+    mode={mode} onModeChange={setMode} onExit={onExit} onStudyMore={reload} />;
 }
 
-/** The ignored targets for the keyboard shortcuts: anywhere the learner is typing. */
-const isTyping = (target) => ['INPUT', 'TEXTAREA', 'SELECT'].includes(target?.tagName)
-  || Boolean(target?.isContentEditable);
+/**
+ * The ignored targets for the keyboard shortcuts: anywhere the learner is typing. Radios and
+ * checkboxes aren't typing, so the shortcuts still work right after the mode toggle is clicked.
+ */
+const isTyping = (target) => {
+  if (target?.tagName === 'INPUT') return !['radio', 'checkbox'].includes(target.type);
+  return ['TEXTAREA', 'SELECT'].includes(target?.tagName) || Boolean(target?.isContentEditable);
+};
 
 /** One session over `due`, from the first card to the summary. */
-function StudySession({ api, deck, due, now, onExit, onStudyMore }) {
+function StudySession({ api, deck, due, now, mode, onModeChange, onExit, onStudyMore }) {
   const [state, dispatch] = useReducer(sessionReducer, { due, now: now() }, initSession);
   // Rule 11: one review request per card shown. The ref holds the session state the request
   // was sent from, so a second click or key press made from that same state does nothing.
@@ -112,9 +131,13 @@ function StudySession({ api, deck, due, now, onExit, onStudyMore }) {
   const sentFrom = useRef(null);
   const [saving, setSaving] = useState(false);
   const [reviewError, setReviewError] = useState('');
-  const { current, revealed } = state;
+  const { current, revealed, answer } = state;
 
   const reveal = useCallback(() => dispatch({ type: 'reveal' }), []);
+  const check = useCallback((typed) => dispatch({
+    type: 'reveal',
+    answer: { typed, ...checkTypedAnswer(current.back, typed) },
+  }), [current]);
 
   const rate = useCallback(async (rating) => {
     if (sentFrom.current === state || !current || !revealed) return;
@@ -141,7 +164,9 @@ function StudySession({ api, deck, due, now, onExit, onStudyMore }) {
     }
   }, [api, now, state, current, revealed]);
 
-  // Space reveals, and 1-4 rate once the answer is showing (decision P10).
+  // Space reveals (in flashcard mode only), and 1-4 rate once the answer is showing
+  // (decision P10). In typed mode, Enter checks, and then Enter on the focused suggested
+  // button accepts it; the browser does both.
   useEffect(() => {
     if (state.finished) return undefined;
     function onKeyDown(event) {
@@ -149,7 +174,7 @@ function StudySession({ api, deck, due, now, onExit, onStudyMore }) {
       if (isTyping(event.target)) return;
       if (event.key === ' ') {
         // A focused button handles Space itself; doing it here as well would act twice.
-        if (event.target?.tagName === 'BUTTON' || revealed) return;
+        if (event.target?.tagName === 'BUTTON' || revealed || mode === 'typed') return;
         event.preventDefault();
         reveal();
         return;
@@ -163,7 +188,7 @@ function StudySession({ api, deck, due, now, onExit, onStudyMore }) {
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [state.finished, revealed, reveal, rate]);
+  }, [state.finished, revealed, mode, reveal, rate]);
 
   if (state.finished) {
     return <main className="page study-session">
@@ -174,23 +199,36 @@ function StudySession({ api, deck, due, now, onExit, onStudyMore }) {
   }
 
   const left = state.main.length + state.learning.length + (current ? 1 : 0);
+  // Switching modes redraws a card that isn't revealed yet. Once it is, the answer (and any
+  // suggestion) stays, and the new mode starts with the next card.
+  const typing = !revealed && mode === 'typed';
+  let hint = 'Press Space to show the answer';
+  if (answer) hint = 'Press Enter to accept the suggestion, or 1–4 to choose';
+  else if (revealed) hint = 'Press 1–4 to rate';
+  else if (typing) hint = 'Press Enter to check';
   return <main className="page study-session">
     <div className="study-heading">
       <div>
         <p className="eyebrow">Study</p>
         <h1>{deck.name}</h1>
       </div>
-      <p className="study-left">{left} {left === 1 ? 'card' : 'cards'} left</p>
+      <div className="study-heading-side">
+        <StudyModeToggle mode={mode} onChange={onModeChange} />
+        <p className="study-left">{left} {left === 1 ? 'card' : 'cards'} left</p>
+      </div>
     </div>
 
     <StudyCard card={current} revealed={revealed} />
 
     <div className="study-actions">
-      {revealed
-        ? <RatingButtons intervals={current.intervals} disabled={saving} onRate={rate} />
-        : <button type="button" className="button primary study-reveal" onClick={reveal}>Show answer</button>}
+      {(typing || answer) && <TypedAnswer key={current.id} answer={answer} disabled={saving}
+        onSubmit={check} />}
+      {revealed && <RatingButtons intervals={current.intervals} disabled={saving} onRate={rate}
+        suggested={answer?.suggestedRating} />}
+      {!revealed && !typing
+        && <button type="button" className="button primary study-reveal" onClick={reveal}>Show answer</button>}
       {reviewError && <p className="error-message" role="alert">{reviewError}</p>}
-      <p className="study-hint">{revealed ? 'Press 1–4 to rate' : 'Press Space to show the answer'}</p>
+      <p className="study-hint">{hint}</p>
     </div>
 
     <button type="button" className="text-button study-exit" onClick={onExit}>
