@@ -5,6 +5,12 @@ defaults, the two that appear in the card JSON, `Card.schedule`, and `as_utc()`.
 scheduling rules themselves are Story 1's, in test_scheduler.py.
 """
 
+# AI Utilization: ~100% of this file's code
+# AI Tools Used: Claude Code (Claude Opus 5.5)
+# AI-Assisted Activities:
+#   Unit test creation
+# Human role: plan approval, code review, and hands-on testing by Miles Cameron.
+
 from dataclasses import FrozenInstanceError
 from datetime import UTC, datetime, timedelta, timezone
 

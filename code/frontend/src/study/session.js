@@ -1,3 +1,21 @@
+/*
+ * AI Utilization: ~100% of this file's code
+ * AI Tools Used: Claude Code (Claude Opus 5.5)
+ * AI-Assisted Activities:
+ *   State management (the session reducer), written test-first
+ *   Documentation
+ * Human role: checked every Given/When/Then row of Story 3 in code/plans/LAB_3_PLAN.md had a
+ * test before opening the PR, by Duc Anh Nguyen.
+ *
+ * Iteration 3, F5: the `answer` field.
+ * AI Utilization: ~100% of that change
+ * AI Tools Used: Devin (Cognition AI)
+ * AI-Assisted Activities:
+ *   State management
+ * Human role: requirements (F5 in code/plans/ITERATION_3_PLAN.md), direction, and review by
+ * Nurzat Mukhamedali.
+ */
+
 /**
  * The study session reducer (Lab 3, Story 3). It decides which card is showing; it never
  * computes intervals (the backend does), renders anything, or calls the API.
