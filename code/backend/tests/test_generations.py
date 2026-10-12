@@ -232,7 +232,9 @@ def test_deleting_the_deck_removes_the_generation_and_its_cards(client, mine, db
     deck, generation = mine
     _accept(client, generation.id, [0])
 
-    assert client.delete(f"/api/decks/{deck.id}").status_code == 204
+    res = client.delete(f"/api/decks/{deck.id}")
+
+    assert res.status_code == 204
 
     db.session.expire_all()
     assert AiGeneration.query.count() == 0
