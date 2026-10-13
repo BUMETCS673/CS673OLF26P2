@@ -51,6 +51,13 @@ test('three pending cards show their text, the count, and both bulk buttons', ()
   noButton('Back to deck');
 });
 
+// .button.ghost is white on transparent, for the navy header only: on a white card it can't be seen.
+test('each card\'s Reject is styled like Reject all, so it shows on the white card', () => {
+  renderList(generationWith(['pending']));
+
+  expect(button('Reject suggestion 1').className).toBe(button('Reject all').className);
+});
+
 test('one card is "1 suggestion"', () => {
   renderList(generationWith(['pending']));
 
