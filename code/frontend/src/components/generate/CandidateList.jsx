@@ -82,7 +82,7 @@ function Candidate({ card, busy, onAccept, onReject }) {
       {!decided && <>
         <button type="button" className="button primary" disabled={busy}
           aria-label={`Accept suggestion ${n}`} onClick={() => onAccept([card.index])}>Accept</button>
-        <button type="button" className="button ghost" disabled={busy}
+        <button type="button" className="button secondary" disabled={busy}
           aria-label={`Reject suggestion ${n}`} onClick={() => onReject([card.index])}>Reject</button>
       </>}
     </div>

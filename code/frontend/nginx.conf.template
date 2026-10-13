@@ -40,6 +40,15 @@ server {
         client_max_body_size 6m;
     }
 
+    # Sends the browser to the backend's own health check. A sleeping free-tier backend on
+    # Render only wakes for requests that come in from outside, and the proxied /api
+    # requests above come from this server instead, so they get an instant 502. client.js
+    # calls this when it sees one.
+    location = /wake {
+        add_header Cache-Control "no-store";
+        return 307 ${API_ORIGIN}/api/health;
+    }
+
     # Vite fingerprints these filenames, so a given URL's contents never change.
     location /assets/ {
         expires 1y;
