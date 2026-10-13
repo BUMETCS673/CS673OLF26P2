@@ -13,9 +13,31 @@
  *
  * Callers switch on `err.code`, never on `err.message` — the code table in the contract
  * is closed, the wording isn't.
+ *
+ * Hotfix: waking a sleeping Render backend and retrying while it starts.
+ * AI Utilization: ~100% of that change
+ * AI Tools Used: Claude Code (Claude Opus 5.5)
+ * AI-Assisted Activities:
+ *   Debugging, code generation
+ * Human role: plan approval and code review by Duc Anh Nguyen.
  */
 
 const BASE = "/api";
+
+// A free-tier backend on Render sleeps when idle, and while it does, every proxied /api
+// request gets an instant 502/503/504 page from Render instead of our JSON. The browser
+// itself has to reach the backend to wake it (nginx's /wake), and then we retry until
+// it answers. A cold start takes 30-60 seconds.
+const WAKING_STATUSES = new Set([502, 503, 504]);
+const WAKE_TIMEOUT_MS = 90_000;
+const RETRY_DELAY_MS = 3_000;
+
+function wakeBackend() {
+  // Opaque and not awaited: only the request reaching the backend matters.
+  fetch("/wake", { mode: "no-cors", cache: "no-store" }).catch(() => {});
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export class ApiError extends Error {
   constructor(status, code, message, field) {
@@ -27,7 +49,7 @@ export class ApiError extends Error {
   }
 }
 
-export async function request(path, { method = "GET", body } = {}) {
+async function send(path, method, body) {
   let response;
 
   try {
@@ -48,7 +70,7 @@ export async function request(path, { method = "GET", body } = {}) {
   // 204 is the contract's answer for logout and delete, and it has no body at all --
   // calling response.json() on it throws.
   if (response.status === 204) {
-    return null;
+    return { response, payload: null };
   }
 
   const text = await response.text();
@@ -61,6 +83,29 @@ export async function request(path, { method = "GET", body } = {}) {
       // error page, say. Handled as a failure below; on a 2xx it just isn't data.
       payload = null;
     }
+  }
+
+  return { response, payload };
+}
+
+export async function request(path, { method = "GET", body } = {}) {
+  const deadline = Date.now() + WAKE_TIMEOUT_MS;
+  let woken = false;
+  let { response, payload } = await send(path, method, body);
+
+  // Only a non-JSON answer is Render's page for a sleeping backend. A JSON 5xx came from
+  // Flask, so the request was handled and retrying a POST could repeat it.
+  while (WAKING_STATUSES.has(response.status) && payload === null && Date.now() < deadline) {
+    if (!woken) {
+      wakeBackend();
+      woken = true;
+    }
+    await sleep(RETRY_DELAY_MS);
+    ({ response, payload } = await send(path, method, body));
+  }
+
+  if (response.status === 204) {
+    return null;
   }
 
   if (!response.ok) {
