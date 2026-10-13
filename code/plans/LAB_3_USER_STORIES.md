@@ -236,8 +236,13 @@ it, so that I get an honest assessment instead of grading myself.
 
 Self-grading puts the burden of honest assessment on the learner and suits some material poorly,
 which is one of the two Anki limitations Cadence set out to address. Checking a typed answer,
-while forgiving capitalization, stray punctuation, and small typos, gives learners an objective
-signal and a suggested rating. They can still overrule it when they typed a valid synonym.
+while forgiving capitalization and stray punctuation, gives learners an objective signal and a
+suggested rating. Spelling and accents count, because they're part of knowing the answer. Learners
+can still overrule the check when they typed a valid synonym.
+
+This story moved to Iteration 3 (SCRUM-73), which replaced the "close" grade with strict grading:
+see decision A12 in [ITERATION_3_PLAN.md](ITERATION_3_PLAN.md#decisions-we-made). Tests 2 and 3
+below follow the strict rule.
 
 ### Acceptance Tests
 
@@ -249,21 +254,21 @@ When the learner types "The Library.",
 
 Then the platform should mark the answer correct and suggest the rating Good.
 
-**Acceptance Test 2 — A small typo counts as close**
+**Acceptance Test 2 — Spelling counts**
 
 Given a card whose answer is "la biblioteca",
 
 When the learner types "la bibloteca",
 
-Then the platform should mark the answer close and suggest the rating Hard.
+Then the platform should mark the answer incorrect and suggest the rating Again.
 
-**Acceptance Test 3 — A missing accent counts as close**
+**Acceptance Test 3 — Accents count**
 
 Given a card whose answer is "adiós",
 
 When the learner types "adios",
 
-Then the platform should mark the answer close and suggest the rating Hard.
+Then the platform should mark the answer incorrect and suggest the rating Again.
 
 **Acceptance Test 4 — Numbers must match exactly**
 
