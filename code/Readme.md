@@ -38,6 +38,32 @@ docker compose exec backend flask db upgrade
 docker compose exec backend flask seed
 ```
 
+## AI Card Generation
+
+`AI_PROVIDER` in `.env` chooses what writes the cards:
+
+- `fake`, the value in `.env.example`: a stand-in that returns sample cards without
+  contacting Google. No key needed.
+- `gemini`: Google's model named in `GEMINI_MODEL` (`gemini-3.5-flash` by default). It
+  needs `GEMINI_API_KEY`.
+
+To try the real model, make your own free key at [Google AI Studio](https://aistudio.google.com)
+in a project of its own, so your testing doesn't spend the team's quota, and never set up
+billing on it. Put the key in `.env` only.
+
+`.env` is read when a container is created, so after changing it run
+`docker compose up -d`. `docker compose restart` keeps the old values.
+
+To check the provider works, ask it for one card:
+
+```bash
+docker compose exec backend flask ai-smoke
+```
+
+With `gemini`, that spends one of the free tier's 20 requests for the day. Generations are
+also capped over a rolling 24 hours: `AI_DAILY_LIMIT` per user (10) and
+`AI_SITE_DAILY_LIMIT` for the whole site (18).
+
 ## Checking It Works
 
 ```bash
@@ -55,7 +81,8 @@ session cookie works without any CORS setup.
 docker compose exec backend python -m pytest
 ```
 
-The tests run against in-memory SQLite, so they also work outside Docker from
+The tests always use the stand-in AI with no key, so they never call Google or spend its
+quota. They run against in-memory SQLite, so they also work outside Docker from
 `code/backend`:
 
 ```bash
