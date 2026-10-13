@@ -4,27 +4,32 @@ An AI-assisted spaced-repetition learning platform. Describe what you want to le
 
 [![CI](https://github.com/BUMETCS673/CS673OLF26P2/actions/workflows/ci.yml/badge.svg)](https://github.com/BUMETCS673/CS673OLF26P2/actions/workflows/ci.yml)
 
-Iteration 1 presentation video: [demo/CS673_presentation1_team2.md](demo/CS673_presentation1_team2.md)
+**Live site:** https://cadence-frontend-jufj.onrender.com — it runs on Render's free tier, which sleeps after 15 minutes idle, so the first visit after a quiet spell takes about 30 seconds.
+
+AI card generation uses Google Gemini's free tier, so to use it you must be 18 or over and not in the EEA, Switzerland, or the UK, and you shouldn't upload anything containing personal information. To stay within that tier, the site allows 18 generations a day in total and 10 per account.
+
+Presentation videos: [Iteration 1](demo/CS673_presentation1_team2.md) · [Iteration 2](demo/CS673_presentation2_team2.md)
 
 ## Why
 
 Spaced repetition works, but the tools built around it ask a lot of the learner. Building a deck in Anki means writing every card by hand or hunting down someone else's deck that doesn't quite fit. And the default review format — reveal the answer, grade yourself — suits some material poorly and leaves honest assessment up to you.
 
-Cadence generates cards from a prompt or your own source material, then drills them through several interaction formats with assisted grading. The scheduling model follows Anki's, which is well-proven; the authoring and review experience is where we differ.
+Cadence generates cards from a prompt or your own source material, then drills them two ways: as classic flashcards, or by having you type the answer and checking it for you. The scheduling model follows Anki's, which is well-proven; the authoring and review experience is where we differ.
 
 It's aimed at people who need to retain a lot of discrete facts: students in medicine, law, and the sciences, language learners, and anyone studying for a certification exam.
 
 ## Features
 
 - **Deck management** — create, edit, and delete decks and cards
+- **AI card generation** — press Generate with AI on any deck and ask for 1 to 25 cards from a prompt, from an uploaded PDF, TXT, or MD file (up to 4 MB), or, once a deck has 10 cards, with Suggest more content. You review every suggestion, and only the ones you accept join the deck, where they keep an AI-generated label
 - **Study mode** — study a deck one card at a time: reveal the answer, then rate it Again, Hard, Good, or Easy, with each button showing when the card would come back
+- **Typed answers** — switch the study page to Typed answer at any time to type each answer instead. Cadence says whether it matched (ignoring capitals, extra spaces, and punctuation at either end; spelling and accents count), shows the card's answer, and suggests a rating: Good when right, Again when wrong
 - **Spaced repetition scheduling** — Anki's default algorithm schedules each card's next review, and every deck shows what's due
 - **Saved progress** — decks, cards, and each card's schedule are stored in the database and survive refreshes and sign-outs
-- **Planned** — AI deck generation (Iteration 3); typed answers and multiple choice if time allows
 
 ## Tech Stack
 
-React + Vite · Python + Flask + SQLAlchemy · PostgreSQL · Docker · GitHub Actions · Render
+React + Vite · Python + Flask + SQLAlchemy · PostgreSQL · Google Gemini · Docker · GitHub Actions · Render
 
 ## Getting Started
 
@@ -52,6 +57,8 @@ docker compose exec backend flask seed     # demo@cadence.local / demo1234
 - Frontend: http://localhost:3000
 - Backend: http://localhost:5001 — `curl localhost:5001/api/health` should return `{"status": "ok"}`
 
+AI card generation works without a key: `AI_PROVIDER=fake` in `.env` returns sample cards and never contacts Google. For real cards, set `AI_PROVIDER=gemini`, put your Gemini API key in `GEMINI_API_KEY`, and run `docker compose up -d` to apply it. See [code/Readme.md](code/Readme.md#ai-card-generation).
+
 To start over from an empty database: `docker compose down -v`, then the steps above again.
 
 If the browser shows `Failed to resolve import` after you pull, a frontend dependency was added and the container still has the old `node_modules` volume. Rebuild with `docker compose up --build -V` (`-V` recreates that volume).
@@ -78,17 +85,19 @@ docker compose exec frontend npm test
 ## Repository Structure
 
 ```
-doc/      Project documentation — SPPP, SDD, STD, meeting minutes,
-          progress reports, iteration presentations
+doc/          Project documentation — SPPP, SDD, STD, meeting minutes,
+              progress reports, iteration presentations, CI/CD guide
+demo/         Demo videos, and links to the presentation videos
 code/
   plans/      Team implementation plans, one per iteration or lab
   frontend/   React client
   backend/    Python API service
+render.yaml   Render blueprint for the live site
 ```
 
 ## Contributing
 
-Branch from `develop` (`feat/`, `fix/`, `test/`, `ci/`, `chore/`, `doc/`), open a pull request back into `develop`, and merge once CI passes and a teammate has reviewed it. `develop` is released to `main` after validation.
+Branch from `develop` (`feat/`, `fix/`, `test/`, `ci/`, `chore/`, `doc/`), open a pull request back into `develop`, and merge once CI passes and a teammate has reviewed it. `develop` is released to `main` after validation, through a pull request merged with **Create a merge commit**, not squash, so the two branches keep one history.
 
 ## License
 
