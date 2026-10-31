@@ -21,13 +21,13 @@ import httpx
 import pytest
 from google.genai import errors, types
 
+from app.ai.gemini import GeminiProvider
 from app.ai.provider import (
     DECLINED,
     TOO_MUCH,
     AIRateLimited,
     AIUnavailable,
     Attachment,
-    GeminiProvider,
     Prompt,
 )
 
@@ -259,7 +259,7 @@ def test_an_unusable_reply_logs_without_the_reply(caplog):
 
 
 def test_with_no_client_the_real_one_is_built_with_a_45_second_timeout():
-    with patch("app.ai.provider.genai.Client") as client_class:
+    with patch("app.ai.gemini.genai.Client") as client_class:
         provider = GeminiProvider("the-key", MODEL)
 
     client_class.assert_called_once()

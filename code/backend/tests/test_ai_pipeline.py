@@ -14,18 +14,27 @@ import pytest
 from google.genai import errors
 
 from app.ai import pipeline
+from app.ai.gemini import GeminiProvider
 from app.ai.pipeline import PASSED, SKIPPED, PipelineRequest, run_pipeline
-from app.ai.prompts import PROMPT_VERSION
+from app.ai.prompts import (
+    PROMPT_VERSION,
+    NoEvidence,
+    PdfEvidence,
+    PromptContext,
+    TextEvidence,
+    TopicEvidence,
+)
 from app.ai.provider import (
     AIRateLimited,
     AITransient,
     AIUnavailable,
+    Attachment,
     CardDraft,
-    GeminiProvider,
     Prompt,
     TokenUsage,
     verdicts_schema,
 )
+from app.api.generate import _evidence
 from app.models import AiGeneration
 
 ORIGINAL = Prompt(system="rules", text="write cards", max_cards=2)
@@ -80,8 +89,13 @@ class ExtractingWriter(Scripted):
         return reply
 
 
-def run(writer, judge, count=2, **kwargs):
-    request = PipelineRequest(prompt=ORIGINAL, count=count, existing_fronts=[], **kwargs)
+def run(writer, judge, count=2, deck_name="Deck", chunks=(), file_text="", evidence=None, **kwargs):
+    context = PromptContext("file", count, deck_name, None)
+    if evidence is None:
+        evidence = TextEvidence(file_text, chunks) if chunks or file_text else NoEvidence()
+    request = PipelineRequest(
+        prompt=ORIGINAL, context=context, existing_fronts=[], evidence=evidence, **kwargs
+    )
     return run_pipeline(writer, judge, request)
 
 
@@ -264,11 +278,18 @@ def test_merged_facts_keep_document_order_and_drop_duplicates():
 
 
 def test_a_failed_chunk_doesnt_stop_the_others():
-    writer = ExtractingWriter({"one": AIRateLimited(), "two": ["Fact two."]}, [card(1)])
+    writer = ExtractingWriter({"one": AIUnavailable(), "two": ["Fact two."]}, [card(1)])
     result = run(writer, Scripted(ok(0)), count=1, chunks=["one", "two"])
     assert "<source>\nFact two.\n</source>" in writer.prompts[0].text
     assert fronts(result) == ["Question 1?"]
     assert result.model_calls == 4
+
+
+def test_a_rate_limited_chunk_ends_the_run_before_generate():
+    writer = ExtractingWriter({"one": AIRateLimited(), "two": ["Fact two."]}, [card(1)])
+    with pytest.raises(AIRateLimited):
+        run(writer, Scripted(ok(0)), count=1, chunks=["one", "two"])
+    assert writer.prompts == []
 
 
 def test_the_whole_document_is_used_when_no_chunk_yields_facts():
@@ -288,6 +309,37 @@ def test_a_short_document_skips_the_extract_step():
     run(writer, Scripted(ok(0)), count=1)
     assert writer.chunks_seen == []
     assert writer.prompts[0] is ORIGINAL
+
+
+def test_the_judge_gets_a_topic_as_a_topic_not_a_source():
+    judge = Scripted(ok(0))
+    run(Scripted([card(1)]), judge, count=1, evidence=TopicEvidence("Cells"))
+    assert "<topic>\nCells\n</topic>" in judge.prompts[0].text
+    assert "<source>" not in judge.prompts[0].text
+
+
+def test_the_judge_gets_a_pdf_as_an_attachment():
+    pdf = Attachment(mime_type="application/pdf", data=b"%PDF-")
+    judge = Scripted(ok(0))
+    run(Scripted([card(1)]), judge, count=1, evidence=PdfEvidence(pdf))
+    assert judge.prompts[0].attachment is pdf
+    assert "<source>" not in judge.prompts[0].text
+
+
+def test_the_judge_gets_no_material_without_evidence():
+    judge = Scripted(ok(0))
+    run(Scripted([card(1)]), judge, count=1)
+    assert judge.prompts[0].attachment is None
+    assert "<source>" not in judge.prompts[0].text
+    assert "<topic>" not in judge.prompts[0].text
+
+
+def test_each_mode_maps_to_its_evidence():
+    pdf = Attachment(mime_type="application/pdf", data=b"%PDF-")
+    assert _evidence("Cells", None, None, []) == TopicEvidence("Cells")
+    assert _evidence(None, "notes", None, ["a"]) == TextEvidence("notes", ["a"])
+    assert _evidence(None, None, pdf, []) == PdfEvidence(pdf)
+    assert _evidence(None, None, None, []) == NoEvidence()
 
 
 def test_the_judge_sees_the_source_and_the_existing_cards():

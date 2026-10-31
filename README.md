@@ -57,7 +57,7 @@ docker compose exec backend flask seed     # demo@cadence.local / demo1234
 - Frontend: http://localhost:3000
 - Backend: http://localhost:5001 — `curl localhost:5001/api/health` should return `{"status": "ok"}`
 
-AI card generation works without a key: `AI_PROVIDER=fake` in `.env` returns sample cards and never contacts Google. For real cards, set `AI_PROVIDER=gemini`, put your Gemini API key in `GEMINI_API_KEY`, and run `docker compose up -d` to apply it. See [code/Readme.md](code/Readme.md#ai-card-generation).
+AI card generation works without a key: `AI_WRITER_PROVIDER=fake` in `.env` returns sample cards and never contacts Google. For real cards, set `AI_WRITER_PROVIDER=gemini`, put your Gemini API key in `GEMINI_API_KEY`, and run `docker compose up -d` to apply it. See [code/Readme.md](code/Readme.md#ai-card-generation).
 
 To start over from an empty database: `docker compose down -v`, then the steps above again.
 

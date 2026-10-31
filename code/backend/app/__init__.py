@@ -35,7 +35,7 @@ from flask import Flask
 from flask.cli import with_appcontext
 from flask_migrate import stamp
 
-from app.config import Config
+from app.config import Config, renamed_settings_in_use
 from app.errors import ApiError, register_error_handlers
 from app.extensions import db, login_manager, migrate
 
@@ -46,6 +46,8 @@ def create_app(config_object: type = Config) -> Flask:
     # Without a level, Flask's logger drops info outside debug mode, and with it the
     # generate route's one line per request (rule 17).
     app.logger.setLevel(logging.INFO)
+    for old, new in renamed_settings_in_use().items():
+        app.logger.warning("%s is no longer read and is being ignored. Use %s.", old, new)
 
     # Flask 3 reads this off `app.json`, not the config -- a JSON_SORT_KEYS entry in
     # config.py is silently ignored. Off, so responses come back in the order the API

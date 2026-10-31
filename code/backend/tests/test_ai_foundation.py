@@ -17,6 +17,8 @@ when B1 and B2 merge, and this file shouldn't break when they do.
 
 import pytest
 
+from app.ai.fake import FakeProvider
+from app.ai.gemini import GeminiProvider
 from app.ai.provider import (
     DECLINED,
     NOT_CONFIGURED,
@@ -25,9 +27,8 @@ from app.ai.provider import (
     UNAVAILABLE,
     AIRateLimited,
     AIUnavailable,
-    FakeProvider,
-    GeminiProvider,
     Prompt,
+    Provider,
     cards_schema,
     get_provider,
 )
@@ -227,19 +228,19 @@ def test_the_schema_caps_the_list_at_the_requested_count():
 
 def test_tests_use_the_stand_in_and_no_key(app):
     """Rule 16: no test reaches Google, and a key in someone's .env never reaches a test."""
-    assert app.config["AI_PROVIDER"] == "fake"
+    assert app.config["AI_WRITER_PROVIDER"] == "fake"
     assert app.config["GEMINI_API_KEY"] == ""
 
 
 def test_the_fake_setting_gives_the_stand_in(app):
-    app.config["AI_PROVIDER"] = "fake"
+    app.config["AI_WRITER_PROVIDER"] = "fake"
 
     assert isinstance(get_provider(), FakeProvider)
     assert get_provider().name == "fake"
 
 
 def test_gemini_without_a_key_is_not_set_up(app):
-    app.config["AI_PROVIDER"] = "gemini"
+    app.config["AI_WRITER_PROVIDER"] = "gemini"
     app.config["GEMINI_API_KEY"] = ""
 
     with pytest.raises(AIUnavailable) as raised:
@@ -250,9 +251,9 @@ def test_gemini_without_a_key_is_not_set_up(app):
 
 def test_gemini_with_a_key_is_named_after_the_model(app):
     """Building the client makes no request, so this stays off the network."""
-    app.config["AI_PROVIDER"] = "gemini"
+    app.config["AI_WRITER_PROVIDER"] = "gemini"
     app.config["GEMINI_API_KEY"] = "not-a-real-key"
-    app.config["GEMINI_MODEL"] = "gemini-test-model"
+    app.config["AI_WRITER_MODEL"] = "gemini-test-model"
 
     provider = get_provider()
 
@@ -260,8 +261,27 @@ def test_gemini_with_a_key_is_named_after_the_model(app):
     assert provider.name == "gemini-test-model"
 
 
+def test_each_role_has_its_own_vendor_and_model(app):
+    app.config["AI_WRITER_PROVIDER"] = "fake"
+    app.config["AI_JUDGE_PROVIDER"] = "gemini"
+    app.config["AI_JUDGE_MODEL"] = "gemini-judge-model"
+    app.config["GEMINI_API_KEY"] = "not-a-real-key"
+
+    assert isinstance(get_provider("writer"), FakeProvider)
+    assert isinstance(get_provider("judge"), GeminiProvider)
+    assert get_provider("judge").name == "gemini-judge-model"
+
+
+def test_a_provider_must_implement_complete():
+    class Incomplete(Provider):
+        pass
+
+    with pytest.raises(TypeError):
+        Incomplete("name")
+
+
 def test_an_unknown_provider_setting_is_not_set_up(app):
-    app.config["AI_PROVIDER"] = "openai"
+    app.config["AI_WRITER_PROVIDER"] = "openai"
 
     with pytest.raises(AIUnavailable) as raised:
         get_provider()
@@ -343,3 +363,16 @@ def test_both_ai_blueprints_are_registered(app):
 
 def test_the_ai_smoke_command_is_registered(app):
     assert "ai-smoke" in app.cli.commands
+
+
+def test_startup_warns_about_a_renamed_setting(monkeypatch, caplog):
+    from app import create_app
+    from app.config import TestConfig
+
+    monkeypatch.setenv("GEMINI_MODEL", "gemini-old")
+    monkeypatch.setenv("AI_PROVIDER", "  ")  # compose passes an unset name through as blank
+
+    create_app(TestConfig)
+
+    assert "GEMINI_MODEL is no longer read and is being ignored. Use AI_WRITER_MODEL." in caplog.text
+    assert "AI_PROVIDER" not in caplog.text

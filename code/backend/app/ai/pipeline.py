@@ -14,8 +14,9 @@ Graph topology::
 
 Failure handling by node:
 
-* ``extract`` logs a failed chunk and continues. If no chunk yields facts, ``generate`` uses the
-  whole document.
+* ``extract`` logs a chunk the AI couldn't answer and continues. If no chunk yields facts,
+  ``generate`` uses the whole document. AIRateLimited propagates and ends the run, since the next
+  calls would hit the same limit and partial facts would quietly give worse cards.
 * ``generate`` retries AITransient once. Any other failure propagates as AIRateLimited or
   AIUnavailable, and the route maps it to an HTTP error.
 * ``judge`` keeps the pending cards and sets ``verification`` to SKIPPED if it gets no usable
@@ -38,6 +39,10 @@ from langgraph.types import RetryPolicy, Send
 
 from app.ai.cleanup import clean_drafts, normalize_front
 from app.ai.prompts import (
+    Evidence,
+    NoEvidence,
+    PromptContext,
+    TextEvidence,
     build_extract_prompt,
     build_judge_prompt,
     build_prompt,
@@ -47,7 +52,6 @@ from app.ai.provider import (
     AIRateLimited,
     AITransient,
     AIUnavailable,
-    Attachment,
     CardDraft,
     Prompt,
     Provider,
@@ -73,16 +77,10 @@ class PipelineRequest:
     """Immutable inputs for one run. Kept out of the graph state because nodes never change them."""
 
     prompt: Prompt                         # sent by the generate node
-    count: int                             # maximum cards to keep from the first write
+    context: PromptContext                 # rebuilds the writer's prompt from merged facts
     existing_fronts: Sequence[str]         # all fronts in the deck, used for deduplication
     existing: Sequence[CardDraft] = ()     # newest cards in the deck, sent to the judge
-    topic: str | None = None               # prompt mode: what was requested, not evidence
-    file_text: str | None = None           # file mode, TXT or MD: evidence for the judge
-    attachment: Attachment | None = None   # file mode, PDF: evidence for the judge
-    chunks: Sequence[str] = ()             # non-empty runs the extract step
-    focus: str | None = None               # file mode, passed to the extract step
-    deck_name: str = ""                    # for the writer's prompt from merged facts
-    deck_description: str | None = None    # for the writer's prompt from merged facts
+    evidence: Evidence = NoEvidence()      # what the judge checks cards against
 
 
 @dataclass(frozen=True)
@@ -146,22 +144,25 @@ def build_graph(writer: Provider, judge: Provider, request: PipelineRequest):
     # ``state`` in place, because LangGraph applies changes through the returned update.
 
     def route_start(state: PipelineState) -> list[Send] | str:
-        if not request.chunks:
+        # Only TXT and MD files have chunks.
+        evidence = request.evidence
+        if not isinstance(evidence, TextEvidence) or not evidence.chunks:
             return "generate"
         # Each Send starts one extract node with its own input. They run in parallel.
         return [
             Send("extract", ExtractTask(index=index, chunk=chunk))
-            for index, chunk in enumerate(request.chunks)
+            for index, chunk in enumerate(evidence.chunks)
         ]
 
     def extract_node(task: ExtractTask) -> dict:
         prompt = build_extract_prompt(
-            task["chunk"], focus=request.focus, max_facts=MAX_FACTS_PER_CHUNK
+            task["chunk"], focus=request.context.focus, max_facts=MAX_FACTS_PER_CHUNK
         )
-        # Caught here, because an exception in one parallel task would abort the whole run.
+        # An exception in one parallel task aborts the whole run. AIRateLimited should, so only
+        # AIUnavailable is caught here.
         try:
             raw = writer.extract_facts(prompt)
-        except (AIRateLimited, AIUnavailable):
+        except AIUnavailable:
             logger.warning("ai_pipeline outcome=extract_failed chunk=%d", task["index"])
             return {"model_calls": 1}
         facts = [(task["index"], fact.strip()) for fact in raw
@@ -182,14 +183,7 @@ def build_graph(writer: Provider, judge: Provider, request: PipelineRequest):
     def writer_prompt(state: PipelineState) -> Prompt:
         # Shared with repair_node, so replacements use the same material as the first write.
         if state["source_facts"]:
-            return build_prompt(
-                "file",
-                count=request.count,
-                deck_name=request.deck_name,
-                deck_description=request.deck_description,
-                file_text=state["source_facts"],
-                focus=request.focus,
-            )
+            return build_prompt(request.context, file_text=state["source_facts"])
         return request.prompt
 
     # A failed attempt returns no state update, so attempts are counted here instead of in the
@@ -207,7 +201,7 @@ def build_graph(writer: Provider, judge: Provider, request: PipelineRequest):
 
         # clean_drafts() drops malformed cards and exact duplicates of cards in the deck.
         return {
-            "pending": clean_drafts(raw, request.count, request.existing_fronts),
+            "pending": clean_drafts(raw, request.context.count, request.existing_fronts),
             "model_calls": generate_attempts,
         }
 
@@ -226,13 +220,7 @@ def build_graph(writer: Provider, judge: Provider, request: PipelineRequest):
     def judge_node(state: PipelineState) -> dict:
         # One call checks the whole batch against the full document, not the extracted facts.
         pending = state["pending"]
-        prompt = build_judge_prompt(
-            pending,
-            topic=request.topic,
-            file_text=request.file_text,
-            attachment=request.attachment,
-            existing=request.existing,
-        )
+        prompt = build_judge_prompt(pending, request.evidence, existing=request.existing)
 
         # A failed call and an unusable reply are handled the same way below. AITransient is a
         # subclass of AIUnavailable, so it lands here too and is not retried.
