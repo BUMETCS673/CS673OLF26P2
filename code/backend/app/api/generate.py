@@ -48,8 +48,16 @@ from flask_login import current_user, login_required
 from sqlalchemy import func, select
 
 from app.ai.cleanup import clean_drafts
-from app.ai.prompts import build_prompt
-from app.ai.provider import AIRateLimited, AIUnavailable, Attachment, CardDraft, get_provider
+from app.ai.pipeline import MAX_MODEL_CALLS, PipelineRequest, run_pipeline
+from app.ai.prompts import PROMPT_VERSION, build_prompt
+from app.ai.provider import (
+    AIRateLimited,
+    AIUnavailable,
+    Attachment,
+    CardDraft,
+    get_judge_provider,
+    get_provider,
+)
 from app.api.decks import own_deck_or_404
 from app.api.validation import optional_text, required_text
 from app.errors import ApiError, json_object, validation_error
@@ -132,17 +140,32 @@ def _valid_file(body: dict) -> tuple[str, str | None, Attachment | None]:
     return file["name"], text, None
 
 
-def _check_daily_caps() -> None:
-    """The learner's cap, then the site's. Best effort: only saved generations count (A19)."""
+def _check_daily_caps(cost: int) -> None:
+    """The learner's generations, then the site's model calls, with `cost` for this request.
+
+    `cost` is the most model calls this request can make. Best effort: only saved generations
+    count (A19).
+    """
     since = utcnow() - CAP_WINDOW
     recent = select(func.count()).select_from(AiGeneration).where(AiGeneration.created_at > since)
 
     limit = current_app.config["AI_DAILY_LIMIT"]
-    if db.session.scalar(recent.where(AiGeneration.user_id == current_user.id)) >= limit:
+    # A batch with no cards gave the learner nothing, so it doesn't use their allowance.
+    learner_recent = recent.where(
+        AiGeneration.user_id == current_user.id, AiGeneration.empty.is_(False)
+    )
+    if db.session.scalar(learner_recent) >= limit:
         raise ApiError(
             429, f"You've reached the limit of {limit} AI generations in 24 hours. Try again later."
         )
-    if db.session.scalar(recent) >= current_app.config["AI_SITE_DAILY_LIMIT"]:
+    # Empty batches still spent quota at Google, so they count here. Summing model_calls covers
+    # batches that made several calls, and adding `cost` keeps room for this request's worst case.
+    site_calls = db.session.scalar(
+        select(func.coalesce(func.sum(AiGeneration.model_calls), 0)).where(
+            AiGeneration.created_at > since
+        )
+    )
+    if site_calls + cost > current_app.config["AI_SITE_DAILY_LIMIT"]:
         raise ApiError(429, SITE_CAP)
 
 
@@ -176,11 +199,14 @@ def generate(deck_id):
             "Suggest more content needs at least 10 cards in the deck.", "mode"
         )
 
-    _check_daily_caps()
+    use_graph = current_app.config["AI_PIPELINE"] == "graph"
+    _check_daily_caps(MAX_MODEL_CALLS if use_graph else 1)
 
     existing_fronts = db.session.scalars(select(Card.front).where(Card.deck_id == deck.id)).all()
     existing = ()
-    if mode == "suggest":
+    # The judge checks for duplicates in every mode. build_prompt() still sends these to the
+    # writer only in suggest mode.
+    if mode == "suggest" or use_graph:
         rows = db.session.execute(
             select(Card.front, Card.back)
             .where(Card.deck_id == deck.id)
@@ -191,23 +217,44 @@ def generate(deck_id):
 
     started = time.monotonic()
     model = "-"
+    judge = None  # stays None on the single-call path, which leaves the judge columns null
     try:
         provider = get_provider()
         model = provider.name
-        raw = provider.generate_cards(
-            build_prompt(
-                mode,
-                count=count,
-                deck_name=deck.name,
-                deck_description=deck.description,
-                prompt=prompt,
-                file_text=file_text,
-                attachment=attachment,
-                focus=focus,
-                existing=existing,
-            )
+        built = build_prompt(
+            mode,
+            count=count,
+            deck_name=deck.name,
+            deck_description=deck.description,
+            prompt=prompt,
+            file_text=file_text,
+            attachment=attachment,
+            focus=focus,
+            existing=existing,
         )
-        drafts = clean_drafts(raw, count, existing_fronts)
+        if use_graph:
+            # Inside the try, so a missing key answers 503. Only a failed write leaves
+            # run_pipeline() as an exception. A failed check or repair still returns cards.
+            judge = get_judge_provider()
+            result = run_pipeline(
+                provider,
+                judge,
+                PipelineRequest(
+                    prompt=built,
+                    count=count,
+                    existing_fronts=existing_fronts,
+                    existing=existing,
+                    topic=prompt,
+                    file_text=file_text,
+                    attachment=attachment,
+                ),
+            )
+            drafts, model_calls, verification = (
+                result.drafts, result.model_calls, result.verification
+            )
+        else:
+            raw = provider.generate_cards(built)
+            drafts, model_calls, verification = clean_drafts(raw, count, existing_fronts), 1, None
     except AIRateLimited as e:
         _log(mode, count, 0, model, started, "rate_limited")
         raise ApiError(429, e.message) from None
@@ -223,6 +270,16 @@ def generate(deck_id):
         prompt=prompt or focus,
         source_filename=file_name,
         model=model,
+        # Spend and quality data for comparing the two paths. Only verification reaches the client.
+        model_calls=model_calls,
+        verification=verification,
+        empty=not drafts,
+        prompt_version=PROMPT_VERSION,
+        input_tokens=provider.usage.input_tokens,
+        output_tokens=provider.usage.output_tokens,
+        judge_model=judge.name if judge else None,
+        judge_input_tokens=judge.usage.input_tokens if judge else None,
+        judge_output_tokens=judge.usage.output_tokens if judge else None,
         candidates=[{"front": d.front, "back": d.back, "status": "pending"} for d in drafts],
     )
     db.session.add(generation)

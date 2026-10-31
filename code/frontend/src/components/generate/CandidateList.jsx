@@ -42,6 +42,8 @@ export default function CandidateList({
       ? <p className="candidate-note">Gemini couldn't write cards from that. Try a different prompt or file.</p>
       : cards.length < requested
         && <p className="candidate-note">Gemini returned {cards.length} of the {requested} you asked for.</p>}
+    {generation.verification === 'skipped' && cards.length > 0
+      && <p className="candidate-note">The accuracy check didn't run on this batch, so read these cards closely.</p>}
     {error && <p className="error-message" role="alert">{error.message}</p>}
 
     {cards.length > 0 && <ol className="candidate-list">

@@ -24,6 +24,7 @@ from app.ai.provider import (
     AIRateLimited,
     AIUnavailable,
     FakeProvider,
+    TokenUsage,
 )
 from app.models import AiGeneration, utcnow
 
@@ -39,6 +40,7 @@ class RecordingProvider:
         self.cards = cards
         self.fail_with = fail_with
         self.prompts = []
+        self.usage = TokenUsage()
 
     def generate_cards(self, prompt):
         self.prompts.append(prompt)
@@ -146,7 +148,7 @@ def test_a_card_matching_an_existing_front_is_left_out(client, me, make_deck, pr
     assert [c["front"] for c in resp.get_json()["cards"]] == ["What is DNA?"]
 
 
-def test_no_usable_cards_is_still_a_201_and_counts(client, deck, provider):
+def test_no_usable_cards_is_still_a_201_and_is_saved_as_empty(client, deck, provider):
     provider(cards=[])
 
     resp = _post(client, deck.id, {"mode": "prompt", "count": 3, "prompt": "Cells"})
@@ -154,6 +156,7 @@ def test_no_usable_cards_is_still_a_201_and_counts(client, deck, provider):
     assert resp.status_code == 201
     assert resp.get_json()["cards"] == []
     assert _generation_count() == 1
+    assert AiGeneration.query.one().empty is True
 
 
 # --- Ownership, auth and the body ----------------------------------------------
