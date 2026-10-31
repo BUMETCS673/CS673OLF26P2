@@ -74,7 +74,7 @@ class Config:
     AI_SITE_DAILY_LIMIT = int(_env("AI_SITE_DAILY_LIMIT", "18"))
     AI_MAX_CARDS = 25  # cards per generate request
     # "single": one model call. "graph": the self-correcting pipeline in app/ai/pipeline.py,
-    # up to 5 calls a request, with the checks on AI_JUDGE_MODEL.
+    # up to 5 calls a request plus 4 for a long file, with the checks on AI_JUDGE_MODEL.
     AI_PIPELINE = _env("AI_PIPELINE", "single")
     AI_JUDGE_MODEL = _env("AI_JUDGE_MODEL", "gemini-3.8-flash")
 

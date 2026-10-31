@@ -47,6 +47,7 @@ from flask import Blueprint, current_app, jsonify, request
 from flask_login import current_user, login_required
 from sqlalchemy import func, select
 
+from app.ai.chunking import split_text
 from app.ai.cleanup import clean_drafts
 from app.ai.pipeline import MAX_MODEL_CALLS, PipelineRequest, run_pipeline
 from app.ai.prompts import PROMPT_VERSION, build_prompt
@@ -200,7 +201,8 @@ def generate(deck_id):
         )
 
     use_graph = current_app.config["AI_PIPELINE"] == "graph"
-    _check_daily_caps(MAX_MODEL_CALLS if use_graph else 1)
+    chunks = split_text(file_text) if use_graph and file_text else []
+    _check_daily_caps(MAX_MODEL_CALLS + len(chunks) if use_graph else 1)
 
     existing_fronts = db.session.scalars(select(Card.front).where(Card.deck_id == deck.id)).all()
     existing = ()
@@ -247,6 +249,10 @@ def generate(deck_id):
                     topic=prompt,
                     file_text=file_text,
                     attachment=attachment,
+                    chunks=chunks,
+                    focus=focus,
+                    deck_name=deck.name,
+                    deck_description=deck.description,
                 ),
             )
             drafts, model_calls, verification = (

@@ -28,6 +28,7 @@ turns each into the matching error from C5.
 import itertools
 import json
 import logging
+import threading
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -149,6 +150,17 @@ def verdicts_schema(max_cards: int) -> dict:
     }
 
 
+def facts_schema(max_facts: int) -> dict:
+    """The JSON Schema for extracted facts."""
+    return {
+        "type": "object",
+        "properties": {
+            "facts": {"type": "array", "maxItems": max_facts, "items": {"type": "string"}}
+        },
+        "required": ["facts"],
+    }
+
+
 class Provider(Protocol):
     name: str               # saved as ai_generations.model
     usage: TokenUsage       # running total; providers are created per request
@@ -158,6 +170,9 @@ class Provider(Protocol):
 
     def judge_cards(self, prompt: Prompt) -> list:
         """The model's "verdicts" array, parsed but not validated. Raises the same two errors."""
+
+    def extract_facts(self, prompt: Prompt) -> list:
+        """The model's "facts" array, parsed but not validated. Raises the same two errors."""
 
 
 # One counter for the whole process, so a second batch never repeats the first one's
@@ -186,6 +201,11 @@ class FakeProvider:
         # Approve every candidate. For a judge prompt, max_cards is the number of candidates.
         return [{"index": index, "ok": True} for index in range(prompt.max_cards)]
 
+    def extract_facts(self, prompt: Prompt) -> list:
+        if self.fail_with is not None:
+            raise self.fail_with()
+        return [f"Sample fact {next(_sample_numbers)}"]
+
 
 class GeminiProvider:
     """Google's Gemini, on the free tier (A1). Billing is never turned on (A2)."""
@@ -193,8 +213,9 @@ class GeminiProvider:
     def __init__(self, api_key: str, model: str, client=None):
         self.name = model
         self.usage = TokenUsage()
-        # `client` lets tests pass a fake. The SDK's timeout is in milliseconds: five calls
-        # at 45 s stay under nginx's 235 s, so a slow reply ends as our 503, not nginx's 504.
+        self._usage_lock = threading.Lock()  # extract calls run in parallel threads
+        # `client` lets tests pass a fake. The SDK's timeout is in milliseconds: six sequential
+        # calls at 45 s stay under nginx's 280 s, so a slow reply ends as our 503, not nginx's 504.
         if client is None:
             client = genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=45_000))
         self._client = client
@@ -204,6 +225,9 @@ class GeminiProvider:
 
     def judge_cards(self, prompt: Prompt) -> list:
         return _list_from(self._generate(prompt, verdicts_schema(prompt.max_cards)), "verdicts")
+
+    def extract_facts(self, prompt: Prompt) -> list:
+        return _list_from(self._generate(prompt, facts_schema(prompt.max_cards)), "facts")
 
     def _generate(self, prompt: Prompt, schema: dict) -> str | None:
         """Make one model call and return the reply text. Raises AIRateLimited or AIUnavailable.
@@ -267,10 +291,11 @@ class GeminiProvider:
         metadata = getattr(response, "usage_metadata", None)
         if metadata is None:
             return
-        self.usage.input_tokens += metadata.prompt_token_count or 0
-        self.usage.output_tokens += (
-            (metadata.candidates_token_count or 0) + (metadata.thoughts_token_count or 0)
-        )
+        with self._usage_lock:
+            self.usage.input_tokens += metadata.prompt_token_count or 0
+            self.usage.output_tokens += (
+                (metadata.candidates_token_count or 0) + (metadata.thoughts_token_count or 0)
+            )
 
 
 def _log_failure(error: Exception) -> None:
