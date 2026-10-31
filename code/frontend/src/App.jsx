@@ -33,14 +33,18 @@ import ProtectedRoute, { GuestOnlyRoute } from "./auth/ProtectedRoute";
 import DeckDetailPage from "./pages/DeckDetailPage";
 import DeckListPage from "./pages/DeckListPage";
 import GeneratePage from "./pages/GeneratePage";
+import LeechReviewPage from "./pages/LeechReviewPage";
+import SuggestionsNotice from "./components/SuggestionsNotice";
+import { SuggestionsProvider } from "./suggestions/SuggestionsContext";
 import LoginPage from "./pages/LoginPage";
 import SignupPage from "./pages/SignupPage";
 import StudyPage from "./pages/StudyPage";
 
 export default function App() {
   return (
-    <>
+    <SuggestionsProvider>
       <Header />
+      <SuggestionsNotice />
       <Routes>
         <Route path="/" element={<Navigate to="/decks" replace />} />
 
@@ -93,10 +97,18 @@ export default function App() {
             </ProtectedRoute>
           }
         />
+        <Route
+          path="/decks/:id/leeches"
+          element={
+            <ProtectedRoute>
+              <LeechReviewPage />
+            </ProtectedRoute>
+          }
+        />
 
         {/* Anything else goes home, which then decides login or decks. */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
-    </>
+    </SuggestionsProvider>
   );
 }

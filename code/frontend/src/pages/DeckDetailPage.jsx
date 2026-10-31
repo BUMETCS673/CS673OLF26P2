@@ -31,6 +31,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import CardForm from '../components/CardForm';
 import CardRow from '../components/CardRow';
+import LeechBanner from '../components/LeechBanner.jsx';
 import { deckLoadMessage } from '../components/deckLoadMessage.js';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { createDecksApi } from '../api/decks.js';
@@ -57,10 +58,13 @@ function RoutedDeckDetail({ id, location, navigate }) {
   }, [location, navigate]);
   return <DeckDetailView api={decksApi} deckId={id} startAdding={startAdding}
     onBack={() => navigate('/decks')} onStudy={() => navigate(`/decks/${id}/study`)}
-    onGenerate={() => navigate(`/decks/${id}/generate`)} />;
+    onGenerate={() => navigate(`/decks/${id}/generate`)}
+    onReviewLeeches={() => navigate(`/decks/${id}/leeches`)} />;
 }
 
-export function DeckDetailView({ api, deckId, onBack, onStudy, onGenerate, startAdding = false }) {
+export function DeckDetailView({
+  api, deckId, onBack, onStudy, onGenerate, onReviewLeeches, startAdding = false,
+}) {
   // The page is mounted with key={id}, so a different deck remounts this component rather
   // than loading again in place. `now` is taken once per load, for every CardRow.
   const load = useCallback(
@@ -105,6 +109,7 @@ export function DeckDetailView({ api, deckId, onBack, onStudy, onGenerate, start
             {!adding && <button className="button secondary" onClick={() => { setNotice(''); setAdding(true); }}>+ Add card</button>}
             <button className="button secondary" onClick={onGenerate}>Generate with AI</button>
             {cards.length > 0 && <button className="button primary" onClick={onStudy}>{studyLabel(deck.due_counts)}</button>}</div></div>
+        <LeechBanner deckId={deckId} onReview={onReviewLeeches} />
         {adding && <section className="card-composer" aria-labelledby="add-card-heading">
           <div className="composer-heading"><div><p className="eyebrow">{cards.length === 0 ? 'Your first flashcard' : 'One more idea'}</p>
             <h2 id="add-card-heading">{cards.length === 0 ? 'What do you want to remember?' : 'Add to your collection'}</h2></div>

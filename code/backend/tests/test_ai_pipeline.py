@@ -197,6 +197,13 @@ def test_generate_retries_a_transient_failure_and_counts_both_attempts():
     assert result.model_calls == 3
 
 
+def test_retry_counts_arent_shared_between_runs():
+    first = run(Scripted(AITransient(), [card(1)]), Scripted(ok(0)), count=1)
+    second = run(Scripted([card(1)]), Scripted(ok(0)), count=1)
+    assert first.model_calls == 3
+    assert second.model_calls == 2
+
+
 def test_generate_gives_up_after_two_transient_failures():
     writer = Scripted(AITransient(), AITransient(), [card(1)])
     with pytest.raises(AITransient):

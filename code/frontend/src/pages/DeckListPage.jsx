@@ -20,6 +20,7 @@ import DeckForm from '../components/DeckForm';
 import { useNavigate } from 'react-router-dom';
 import { createDecksApi } from '../api/decks.js';
 import { useApi } from '../api/useApi.js';
+import SuggestionsCard from '../components/SuggestionsCard.jsx';
 import { useLoad } from '../hooks/useLoad.js';
 import { describeDueCounts } from '../study/describeSchedule.js';
 
@@ -29,11 +30,12 @@ export default function DeckListPage() {
   return <div className="ws4"><DeckListView api={decksApi}
     onOpenDeck={(id) => navigate(`/decks/${id}`)}
     onStudyDeck={(id) => navigate(`/decks/${id}/study`)}
-    onDeckCreated={(id) => navigate(`/decks/${id}`, { state: { startAdding: true } })} />
+    onDeckCreated={(id) => navigate(`/decks/${id}`, { state: { startAdding: true } })}
+    onReviewSuggestions={(id) => navigate(`/decks/${id}/leeches`)} />
   </div>;
 }
 
-export function DeckListView({ api, onOpenDeck, onStudyDeck, onDeckCreated = onOpenDeck }) {
+export function DeckListView({ api, onOpenDeck, onStudyDeck, onDeckCreated = onOpenDeck, onReviewSuggestions }) {
   const load = useCallback(() => api.listDecks(), [api]);
   // setDecks edits the loaded list in place, with the same shape as a useState setter.
   const { data, error: loadError, loading, reload, setData: setDecks } = useLoad(load);
@@ -64,6 +66,7 @@ export function DeckListView({ api, onOpenDeck, onStudyDeck, onDeckCreated = onO
       {!creating && !loading && !error && decks.length > 0 && <button className="button primary" onClick={() => { setCreating(true); setEditing(null); }}>+ New deck</button>}
     </div>
     <p className="sr-only" role="status">{notice}</p>
+    <SuggestionsCard onReview={onReviewSuggestions} />
     {creating && <section className="form-panel deck-setup" aria-labelledby="new-deck-heading">
       <p className="eyebrow">Start a collection</p>
       <h2 id="new-deck-heading">Create a deck</h2>

@@ -28,6 +28,23 @@ class FakeProvider(Provider):
         elif key == "verdicts":
             # Approve every candidate. In a judge prompt, max_cards is the candidate count.
             items = [{"index": index, "ok": True} for index in range(prompt.max_cards)]
+        elif key == "recommendations":
+            # In a Leech Doctor prompt, max_cards is the number of cards.
+            items = [
+                {
+                    "index": index,
+                    "options": [{
+                        "kind": "rewrite",
+                        "reason": "Sample reason.",
+                        "cards": [{
+                            "front": f"Sample question {(n := next(_sample_numbers))}",
+                            "back": f"Sample answer {n}",
+                        }],
+                    }],
+                }
+                for index in range(prompt.max_cards)
+            ]
+            return json.dumps({"shared_cause": "Sample shared cause.", key: items})
         else:
             items = [f"Sample fact {next(_sample_numbers)}"]
         return json.dumps({key: items})
