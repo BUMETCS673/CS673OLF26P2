@@ -27,8 +27,12 @@ _RETRIABLE_STATUS = frozenset({408, 500, 502, 503})
 
 
 class GeminiProvider(Provider):
-    def __init__(self, api_key: str, model: str, client=None):
+    def __init__(self, api_key: str, model: str, client=None, thinking: str = "low"):
         super().__init__(model)
+        try:
+            self._thinking = types.ThinkingLevel[thinking.upper()]
+        except KeyError:
+            raise ValueError(f"unknown thinking level: {thinking!r}") from None
         # `client` lets tests pass a fake. The SDK's timeout is in milliseconds: six sequential
         # calls at 45 s stay under nginx's 280 s, so a slow reply ends as our 503, not nginx's 504.
         if client is None:
@@ -47,10 +51,9 @@ class GeminiProvider(Provider):
             system_instruction=prompt.system,
             response_mime_type="application/json",
             response_json_schema=schema,
-            # A20: writing cards is simple instruction following, and Gemini 3 models default
-            # to high thinking, which is slower. Never send thinking_budget as well: the two
-            # together are a 400.
-            thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.LOW),
+            # A20: Gemini 3 models default to high thinking, which is slower, so each role sets
+            # its own level. Never send thinking_budget as well: the two together are a 400.
+            thinking_config=types.ThinkingConfig(thinking_level=self._thinking),
         )
         # One attempt: the SDK doesn't retry unless asked to, and a retry would spend the
         # free quota twice. Only the pipeline's generate node retries, on AITransient. `from None`

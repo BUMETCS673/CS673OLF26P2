@@ -21,6 +21,7 @@ import httpx
 import pytest
 from google.genai import errors, types
 
+from app.ai.card_checks import write_cards
 from app.ai.gemini import GeminiProvider
 from app.ai.provider import (
     DECLINED,
@@ -59,11 +60,10 @@ def _provider(text=None, raises=None, finish=None, blocked=None):
     return GeminiProvider("not-a-real-key", MODEL, client=SimpleNamespace(models=models)), models
 
 
-def _prompt(max_cards=4, attachment=None):
+def _prompt(attachment=None):
     return Prompt(
         system="Write 4 cards.",
         text="Deck name: Anatomy\n\n<source>\nThe bones of the hand\n</source>",
-        max_cards=max_cards,
         attachment=attachment,
     )
 
@@ -78,9 +78,9 @@ def _api_error(kind, code, status, message):
 def test_a_reply_returns_its_cards_and_the_call_carries_the_prompt():
     cards = [{"front": "a", "back": "b"}]
     provider, models = _provider(text=json.dumps({"cards": cards}))
-    prompt = _prompt(max_cards=4)
+    prompt = _prompt()
 
-    assert provider.generate_cards(prompt) == cards
+    assert write_cards(provider, prompt, 4) == cards
 
     [call] = models.calls
     assert call["model"] == MODEL == provider.name
@@ -94,20 +94,35 @@ def test_the_call_asks_for_low_thinking_and_no_thinking_budget():
     """A20. Sending thinking_budget as well would be a 400."""
     provider, models = _provider(text='{"cards": []}', finish=types.FinishReason.STOP)
 
-    provider.generate_cards(_prompt())
+    write_cards(provider, _prompt(), 4)
 
     thinking = models.calls[0]["config"].thinking_config
     assert thinking.thinking_level == types.ThinkingLevel.LOW
     assert thinking.thinking_budget is None
 
 
+def test_each_instance_uses_its_own_thinking_level():
+    models = FakeModels(text='{"cards": []}')
+    client = SimpleNamespace(models=models)
+    provider = GeminiProvider("not-a-real-key", MODEL, client=client, thinking="high")
+
+    write_cards(provider, _prompt(), 4)
+
+    assert models.calls[0]["config"].thinking_config.thinking_level == types.ThinkingLevel.HIGH
+
+
+def test_an_unknown_thinking_level_is_refused():
+    with pytest.raises(ValueError):
+        GeminiProvider("not-a-real-key", MODEL, client=SimpleNamespace(), thinking="extreme")
+
+
 def test_a_blocked_prompt_is_declined():
     provider, _ = _provider(text=None, blocked=types.BlockedReason.SAFETY)
 
     with pytest.raises(AIUnavailable) as raised:
-        provider.generate_cards(_prompt())
+        write_cards(provider, _prompt(), 4)
 
-    assert raised.value.message == DECLINED == "Gemini declined to write cards from that material."
+    assert raised.value.message == DECLINED == "The AI declined to write cards from that material."
 
 
 def test_a_reply_cut_off_for_length_is_too_much():
@@ -115,7 +130,7 @@ def test_a_reply_cut_off_for_length_is_too_much():
     provider, _ = _provider(text='{"cards": [{"front": "a", "ba', finish=types.FinishReason.MAX_TOKENS)
 
     with pytest.raises(AIUnavailable) as raised:
-        provider.generate_cards(_prompt())
+        write_cards(provider, _prompt(), 4)
 
     assert raised.value.message == TOO_MUCH
 
@@ -128,7 +143,7 @@ def test_a_reply_stopped_for_safety_or_similar_is_declined(finish):
     provider, _ = _provider(text=None, finish=types.FinishReason[finish])
 
     with pytest.raises(AIUnavailable) as raised:
-        provider.generate_cards(_prompt())
+        write_cards(provider, _prompt(), 4)
 
     assert raised.value.message == DECLINED
 
@@ -136,14 +151,14 @@ def test_a_reply_stopped_for_safety_or_similar_is_declined(finish):
 def test_a_normal_stop_reads_the_cards():
     provider, _ = _provider(text='{"cards": []}', finish=types.FinishReason.STOP)
 
-    assert provider.generate_cards(_prompt()) == []
+    assert write_cards(provider, _prompt(), 4) == []
 
 
 def test_stop_logs_carry_no_content(caplog):
     provider, _ = _provider(text='{"cards": [{"front": "bones of the', finish=types.FinishReason.MAX_TOKENS)
 
     with caplog.at_level(logging.WARNING), pytest.raises(AIUnavailable):
-        provider.generate_cards(_prompt())
+        write_cards(provider, _prompt(), 4)
 
     assert "cut_off" in caplog.text
     assert "bones of the" not in caplog.text
@@ -153,7 +168,8 @@ def test_a_pdf_travels_as_a_part_after_the_text():
     pdf = b"%PDF-1.7\n1 0 obj\n"
     provider, models = _provider(text='{"cards": []}')
 
-    provider.generate_cards(_prompt(attachment=Attachment(mime_type="application/pdf", data=pdf)))
+    attachment = Attachment(mime_type="application/pdf", data=pdf)
+    write_cards(provider, _prompt(attachment=attachment), 4)
 
     text, part = models.calls[0]["contents"]
     assert text == _prompt().text
@@ -167,7 +183,7 @@ def test_the_cards_come_back_as_parsed_not_validated():
     raw = [{"front": "a"}, {"front": 1, "back": None}, "not a card"]
     provider, _ = _provider(text=json.dumps({"cards": raw}))
 
-    assert provider.generate_cards(_prompt()) == raw
+    assert write_cards(provider, _prompt(), 4) == raw
 
 
 # --- failures (C5) -----------------------------------------------------------------------
@@ -178,7 +194,7 @@ def test_googles_429_is_rate_limited():
     provider, _ = _provider(raises=error)
 
     with pytest.raises(AIRateLimited) as raised:
-        provider.generate_cards(_prompt())
+        write_cards(provider, _prompt(), 4)
 
     assert raised.value.message.startswith("The free AI service is at its limit right now.")
 
@@ -202,7 +218,7 @@ def test_any_other_failure_is_unavailable(error):
     provider, _ = _provider(raises=error)
 
     with pytest.raises(AIUnavailable) as raised:
-        provider.generate_cards(_prompt())
+        write_cards(provider, _prompt(), 4)
 
     assert raised.value.message == "The AI service didn't respond. Try again in a minute."
 
@@ -216,7 +232,7 @@ def test_a_reply_without_a_cards_list_is_unavailable(text):
     provider, _ = _provider(text=text)
 
     with pytest.raises(AIUnavailable):
-        provider.generate_cards(_prompt())
+        write_cards(provider, _prompt(), 4)
 
 
 def test_failures_are_not_chained_to_the_sdk_error():
@@ -224,7 +240,7 @@ def test_failures_are_not_chained_to_the_sdk_error():
     provider, _ = _provider(raises=_api_error(errors.ClientError, 400, "INVALID_ARGUMENT", "x"))
 
     with pytest.raises(AIUnavailable) as raised:
-        provider.generate_cards(_prompt())
+        write_cards(provider, _prompt(), 4)
 
     assert raised.value.__cause__ is None
     assert raised.value.__suppress_context__ is True
@@ -236,7 +252,7 @@ def test_a_failure_logs_its_type_and_status_and_nothing_the_learner_wrote(caplog
     provider, _ = _provider(raises=_api_error(errors.ClientError, 400, "INVALID_ARGUMENT", body))
 
     with caplog.at_level(logging.WARNING), pytest.raises(AIUnavailable):
-        provider.generate_cards(_prompt())
+        write_cards(provider, _prompt(), 4)
 
     assert "ClientError" in caplog.text
     assert "400" in caplog.text
@@ -249,7 +265,7 @@ def test_an_unusable_reply_logs_without_the_reply(caplog):
     provider, _ = _provider(text='{"cards": "The bones of the hand"}')
 
     with caplog.at_level(logging.WARNING), pytest.raises(AIUnavailable):
-        provider.generate_cards(_prompt())
+        write_cards(provider, _prompt(), 4)
 
     assert caplog.text
     assert "bones of the hand" not in caplog.text

@@ -38,6 +38,7 @@ import SuggestionsNotice from "./components/SuggestionsNotice";
 import { SuggestionsProvider } from "./suggestions/SuggestionsContext";
 import LoginPage from "./pages/LoginPage";
 import SignupPage from "./pages/SignupPage";
+import TutorPage from "./pages/TutorPage";
 import StudyPage from "./pages/StudyPage";
 
 export default function App() {
@@ -102,6 +103,14 @@ export default function App() {
           element={
             <ProtectedRoute>
               <LeechReviewPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/decks/:id/tutor"
+          element={
+            <ProtectedRoute>
+              <TutorPage />
             </ProtectedRoute>
           }
         />

@@ -61,9 +61,10 @@ To check the provider works, ask it for one card:
 docker compose exec backend flask ai-smoke
 ```
 
-With `gemini`, that spends one of the free tier's 20 requests for the day. Generations are
-also capped over a rolling 24 hours: `AI_DAILY_LIMIT` per user (10) and
-`AI_SITE_DAILY_LIMIT` for the whole site (18).
+With `gemini`, that spends one of the free tier's requests for the day. Over a rolling 24 hours,
+generations are capped by `AI_DAILY_LIMIT` per user (10), and each model's calls across all features
+by `AI_MODEL_DAILY_LIMITS` (`model:limit,model:limit`), or `AI_MODEL_DAILY_LIMIT` (18) for unlisted
+models. The defaults come from third-party figures, so confirm your real limits in AI Studio.
 
 ## Checking It Works
 

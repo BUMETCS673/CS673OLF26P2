@@ -1,4 +1,4 @@
-"""The Leech Doctor queue: creates reviews for flagged cards and runs them in the background.
+"""Leech Doctor: creates reviews for flagged cards, runs them in the background, applies decisions.
 
 Page loads and status checks drive the queue through `refresh_queue()`, because the free tier has
 no scheduler. A job lost to a restart is therefore retried on a later request.
@@ -20,17 +20,25 @@ from flask import current_app
 from sqlalchemy import and_, func, or_, select, update
 
 from app.ai.checkpoints import discard_threads, open_checkpointer
-from app.ai.leech import MAX_CARDS_PER_REVIEW, similar_cards, start_review
-from app.ai.provider import AIUnavailable, get_provider
-from app.ai_usage import CAP_WINDOW, site_model_calls
+from app.ai.leech import (
+    MAX_CARDS_PER_REVIEW,
+    REPLACING_KINDS,
+    resume_review,
+    similar_cards,
+    start_review,
+)
+from app.ai.provider import Role, get_provider, is_configured
 from app.extensions import db
 from app.models import Card, Deck, LeechReview, as_utc, utcnow
 from app.models.leech_review import ACTIVE, COMPLETED, FAILED, PENDING, QUEUED, RUNNING
+from app.services.usage import LEECH, feature_calls, record_usage, within_model_limits
 
 logger = logging.getLogger(__name__)
 
+REMOVE = "remove"  # a decision that deletes the card
 MAX_ATTEMPTS = 2
-JOB_CALLS = 2  # one to diagnose and one to judge, reserved against the budgets before starting
+JOB_COST = {Role.WRITER: 1, Role.JUDGE: 1}  # reserved against the budgets before starting
+JOB_CALLS = sum(JOB_COST.values())
 REFLAG_AFTER = 2 # lapses until a handled card is flagged again
 RETRY_AFTER = timedelta(minutes=10)  # wait before retrying a failed or rate-limited job
 STALE_AFTER = timedelta(minutes=5)   # a running job older than this counts as lost
@@ -54,32 +62,17 @@ def mark_handled(card: Card) -> None:
     card.leech_next_at = card.lapses + REFLAG_AFTER
 
 
-def _leech_calls(*conditions) -> int:
-    return db.session.scalar(
-        select(func.coalesce(func.sum(LeechReview.model_calls), 0)).where(
-            LeechReview.created_at > utcnow() - CAP_WINDOW, *conditions
-        )
-    )
-
-
 def _can_run(user_id: int) -> bool:
     """Whether a job could make its AI call now. Otherwise jobs wait in the queue."""
+    if not is_configured() or not is_configured(Role.JUDGE):
+        return False
     config = current_app.config
-    # Background work stops early, so that it can't use up the quota for generating cards.
-    usable = config["AI_SITE_DAILY_LIMIT"] - config["AI_LEECH_SITE_RESERVE"]
-    if (
-        site_model_calls() + JOB_CALLS > usable
-        or _leech_calls() + JOB_CALLS > config["AI_LEECH_DAILY_LIMIT"]
-        or _leech_calls(LeechReview.user_id == user_id) + JOB_CALLS
-        > config["AI_LEECH_USER_DAILY_LIMIT"]
-    ):
-        return False
-    try:
-        get_provider()
-        get_provider("judge")
-    except AIUnavailable:
-        return False
-    return True
+    return (
+        feature_calls(LEECH) + JOB_CALLS <= config["AI_LEECH_DAILY_LIMIT"]
+        and feature_calls(LEECH, user_id) + JOB_CALLS <= config["AI_LEECH_USER_DAILY_LIMIT"]
+        # Background work stops early, so that it can't use up the quota for learners' requests.
+        and within_model_limits(JOB_COST, reserve=config["AI_LEECH_MODEL_RESERVE"])
+    )
 
 
 def _is_paused(deck_id: int) -> bool:
@@ -99,19 +92,29 @@ def _is_paused(deck_id: int) -> bool:
 
 def _ensure_reviews(user_id: int) -> None:
     """Queue a review for each of the user's decks with flagged cards and no active review."""
-    deck_ids = db.session.scalars(
+    flagged = set(db.session.scalars(
         select(Card.deck_id)
         .join(Deck, Deck.id == Card.deck_id)
         .where(Deck.user_id == user_id, Card.lapses >= Card.leech_next_at)
         .distinct()
-    ).all()
-    for deck_id in deck_ids:
-        # The lock stops two simultaneous requests from queuing two reviews. SQLite ignores it.
+    ))
+    if not flagged:
+        return
+    active = set(db.session.scalars(
+        select(LeechReview.deck_id).where(
+            LeechReview.user_id == user_id, LeechReview.status.in_(ACTIVE)
+        )
+    ))
+    for deck_id in flagged - active:
+        if _is_paused(deck_id):
+            continue
+        # The lock stops two simultaneous requests from queuing two reviews, so check again
+        # after taking it. SQLite ignores it.
         db.session.scalar(select(Deck.id).where(Deck.id == deck_id).with_for_update())
-        active = LeechReview.query.filter(
+        still_free = LeechReview.query.filter(
             LeechReview.deck_id == deck_id, LeechReview.status.in_(ACTIVE)
-        ).first()
-        if active is None and not _is_paused(deck_id):
+        ).first() is None
+        if still_free:
             db.session.add(LeechReview(user_id=user_id, deck_id=deck_id, status=QUEUED))
         db.session.commit()
 
@@ -151,11 +154,12 @@ def refresh_queue(user_id: int) -> bool:
     if not current_app.config["AI_LEECH_ENABLED"]:
         return False
     _ensure_reviews(user_id)
-    can_run = _can_run(user_id)
+    waiting = db.session.scalars(
+        select(LeechReview.id).where(LeechReview.user_id == user_id, _startable(utcnow()))
+    ).all()
+    # Budgets take several queries, so they're only checked when a job could use them.
+    can_run = bool(waiting) and _can_run(user_id)
     if can_run:
-        waiting = db.session.scalars(
-            select(LeechReview.id).where(LeechReview.user_id == user_id, _startable(utcnow()))
-        ).all()
         for review_id in waiting:
             _start_thread(review_id)
 
@@ -221,20 +225,18 @@ def _diagnose(review: LeechReview):
     thread_id = review.thread_id
     db.session.commit()
 
-    provider, judge = get_provider(), get_provider("judge")
-    with open_checkpointer(current_app.config["SQLALCHEMY_DATABASE_URI"]) as checkpointer:
-        outcome = start_review(
-            provider, judge, checkpointer, thread_id, cards,
-            [item["front"] for item in deck_cards],
-        )
-    review.model = provider.name
-    review.input_tokens += provider.usage.input_tokens
-    review.output_tokens += provider.usage.output_tokens
-    review.judge_model = judge.name
-    review.judge_input_tokens += judge.usage.input_tokens
-    review.judge_output_tokens += judge.usage.output_tokens
-    review.model_calls += outcome.model_calls
-    return outcome
+    provider, judge = get_provider(), get_provider(Role.JUDGE)
+    user_id, deck_id = review.user_id, review.deck_id
+    try:
+        with open_checkpointer(current_app.config["SQLALCHEMY_DATABASE_URI"]) as checkpointer:
+            return start_review(
+                provider, judge, checkpointer, thread_id, cards,
+                [item["front"] for item in deck_cards],
+            )
+    finally:
+        # Failed calls spent quota too, so this runs however the graph ended.
+        record_usage(LEECH, user_id, deck_id, provider, judge)
+        db.session.commit()
 
 
 def _save_results(review: LeechReview, outcome) -> None:
@@ -288,3 +290,103 @@ def run_job(review_id: int) -> None:
     # Only a paused run needs its checkpoint.
     if not paused:
         discard_threads(current_app.config["SQLALCHEMY_DATABASE_URI"], [thread_id])
+
+
+def refresh_suggestions(user_id: int) -> dict:
+    """Drive the queue, then list the user's ready suggestions."""
+    processing = refresh_queue(user_id)
+    rows = (
+        db.session.query(LeechReview, Deck.name)
+        .join(Deck, Deck.id == LeechReview.deck_id)
+        .filter(LeechReview.user_id == user_id, LeechReview.status == PENDING)
+        .order_by(LeechReview.id)
+        .all()
+    )
+    return {
+        "processing": processing,
+        "ready": [
+            {
+                "review_id": review.id,
+                "deck_id": review.deck_id,
+                "deck_name": name,
+                "card_count": len(review.recommendations),
+            }
+            for review, name in rows
+        ],
+    }
+
+
+def pending_review(deck: Deck) -> LeechReview | None:
+    return LeechReview.query.filter_by(deck_id=deck.id, status=PENDING).first()
+
+
+def lock_own_review(review_id: int, user_id: int) -> LeechReview | None:
+    """The user's review. The lock makes two submissions run in turn. SQLite ignores it."""
+    return (
+        LeechReview.query.filter_by(id=review_id, user_id=user_id).with_for_update().first()
+    )
+
+
+def _apply(review: LeechReview, decisions: list[dict]) -> tuple[list[dict], list[Card]]:
+    """Change the deck to match the decisions. New cards start as new, with no lapses."""
+    options_by_card = {item["card_id"]: item["options"] for item in review.recommendations}
+    ids = [decision["card_id"] for decision in decisions]
+    cards = {
+        card.id: card
+        for card in Card.query.filter(Card.deck_id == review.deck_id, Card.id.in_(ids))
+    }
+    applied, created = [], []
+    for decision in decisions:
+        card_id, choice = decision["card_id"], decision["option"]
+        card = cards.get(card_id)  # None if the learner deleted it while the review was pending
+        new_cards = []
+        kind = None
+        if card is not None and choice == REMOVE:
+            kind = REMOVE
+            db.session.delete(card)
+        elif card is not None and choice is not None:
+            option = options_by_card[card_id][choice]
+            kind = option["kind"]
+            new_cards = [
+                Card(deck_id=review.deck_id, front=item["front"], back=item["back"], origin="ai")
+                for item in option["cards"]
+            ]
+            db.session.add_all(new_cards)
+            if kind in REPLACING_KINDS:
+                db.session.delete(card)
+            else:
+                mark_handled(card)
+        elif card is not None:
+            mark_handled(card)
+        created.extend(new_cards)
+        applied.append({"card_id": card_id, "kind": kind, "new_cards": new_cards})
+    db.session.flush()  # assigns the new cards' ids
+    return [
+        {
+            "card_id": item["card_id"],
+            "kind": item["kind"],
+            "new_card_ids": [new.id for new in item["new_cards"]],
+        }
+        for item in applied
+    ], created
+
+
+def apply_decisions(review: LeechReview, decisions: list[dict]) -> list[Card]:
+    """Apply validated decisions to a pending review, and return the new cards."""
+    # The database is the record of what happened, so it commits first. If the commit fails the
+    # run is still paused and the learner can retry. If finishing the run fails, the deck is
+    # already right, and only a leftover checkpoint remains.
+    applied, created = _apply(review, decisions)
+    review.decisions = applied
+    review.status = COMPLETED
+    review.completed_at = utcnow()
+    thread_id = review.thread_id
+    db.session.commit()
+    url = current_app.config["SQLALCHEMY_DATABASE_URI"]
+    try:
+        with open_checkpointer(url) as checkpointer:
+            resume_review(checkpointer, thread_id, decisions)
+    except Exception as error:
+        logger.warning("leech_doctor outcome=resume_failed type=%s", type(error).__name__)
+    discard_threads(url, [thread_id])
+    return created

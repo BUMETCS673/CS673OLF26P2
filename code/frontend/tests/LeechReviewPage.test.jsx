@@ -58,12 +58,12 @@ test('the API calls the three routes', () => {
   const request = vi.fn();
   const api = createLeechesApi(request);
 
-  api.listSuggestions();
+  api.refreshSuggestions();
   api.getDeckReview(2);
   api.submitDecisions(3, [{ card_id: 7, option: 0 }]);
 
   expect(request.mock.calls).toEqual([
-    ['/api/leech-suggestions'],
+    ['/api/leech-suggestions/refresh', { method: 'POST' }],
     ['/api/decks/2/leech-review'],
     ['/api/leech-reviews/3/decisions', {
       method: 'POST', body: { decisions: [{ card_id: 7, option: 0 }] },

@@ -2,7 +2,7 @@
 code/plans/ITERATION_3_PLAN.md, plus the log line and a few edges of C2.
 
 `TestConfig` uses the stand-in. The failure rows, and the ones that look at the `Prompt`,
-patch `app.api.generate.get_provider`.
+patch `app.services.generation.get_provider`.
 """
 
 # AI Utilization: ~100% of this file's code
@@ -16,6 +16,7 @@ import logging
 from datetime import timedelta
 
 import pytest
+from ai_fakes import spend
 
 from app.ai.fake import FakeProvider
 from app.ai.provider import (
@@ -40,15 +41,18 @@ class RecordingProvider:
         self.cards = cards
         self.fail_with = fail_with
         self.prompts = []
+        self.schemas = []
         self.usage = TokenUsage()
 
-    def generate_cards(self, prompt):
+    def complete_json(self, prompt, schema):
+        self.usage.calls += 1
         self.prompts.append(prompt)
+        self.schemas.append(schema)
         if self.fail_with:
             raise self.fail_with
         if self.cards is not None:
-            return self.cards
-        return FakeProvider().generate_cards(prompt)
+            return {"cards": self.cards}
+        return FakeProvider().complete_json(prompt, schema)
 
 
 @pytest.fixture
@@ -67,7 +71,7 @@ def deck(me, make_deck):
 def provider(monkeypatch):
     def _install(**kwargs):
         recording = RecordingProvider(**kwargs)
-        monkeypatch.setattr("app.api.generate.get_provider", lambda: recording)
+        monkeypatch.setattr("app.services.generation.get_provider", lambda: recording)
         return recording
 
     return _install
@@ -88,6 +92,7 @@ def past_generation(db):
             )
         )
         db.session.commit()
+        spend(user.id, 1, hours_ago=hours_ago)
 
     return _past_generation
 
@@ -134,7 +139,7 @@ def test_the_provider_gets_the_trimmed_prompt_and_the_deck(client, deck, provide
     _post(client, deck.id, {"mode": "prompt", "count": 4, "prompt": "  Mitosis  "})
 
     sent = recording.prompts[0]
-    assert sent.max_cards == 4
+    assert recording.schemas[0]["properties"]["cards"]["maxItems"] == 4
     assert sent.text.startswith("Deck name: Biology\nDeck description: Cells and more")
     assert "<source>\nMitosis\n</source>" in sent.text
 

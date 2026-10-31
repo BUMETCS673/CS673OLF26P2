@@ -11,13 +11,21 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
+from ai_fakes import Scripted, calls_used, spend
 from google.genai import errors
 
 from app.ai import pipeline
+from app.ai.card_checks import cards_schema, verdicts_schema
+from app.ai.fake import FakeProvider
 from app.ai.gemini import GeminiProvider
-from app.ai.pipeline import PASSED, SKIPPED, PipelineRequest, run_pipeline
+from app.ai.pipeline import (
+    PASSED,
+    PIPELINE_PROMPT_VERSION,
+    SKIPPED,
+    PipelineRequest,
+    run_pipeline,
+)
 from app.ai.prompts import (
-    PROMPT_VERSION,
     NoEvidence,
     PdfEvidence,
     PromptContext,
@@ -32,12 +40,11 @@ from app.ai.provider import (
     CardDraft,
     Prompt,
     TokenUsage,
-    verdicts_schema,
 )
-from app.api.generate import _evidence
-from app.models import AiGeneration
+from app.models import AiGeneration, AiUsage
+from app.services.generation import _evidence
 
-ORIGINAL = Prompt(system="rules", text="write cards", max_cards=2)
+ORIGINAL = Prompt(system="rules", text="write cards")
 
 
 def card(n, back=None):
@@ -52,26 +59,6 @@ def bad(index, reason="Wrong."):
     return {"index": index, "ok": False, "reason": reason}
 
 
-class Scripted:
-    """Answers each call with the next item in `replies`. An exception in the list is raised."""
-
-    name = "scripted"
-
-    def __init__(self, *replies):
-        self.replies = list(replies)
-        self.prompts = []
-
-    def _next(self, prompt):
-        self.prompts.append(prompt)
-        reply = self.replies.pop(0)
-        if isinstance(reply, Exception):
-            raise reply
-        return reply
-
-    generate_cards = _next
-    judge_cards = _next
-
-
 class ExtractingWriter(Scripted):
     """Scripted, with extract replies keyed by chunk, because extract calls run in parallel."""
 
@@ -80,13 +67,15 @@ class ExtractingWriter(Scripted):
         self.facts = facts
         self.chunks_seen = []
 
-    def extract_facts(self, prompt):
+    def complete_json(self, prompt, schema):
+        if "facts" not in schema["required"]:
+            return super().complete_json(prompt, schema)
         chunk = next(chunk for chunk in self.facts if chunk in prompt.text)
         self.chunks_seen.append(chunk)
         reply = self.facts[chunk]
         if isinstance(reply, Exception):
             raise reply
-        return reply
+        return {"facts": reply}
 
 
 def run(writer, judge, count=2, deck_name="Deck", chunks=(), file_text="", evidence=None, **kwargs):
@@ -94,7 +83,7 @@ def run(writer, judge, count=2, deck_name="Deck", chunks=(), file_text="", evide
     if evidence is None:
         evidence = TextEvidence(file_text, chunks) if chunks or file_text else NoEvidence()
     request = PipelineRequest(
-        prompt=ORIGINAL, context=context, existing_fronts=[], evidence=evidence, **kwargs
+        prompt=ORIGINAL, prompt_context=context, existing_fronts=[], evidence=evidence, **kwargs
     )
     return run_pipeline(writer, judge, request)
 
@@ -119,10 +108,10 @@ def test_a_failed_card_is_replaced_and_only_the_replacement_is_checked_again():
     assert fronts(result) == ["Question 1?", "Question 3?"]
     assert result.model_calls == 4
     repair = writer.prompts[1]
-    assert repair.max_cards == 1
+    assert writer.schemas[1] == cards_schema(1)
     assert "The back is wrong." in repair.text
     assert '"front": "Question 1?"' in repair.text.split("<kept_cards>")[-1]
-    assert judge.prompts[1].max_cards == 1
+    assert judge.schemas[1] == verdicts_schema(1)
     assert "Question 3?" in judge.prompts[1].text
     assert "Question 1?" not in judge.prompts[1].text
 
@@ -252,7 +241,7 @@ def test_gemini_marks_only_retriable_failures_as_transient(raised, expected):
     provider = GeminiProvider("key", "model", client=client)
 
     with pytest.raises(AIUnavailable) as caught:
-        provider.generate_cards(ORIGINAL)
+        provider.complete_json(ORIGINAL, {})
 
     assert type(caught.value) is expected
 
@@ -377,24 +366,6 @@ def test_the_pipeline_imports_no_flask_sqlalchemy_or_models():
     assert not {m for m in imported if m.startswith("app.models")}
 
 
-def test_gemini_judge_cards_asks_for_verdicts_and_reads_them():
-    reply = SimpleNamespace(
-        text=json.dumps({"verdicts": ok(0)}), prompt_feedback=None, candidates=[]
-    )
-    calls = []
-
-    def generate_content(**kwargs):
-        calls.append(kwargs)
-        return reply
-
-    client = SimpleNamespace(models=SimpleNamespace(generate_content=generate_content))
-    provider = GeminiProvider("key", "lite", client=client)
-
-    assert provider.judge_cards(Prompt(system="s", text="t", max_cards=3)) == ok(0)
-    assert calls[0]["model"] == "lite"
-    assert calls[0]["config"].response_json_schema == verdicts_schema(3)
-
-
 def test_gemini_usage_adds_up_across_calls_and_counts_thinking_as_output():
     usage = SimpleNamespace(
         prompt_token_count=100, candidates_token_count=20, thoughts_token_count=5
@@ -407,10 +378,10 @@ def test_gemini_usage_adds_up_across_calls_and_counts_thinking_as_output():
     )
     provider = GeminiProvider("key", "model", client=client)
 
-    provider.generate_cards(ORIGINAL)
-    provider.generate_cards(ORIGINAL)
+    provider.complete_json(ORIGINAL, {})
+    provider.complete_json(ORIGINAL, {})
 
-    assert provider.usage == TokenUsage(input_tokens=200, output_tokens=50)
+    assert provider.usage == TokenUsage(input_tokens=200, output_tokens=50, calls=2)
 
 
 def test_gemini_usage_tolerates_missing_counts():
@@ -425,9 +396,9 @@ def test_gemini_usage_tolerates_missing_counts():
     )
     provider = GeminiProvider("key", "model", client=client)
 
-    provider.generate_cards(ORIGINAL)
+    provider.complete_json(ORIGINAL, {})
 
-    assert provider.usage == TokenUsage()
+    assert provider.usage == TokenUsage(calls=1)
 
 
 @pytest.fixture
@@ -453,47 +424,88 @@ def _post(client, deck_id):
     )
 
 
-def _spent(db, me, deck, calls, empty=False):
-    db.session.add(
+def _generations(db, me, deck, count, empty=False):
+    db.session.add_all(
         AiGeneration(
             user_id=me.id, deck_id=deck.id, mode="prompt", requested_count=1, model="fake",
-            model_calls=calls, empty=empty, candidates=[],
+            empty=empty, candidates=[],
         )
+        for _ in range(count)
     )
     db.session.commit()
 
 
-def test_the_route_saves_the_prompt_version_and_token_counts(client, deck):
+def test_the_route_saves_the_prompt_version_and_usage(client, me, deck):
     assert _post(client, deck.id).status_code == 201
-    saved = AiGeneration.query.one()
-    assert saved.prompt_version == PROMPT_VERSION
-    assert (saved.input_tokens, saved.output_tokens) == (0, 0)
-    assert saved.judge_model is None
-    assert saved.judge_input_tokens is None
+    assert AiGeneration.query.one().prompt_version == PIPELINE_PROMPT_VERSION
+    usage = AiUsage.query.one()
+    assert (usage.feature, usage.role, usage.model, usage.calls) == (
+        "generate", "writer", "fake", 1,
+    )
+    assert usage.prompt_version == PIPELINE_PROMPT_VERSION
+    assert (usage.user_id, usage.deck_id) == (me.id, deck.id)
 
 
-def test_the_graph_saves_the_judges_model_and_tokens(client, app, deck, graph_mode):
+def test_the_graph_saves_a_row_per_role(client, deck, graph_mode):
     assert _post(client, deck.id).status_code == 201
-    saved = AiGeneration.query.one()
-    assert saved.judge_model == "fake"
-    assert (saved.judge_input_tokens, saved.judge_output_tokens) == (0, 0)
+    rows = {row.role: row.calls for row in AiUsage.query.all()}
+    assert rows == {"writer": 1, "judge": 1}
+
+
+def test_a_failed_call_is_recorded_though_nothing_else_is_saved(client, deck, monkeypatch):
+    monkeypatch.setattr(
+        "app.services.generation.get_provider", lambda *args: FakeProvider(fail_with=AIUnavailable)
+    )
+
+    assert _post(client, deck.id).status_code == 503
+
+    assert AiGeneration.query.count() == 0
+    assert calls_used("generate") == 1
+
+
+def test_deleting_a_deck_doesnt_refund_its_usage(client, deck):
+    assert _post(client, deck.id).status_code == 201
+
+    resp = client.delete(f"/api/decks/{deck.id}")
+
+    assert resp.status_code == 204
+    assert calls_used("generate") == 1
+    assert AiUsage.query.one().deck_id is None
 
 
 def test_empty_batches_dont_use_the_learners_cap(client, db, me, deck):
-    for _ in range(10):
-        _spent(db, me, deck, 1, empty=True)
+    _generations(db, me, deck, 10, empty=True)
     assert _post(client, deck.id).status_code == 201
 
 
 def test_batches_with_cards_still_use_the_learners_cap(client, db, me, deck):
-    for _ in range(10):
-        _spent(db, me, deck, 1)
+    _generations(db, me, deck, 10)
     assert _post(client, deck.id).status_code == 429
 
 
-def test_empty_batches_still_count_toward_the_site_cap(client, db, me, deck):
-    _spent(db, me, deck, 18, empty=True)
-    assert _post(client, deck.id).status_code == 429
+def test_each_model_has_its_own_limit(client, app, me, deck, graph_mode):
+    app.config.update(
+        AI_WRITER_PROVIDER="gemini", AI_JUDGE_PROVIDER="gemini", GEMINI_API_KEY="not-a-real-key",
+        AI_WRITER_MODEL="lite", AI_JUDGE_MODEL="flash",
+        AI_MODEL_DAILY_LIMITS={"lite": 3, "flash": 2},
+    )
+    spend(me.id, 1, model="flash")
+
+    resp = _post(client, deck.id)  # the judge's worst case is 2 calls, and only 1 is left
+
+    assert resp.status_code == 429
+    assert AiGeneration.query.count() == 0
+
+
+def test_spending_on_one_model_leaves_the_other_alone(client, app, me, deck, monkeypatch):
+    app.config.update(
+        AI_WRITER_PROVIDER="gemini", GEMINI_API_KEY="not-a-real-key", AI_WRITER_MODEL="lite",
+        AI_MODEL_DAILY_LIMITS={"lite": 3, "flash": 1},
+    )
+    spend(me.id, 1, model="flash")
+    monkeypatch.setattr("app.services.generation.get_provider", lambda *args: FakeProvider())
+
+    assert _post(client, deck.id).status_code == 201
 
 
 def test_the_route_runs_the_graph_and_saves_what_it_spent(client, deck, graph_mode):
@@ -501,15 +513,14 @@ def test_the_route_runs_the_graph_and_saves_what_it_spent(client, deck, graph_mo
     assert resp.status_code == 201
     assert resp.get_json()["verification"] == PASSED
     assert len(resp.get_json()["cards"]) == 2
-    saved = AiGeneration.query.one()
-    assert saved.model_calls == 2
+    assert calls_used("generate") == 2
 
 
 def test_the_route_stays_on_one_call_without_the_flag(client, deck):
     resp = _post(client, deck.id)
     assert resp.status_code == 201
     assert resp.get_json()["verification"] is None
-    assert AiGeneration.query.one().model_calls == 1
+    assert calls_used("generate") == 1
 
 
 def _post_long_file(client, deck_id):
@@ -528,22 +539,25 @@ def test_the_route_extracts_a_long_file_and_saves_the_calls(client, deck, graph_
     resp = _post_long_file(client, deck.id)
     assert resp.status_code == 201
     assert len(resp.get_json()["cards"]) == 2
-    assert AiGeneration.query.one().model_calls == 4
+    assert calls_used("generate") == 4
 
 
-def test_the_site_cap_reserves_a_call_per_chunk(client, db, me, deck, graph_mode):
-    _spent(db, me, deck, 12)
-    assert _post(client, deck.id).status_code == 201
-    AiGeneration.query.filter(AiGeneration.model_calls != 12).delete()
-    db.session.commit()
+def test_the_model_limit_reserves_a_call_per_chunk(client, me, deck, graph_mode):
+    spend(me.id, 12)  # both roles use "fake" here, so they share one limit
     assert _post_long_file(client, deck.id).status_code == 429
+    assert _post(client, deck.id).status_code == 201
 
 
-def test_the_site_cap_keeps_room_for_the_graphs_worst_case(client, db, me, deck, graph_mode):
-    _spent(db, me, deck, 15)
+def test_the_model_limit_keeps_room_for_the_graphs_worst_case(client, me, deck, graph_mode):
+    spend(me.id, 15)
     assert _post(client, deck.id).status_code == 429
 
 
-def test_the_same_spend_still_allows_a_single_call(client, db, me, deck):
-    _spent(db, me, deck, 15)
+def test_the_same_spend_still_allows_a_single_call(client, me, deck):
+    spend(me.id, 15)
+    assert _post(client, deck.id).status_code == 201
+
+
+def test_old_usage_doesnt_count(client, me, deck):
+    spend(me.id, 18, hours_ago=25)
     assert _post(client, deck.id).status_code == 201

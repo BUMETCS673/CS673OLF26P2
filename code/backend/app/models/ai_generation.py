@@ -33,25 +33,17 @@ class AiGeneration(db.Model):
     source_filename = db.Column(db.String(255), nullable=True)  # the file's name, never its contents
     requested_count = db.Column(db.Integer, nullable=False)
     model = db.Column(db.String(64), nullable=False)            # the provider's name: a Gemini model, or "fake"
-    # Calls this batch spent, for the site cap. Always 1 on the single-call path.
-    model_calls = db.Column(db.Integer, nullable=False, default=1, server_default="1")
     # "passed" | "skipped" (the judge couldn't answer), or null on the single-call path.
     verification = db.Column(db.String(16), nullable=True)
-    # True when no candidates survived. Excluded from the per-user cap, not the site cap.
+    # True when no candidates survived. Excluded from the per-user cap.
     empty = db.Column(db.Boolean, nullable=False, default=False, server_default=db.false())
-    # Hash of the prompt text, from app.ai.prompts.PROMPT_VERSION. Null on older rows.
+    # Hash of the prompt text, from app.ai.pipeline.PIPELINE_PROMPT_VERSION. Null on older rows.
     prompt_version = db.Column(db.String(16), nullable=True)
-    # Token counts are null on older rows. Judge fields are null on the single-call path.
-    input_tokens = db.Column(db.Integer, nullable=True)
-    output_tokens = db.Column(db.Integer, nullable=True)
-    judge_model = db.Column(db.String(64), nullable=True)
-    judge_input_tokens = db.Column(db.Integer, nullable=True)
-    judge_output_tokens = db.Column(db.Integer, nullable=True)
     # [{"front", "back", "status"}], status "pending" | "accepted" | "rejected".
     # SQLAlchemy doesn't notice an in-place change to a JSON value, so build a new list
     # and assign it (rule 20).
     candidates = db.Column(db.JSON, nullable=False)
-    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow, index=True)
 
     def to_dict(self) -> dict:
         """The Generation shape in C3.

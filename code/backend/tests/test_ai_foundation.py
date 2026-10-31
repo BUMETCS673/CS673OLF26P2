@@ -17,6 +17,7 @@ when B1 and B2 merge, and this file shouldn't break when they do.
 
 import pytest
 
+from app.ai.card_checks import cards_schema, write_cards
 from app.ai.fake import FakeProvider
 from app.ai.gemini import GeminiProvider
 from app.ai.provider import (
@@ -29,15 +30,16 @@ from app.ai.provider import (
     AIUnavailable,
     Prompt,
     Provider,
-    cards_schema,
+    Role,
     get_provider,
+    is_configured,
 )
 from app.errors import ApiError
 from app.models import AiGeneration, Card, as_utc, utcnow
 
 
-def _prompt(max_cards=3):
-    return Prompt(system="rules", text="Deck name: Anatomy", max_cards=max_cards)
+def _prompt():
+    return Prompt(system="rules", text="Deck name: Anatomy")
 
 
 def _generation(db, user, deck, candidates):
@@ -177,8 +179,8 @@ def test_created_at_is_set_on_insert(db, make_user, make_deck):
 def test_the_stand_in_numbers_its_samples_across_calls():
     provider = FakeProvider()
 
-    first = provider.generate_cards(_prompt(max_cards=3))
-    second = provider.generate_cards(_prompt(max_cards=3))
+    first = write_cards(provider, _prompt(), 3)
+    second = write_cards(provider, _prompt(), 3)
 
     assert len(first) == 3
     assert len(second) == 3
@@ -193,7 +195,7 @@ def test_the_stand_in_numbers_its_samples_across_calls():
 
 def test_the_stand_in_can_fail_like_google():
     with pytest.raises(AIRateLimited) as raised:
-        FakeProvider(fail_with=AIRateLimited).generate_cards(_prompt())
+        FakeProvider(fail_with=AIRateLimited).complete_json(_prompt(), cards_schema(3))
 
     assert raised.value.message == (
         "The free AI service is at its limit right now. Wait a minute and try again. "
@@ -214,7 +216,7 @@ def test_the_messages_that_dont_say_try_again():
     assert TOO_MUCH == (
         "That was too much to turn into cards at once. Ask for fewer cards or use a shorter file."
     )
-    assert DECLINED == "Gemini declined to write cards from that material."
+    assert DECLINED == "The AI declined to write cards from that material."
     assert AIUnavailable(DECLINED).message == DECLINED
 
 
@@ -272,6 +274,73 @@ def test_each_role_has_its_own_vendor_and_model(app):
     assert get_provider("judge").name == "gemini-judge-model"
 
 
+def test_each_role_has_its_own_thinking_level(app):
+    app.config["AI_WRITER_PROVIDER"] = "gemini"
+    app.config["GEMINI_API_KEY"] = "not-a-real-key"
+    app.config["AI_WRITER_THINKING"] = "high"
+
+    assert get_provider(Role.WRITER)._thinking.name == "HIGH"
+
+
+def test_an_unknown_thinking_level_is_not_set_up(app):
+    app.config["AI_WRITER_PROVIDER"] = "gemini"
+    app.config["GEMINI_API_KEY"] = "not-a-real-key"
+    app.config["AI_WRITER_THINKING"] = "extreme"
+
+    with pytest.raises(AIUnavailable) as raised:
+        get_provider()
+
+    assert raised.value.message == NOT_CONFIGURED
+
+
+def test_is_configured_checks_the_vendor_and_its_key(app):
+    assert is_configured(Role.JUDGE) is True
+
+    app.config["AI_JUDGE_PROVIDER"] = "openai"
+    assert is_configured(Role.JUDGE) is False
+
+    app.config["AI_JUDGE_PROVIDER"] = "gemini"
+    app.config["GEMINI_API_KEY"] = ""
+    assert is_configured(Role.JUDGE) is False
+
+    app.config["GEMINI_API_KEY"] = "not-a-real-key"
+    assert is_configured(Role.JUDGE) is True
+
+
+def test_the_stand_in_answers_a_schema_it_has_never_seen():
+    schema = {
+        "type": "object",
+        "properties": {
+            "kind": {"type": "string", "enum": ["first", "second"]},
+            "note": {"type": "string"},
+            "rows": {
+                "type": "array",
+                "maxItems": 2,
+                "items": {
+                    "type": "object",
+                    "properties": {"index": {"type": "integer"}, "ok": {"type": "boolean"}},
+                },
+            },
+        },
+    }
+
+    reply = FakeProvider().complete_json(_prompt(), schema)
+
+    assert reply["kind"] == "first"
+    assert reply["note"].startswith("Sample note ")
+    assert reply["rows"] == [{"index": 0, "ok": True}, {"index": 1, "ok": True}]
+
+
+@pytest.mark.parametrize("text", [None, "not json", "[1, 2]", '"text"'])
+def test_a_reply_that_isnt_a_json_object_is_unavailable(text):
+    class Replying(Provider):
+        def _complete(self, prompt, schema):
+            return text
+
+    with pytest.raises(AIUnavailable):
+        Replying("name").complete_json(_prompt(), {})
+
+
 def test_a_provider_must_implement_complete():
     class Incomplete(Provider):
         pass
@@ -297,22 +366,42 @@ def test_tests_run_with_the_plans_limits(app):
     can't change what B3's cap tests count to."""
     assert app.config["AI_MAX_CARDS"] == 25
     assert app.config["AI_DAILY_LIMIT"] == 10
-    assert app.config["AI_SITE_DAILY_LIMIT"] == 18
+    assert app.config["AI_MODEL_DAILY_LIMIT"] == 18
+    assert app.config["AI_MODEL_DAILY_LIMITS"] == {}
 
 
-def test_the_site_limit_defaults_to_18_and_reads_the_environment(monkeypatch):
-    """Under the free tier's 20 a day for gemini-3.5-flash (A19)."""
+def test_the_model_limits_default_to_18_and_read_the_environment(monkeypatch):
     import importlib
 
     import app.config
 
-    monkeypatch.delenv("AI_SITE_DAILY_LIMIT", raising=False)
-    assert importlib.reload(app.config).Config.AI_SITE_DAILY_LIMIT == 18
+    monkeypatch.delenv("AI_MODEL_DAILY_LIMIT", raising=False)
+    monkeypatch.delenv("AI_MODEL_DAILY_LIMITS", raising=False)
+    config = importlib.reload(app.config).Config
+    assert config.AI_MODEL_DAILY_LIMIT == 18
+    assert config.AI_MODEL_DAILY_LIMITS == {"gemini-3.5-flash-lite": 450, "gemini-3.8-flash": 18}
 
-    monkeypatch.setenv("AI_SITE_DAILY_LIMIT", "450")
-    assert importlib.reload(app.config).Config.AI_SITE_DAILY_LIMIT == 450
+    monkeypatch.setenv("AI_MODEL_DAILY_LIMIT", "450")
+    monkeypatch.setenv("AI_MODEL_DAILY_LIMITS", " lite:500 , flash:20 ")
+    config = importlib.reload(app.config).Config
+    assert config.AI_MODEL_DAILY_LIMIT == 450
+    assert config.AI_MODEL_DAILY_LIMITS == {"lite": 500, "flash": 20}
 
-    monkeypatch.delenv("AI_SITE_DAILY_LIMIT")
+    monkeypatch.delenv("AI_MODEL_DAILY_LIMIT")
+    monkeypatch.delenv("AI_MODEL_DAILY_LIMITS")
+    importlib.reload(app.config)
+
+
+def test_a_malformed_model_limit_stops_the_app_starting(monkeypatch):
+    import importlib
+
+    import app.config
+
+    monkeypatch.setenv("AI_MODEL_DAILY_LIMITS", "lite=500")
+    with pytest.raises(ValueError):
+        importlib.reload(app.config)
+
+    monkeypatch.delenv("AI_MODEL_DAILY_LIMITS")
     importlib.reload(app.config)
 
 
@@ -326,14 +415,14 @@ def test_the_site_limit_defaults_to_18_and_reads_the_environment(monkeypatch):
     ],
 )
 def test_a_blank_setting_falls_back_to_its_default(monkeypatch, value, expected):
-    from app.config import _env
+    import app.config
 
     if value is None:
         monkeypatch.delenv("CADENCE_TEST_SETTING", raising=False)
     else:
         monkeypatch.setenv("CADENCE_TEST_SETTING", value)
 
-    assert _env("CADENCE_TEST_SETTING", "fallback") == expected
+    assert app.config._env("CADENCE_TEST_SETTING", "fallback") == expected
 
 
 # --- Errors (C5) and wiring --------------------------------------------------------------
@@ -366,13 +455,14 @@ def test_the_ai_smoke_command_is_registered(app):
 
 
 def test_startup_warns_about_a_renamed_setting(monkeypatch, caplog):
-    from app import create_app
-    from app.config import TestConfig
+    import app.config
 
     monkeypatch.setenv("GEMINI_MODEL", "gemini-old")
+    monkeypatch.setenv("AI_SITE_DAILY_LIMIT", "18")
     monkeypatch.setenv("AI_PROVIDER", "  ")  # compose passes an unset name through as blank
 
-    create_app(TestConfig)
+    app.create_app(app.config.TestConfig)
 
     assert "GEMINI_MODEL is no longer read and is being ignored. Use AI_WRITER_MODEL." in caplog.text
+    assert "AI_SITE_DAILY_LIMIT is no longer read" in caplog.text
     assert "AI_PROVIDER" not in caplog.text

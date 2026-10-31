@@ -11,7 +11,8 @@ url_prefix:
 
 Contract C2 in code/plans/ITERATION_3_PLAN.md, which also fixes the order of the checks:
 ownership, the JSON body, the fields top to bottom, the daily caps, then the provider.
-A request that fails at the provider saves nothing, so it doesn't count toward either cap.
+The logic is in `app/services/generation.py`. A request that fails at the provider saves no batch,
+so it doesn't use the learner's cap, but its calls still count toward the model's limit.
 """
 
 # Step 0a: the empty blueprint and the docstring.
@@ -40,32 +41,15 @@ A request that fails at the provider saves nothing, so it doesn't count toward e
 
 import base64
 import binascii
-import time
 
 from flask import Blueprint, current_app, jsonify, request
 from flask_login import current_user, login_required
-from sqlalchemy import func, select
 
-from app.ai.chunking import split_text
-from app.ai.cleanup import clean_drafts
-from app.ai.pipeline import MAX_MODEL_CALLS, PipelineRequest, run_pipeline
-from app.ai.prompts import (
-    PROMPT_VERSION,
-    Evidence,
-    NoEvidence,
-    PdfEvidence,
-    PromptContext,
-    TextEvidence,
-    TopicEvidence,
-    build_prompt,
-)
-from app.ai.provider import AIRateLimited, AIUnavailable, Attachment, CardDraft, get_provider
-from app.ai_usage import CAP_WINDOW, site_model_calls
+from app.ai.provider import Attachment
 from app.api.decks import own_deck_or_404
 from app.api.validation import optional_text, required_text
-from app.errors import ApiError, json_object, validation_error
-from app.extensions import db
-from app.models import AiGeneration, Card, utcnow
+from app.errors import json_object, validation_error
+from app.services.generation import GenerationRequest, generate_cards
 
 generate_bp = Blueprint("generate", __name__)
 
@@ -76,14 +60,12 @@ PROMPT_MAX = 2000
 FOCUS_MAX = 500
 FILE_NAME_MAX = 255
 SUGGEST_MIN_CARDS = 10
-SUGGEST_CONTEXT = 200             # newest cards sent to the model in suggest mode
 
 MODES = ("prompt", "file", "suggest")
 PDF = "application/pdf"
 FILE_TYPES = (PDF, "text/plain", "text/markdown")
 
 UNSUPPORTED_FILE = "Only PDF, TXT and MD files are supported. Save other documents as a PDF first."
-SITE_CAP = "AI generation has hit today's limit for the whole site. Try again later."
 
 
 def _valid_mode(body: dict) -> str:
@@ -142,50 +124,6 @@ def _valid_file(body: dict) -> tuple[str, str | None, Attachment | None]:
     return file["name"], text, None
 
 
-def _evidence(
-    prompt: str | None, file_text: str | None, attachment: Attachment | None, chunks: list[str],
-) -> Evidence:
-    """What the judge checks cards against, from the fields the request's mode set."""
-    if prompt:
-        return TopicEvidence(prompt)
-    if file_text is not None:
-        return TextEvidence(file_text, chunks)
-    if attachment is not None:
-        return PdfEvidence(attachment)
-    return NoEvidence()
-
-
-def _check_daily_caps(cost: int) -> None:
-    """The learner's generations, then the site's model calls, with `cost` for this request.
-
-    `cost` is the most model calls this request can make. Best effort: only saved generations
-    count (A19).
-    """
-    since = utcnow() - CAP_WINDOW
-    recent = select(func.count()).select_from(AiGeneration).where(AiGeneration.created_at > since)
-
-    limit = current_app.config["AI_DAILY_LIMIT"]
-    # A batch with no cards gave the learner nothing, so it doesn't use their allowance.
-    learner_recent = recent.where(
-        AiGeneration.user_id == current_user.id, AiGeneration.empty.is_(False)
-    )
-    if db.session.scalar(learner_recent) >= limit:
-        raise ApiError(
-            429, f"You've reached the limit of {limit} AI generations in 24 hours. Try again later."
-        )
-    # `cost` reserves this request's worst case.
-    if site_model_calls() + cost > current_app.config["AI_SITE_DAILY_LIMIT"]:
-        raise ApiError(429, SITE_CAP)
-
-
-def _log(mode: str, count: int, kept: int, model: str, started: float, outcome: str) -> None:
-    """One line per request (rule 17): never the prompt, the file, the cards or an error's text."""
-    current_app.logger.info(
-        "ai_generation mode=%s count=%d kept=%d model=%s ms=%d outcome=%s",
-        mode, count, kept, model, (time.monotonic() - started) * 1000, outcome,
-    )
-
-
 @generate_bp.post("/decks/<int:deck_id>/generate")
 @login_required
 def generate(deck_id):
@@ -208,82 +146,13 @@ def generate(deck_id):
             "Suggest more content needs at least 10 cards in the deck.", "mode"
         )
 
-    use_graph = current_app.config["AI_PIPELINE"] == "graph"
-    chunks = split_text(file_text) if use_graph and file_text else []
-    _check_daily_caps(MAX_MODEL_CALLS + len(chunks) if use_graph else 1)
-
-    existing_fronts = db.session.scalars(select(Card.front).where(Card.deck_id == deck.id)).all()
-    existing = ()
-    # The judge checks for duplicates in every mode. build_prompt() still sends these to the
-    # writer only in suggest mode.
-    if mode == "suggest" or use_graph:
-        rows = db.session.execute(
-            select(Card.front, Card.back)
-            .where(Card.deck_id == deck.id)
-            .order_by(Card.id.desc())
-            .limit(SUGGEST_CONTEXT)
-        ).all()
-        existing = [CardDraft(front=front, back=back) for front, back in rows]
-
-    started = time.monotonic()
-    model = "-"
-    judge = None  # stays None on the single-call path, which leaves the judge columns null
-    try:
-        provider = get_provider()
-        model = provider.name
-        context = PromptContext(mode, count, deck.name, deck.description, focus)
-        built = build_prompt(
-            context, prompt=prompt, file_text=file_text, attachment=attachment, existing=existing
-        )
-        if use_graph:
-            # Inside the try, so a missing key answers 503. Only a failed write leaves
-            # run_pipeline() as an exception. A failed check or repair still returns cards.
-            judge = get_provider("judge")
-            result = run_pipeline(
-                provider,
-                judge,
-                PipelineRequest(
-                    prompt=built,
-                    context=context,
-                    existing_fronts=existing_fronts,
-                    existing=existing,
-                    evidence=_evidence(prompt, file_text, attachment, chunks),
-                ),
-            )
-            drafts, model_calls, verification = (
-                result.drafts, result.model_calls, result.verification
-            )
-        else:
-            raw = provider.generate_cards(built)
-            drafts, model_calls, verification = clean_drafts(raw, count, existing_fronts), 1, None
-    except AIRateLimited as e:
-        _log(mode, count, 0, model, started, "rate_limited")
-        raise ApiError(429, e.message) from None
-    except AIUnavailable as e:
-        _log(mode, count, 0, model, started, "unavailable")
-        raise ApiError(503, e.message) from None
-
-    generation = AiGeneration(
-        user_id=current_user.id,
-        deck_id=deck.id,
+    generation = generate_cards(deck, current_user.id, GenerationRequest(
         mode=mode,
-        requested_count=count,
-        prompt=prompt or focus,
-        source_filename=file_name,
-        model=model,
-        # Spend and quality data for comparing the two paths. Only verification reaches the client.
-        model_calls=model_calls,
-        verification=verification,
-        empty=not drafts,
-        prompt_version=PROMPT_VERSION,
-        input_tokens=provider.usage.input_tokens,
-        output_tokens=provider.usage.output_tokens,
-        judge_model=judge.name if judge else None,
-        judge_input_tokens=judge.usage.input_tokens if judge else None,
-        judge_output_tokens=judge.usage.output_tokens if judge else None,
-        candidates=[{"front": d.front, "back": d.back, "status": "pending"} for d in drafts],
-    )
-    db.session.add(generation)
-    db.session.commit()
-    _log(mode, count, len(drafts), model, started, "ok")
+        count=count,
+        prompt=prompt,
+        file_name=file_name,
+        file_text=file_text,
+        attachment=attachment,
+        focus=focus,
+    ))
     return jsonify(generation.to_dict()), 201

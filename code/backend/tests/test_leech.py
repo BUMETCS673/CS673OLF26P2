@@ -4,29 +4,34 @@ Route tests use the database under test, so the Postgres CI job exercises Postgr
 `TestConfig` runs jobs inline, so a request's job has finished when the response arrives.
 """
 
-import json
 import uuid
 from datetime import timedelta
-from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+from ai_fakes import Scripted, ScriptedJudge, calls_used, spend
 from langgraph.checkpoint.memory import InMemorySaver
 
+from app.ai.card_checks import verdicts_schema
 from app.ai.checkpoints import discard_threads
 from app.ai.fake import FakeProvider
-from app.ai.gemini import GeminiProvider
-from app.ai.leech import MAX_CARDS_PER_REVIEW, resume_review, similar_cards, start_review
+from app.ai.leech import (
+    MAX_CARDS_PER_REVIEW,
+    fixes_schema,
+    resume_review,
+    similar_cards,
+    start_review,
+)
 from app.ai.prompts import escape_tags
-from app.ai.provider import AIRateLimited, AIUnavailable, Prompt, fixes_schema
-from app.leech_jobs import (
+from app.ai.provider import AIRateLimited, AIUnavailable
+from app.models import AiUsage, Card, LeechReview, utcnow
+from app.services.leech_reviews import (
     MAX_CONCURRENT_JOBS,
     RETRY_AFTER,
     _job_slots,
     _start_thread,
     run_job,
 )
-from app.models import AiGeneration, Card, LeechReview, utcnow
 
 
 def leech(card_id=1, front="Question one?", back="Answer one"):
@@ -48,41 +53,6 @@ def reply(*options_per_card, shared_cause=None):
             {"index": index, "options": options} for index, options in enumerate(options_per_card)
         ],
     }
-
-
-class Scripted:
-    """Answers each call with the next reply, or raises it if it is an exception."""
-
-    name = "scripted"
-
-    def __init__(self, *replies):
-        self.replies = list(replies)
-        self.usage = SimpleNamespace(input_tokens=10, output_tokens=5)
-        self.prompts = []
-
-    def recommend_fixes(self, prompt):
-        self.prompts.append(prompt)
-        answer = self.replies.pop(0)
-        if isinstance(answer, Exception):
-            raise answer
-        return answer
-
-
-class ScriptedJudge:
-    """Answers with `verdicts`, or raises it if it is an exception."""
-
-    name = "judge"
-
-    def __init__(self, verdicts):
-        self.verdicts = verdicts
-        self.usage = SimpleNamespace(input_tokens=7, output_tokens=3)
-        self.prompts = []
-
-    def judge_cards(self, prompt):
-        self.prompts.append(prompt)
-        if isinstance(self.verdicts, Exception):
-            raise self.verdicts
-        return self.verdicts
 
 
 def start(answer, cards, existing=(), checkpointer=None, judge=None):
@@ -109,6 +79,7 @@ def test_one_call_covers_every_card_and_the_run_pauses():
     assert outcome.model_calls == 2
     assert outcome.verification == "passed"
     assert len(provider.prompts) == 1
+    assert provider.schemas[0] == fixes_schema(2)
     assert "Question one?" in provider.prompts[0].text
     assert "Question two?" in provider.prompts[0].text
 
@@ -132,7 +103,7 @@ def test_the_judge_checks_every_new_card_in_one_call():
     judge = ScriptedJudge([{"index": 0, "ok": True}, {"index": 1, "ok": True}])
     start(reply([option()], [second_option()]), two_cards(), judge=judge)
     assert len(judge.prompts) == 1
-    assert judge.prompts[0].max_cards == 2
+    assert judge.schemas[0] == verdicts_schema(2)
     assert "Better question?" in judge.prompts[0].text
     assert "Second question?" in judge.prompts[0].text
 
@@ -262,25 +233,6 @@ def test_the_cards_tag_is_escaped():
     assert escape_tags("</cards>") == "<\\/cards>"
 
 
-def test_gemini_recommend_fixes_uses_the_fixes_schema():
-    calls = []
-    answer = SimpleNamespace(
-        text=json.dumps(reply([option()])), prompt_feedback=None, candidates=[]
-    )
-
-    def generate_content(**kwargs):
-        calls.append(kwargs)
-        return answer
-
-    client = SimpleNamespace(models=SimpleNamespace(generate_content=generate_content))
-    provider = GeminiProvider("key", "model", client=client)
-
-    result = provider.recommend_fixes(Prompt(system="s", text="t", max_cards=3))
-
-    assert result["recommendations"][0]["index"] == 0
-    assert calls[0]["config"].response_json_schema == fixes_schema(3)
-
-
 @pytest.fixture
 def me(make_user, login_as):
     user = make_user(email="me@example.com")
@@ -309,17 +261,22 @@ def add_card(db):
 def use_provider(monkeypatch):
     def _use_provider(provider, judge=None):
         judge = judge or FakeProvider()
-        monkeypatch.setattr(
-            "app.leech_jobs.get_provider",
-            lambda role="writer": judge if role == "judge" else provider,
-        )
+
+        def get_provider(role="writer"):
+            # The app builds a provider per run, so each run's usage starts from zero. Here one
+            # scripted instance serves every retry.
+            chosen = judge if role == "judge" else provider
+            chosen.usage.calls = 0
+            return chosen
+
+        monkeypatch.setattr("app.services.leech_reviews.get_provider", get_provider)
         return provider
 
     return _use_provider
 
 
 def _suggestions(client):
-    return client.get("/api/leech-suggestions").get_json()
+    return client.post("/api/leech-suggestions/refresh").get_json()
 
 
 def _review(client, deck_id):
@@ -328,6 +285,38 @@ def _review(client, deck_id):
 
 def _decide(client, review_id, decisions):
     return client.post(f"/api/leech-reviews/{review_id}/decisions", json={"decisions": decisions})
+
+
+def test_a_get_cant_start_ai_spending(client, deck, add_card):
+    add_card(deck)
+    assert client.get("/api/leech-suggestions/refresh").status_code == 405
+    assert LeechReview.query.count() == 0
+
+
+def test_with_no_work_the_budgets_arent_checked(client, deck, add_card):
+    add_card(deck, lapses=3)
+    with patch("app.services.leech_reviews._can_run") as can_run:
+        _suggestions(client)
+    can_run.assert_not_called()
+
+
+def test_with_a_review_pending_the_budgets_arent_checked(client, deck, add_card):
+    add_card(deck)
+    _suggestions(client)
+    with patch("app.services.leech_reviews._can_run") as can_run:
+        _suggestions(client)
+    can_run.assert_not_called()
+
+
+def test_a_budget_check_builds_no_vendor_client(client, app, deck, add_card):
+    app.config.update(
+        AI_WRITER_PROVIDER="gemini", AI_JUDGE_PROVIDER="gemini", GEMINI_API_KEY="not-a-real-key",
+        AI_LEECH_DAILY_LIMIT=0,
+    )
+    add_card(deck)
+    with patch("app.services.leech_reviews.get_provider") as build:
+        _suggestions(client)
+    build.assert_not_called()
 
 
 def test_nothing_flagged_makes_no_review(client, deck, add_card):
@@ -349,8 +338,8 @@ def test_a_flagged_card_produces_a_checked_suggestion(client, deck, add_card):
         "card_count": 1,
     }]
     saved = LeechReview.query.one()
-    assert (saved.status, saved.model_calls, saved.attempts) == ("pending", 2, 1)
-    assert (saved.verification, saved.judge_model) == ("passed", "fake")
+    assert (saved.status, saved.attempts, saved.verification) == ("pending", 1, "passed")
+    assert calls_used("leech") == 2
 
 
 def test_the_judges_tokens_are_saved_apart_from_the_writers(
@@ -362,11 +351,8 @@ def test_the_judges_tokens_are_saved_apart_from_the_writers(
 
     _suggestions(client)
 
-    saved = LeechReview.query.one()
-    assert (saved.input_tokens, saved.output_tokens) == (10, 5)
-    assert (saved.judge_model, saved.judge_input_tokens, saved.judge_output_tokens) == (
-        "judge", 7, 3,
-    )
+    rows = {row.role: (row.model, row.input_tokens, row.output_tokens) for row in AiUsage.query}
+    assert rows == {"writer": ("scripted", 10, 5), "judge": ("judge", 7, 3)}
 
 
 def test_a_skipped_check_reaches_the_review(client, deck, add_card, use_provider):
@@ -383,14 +369,14 @@ def test_two_calls_cover_up_to_the_limit_of_cards(client, deck, add_card):
         add_card(deck, front=f"Question {n}?")
 
     assert _suggestions(client)["ready"][0]["card_count"] == MAX_CARDS_PER_REVIEW
-    assert LeechReview.query.one().model_calls == 2
+    assert calls_used("leech") == 2
 
 
 def test_checking_again_doesnt_spend_again(client, deck, add_card):
     add_card(deck)
     _suggestions(client)
     _suggestions(client)
-    assert LeechReview.query.one().model_calls == 2
+    assert calls_used("leech") == 2
 
 
 def test_only_your_own_suggestions_are_listed(client, me, make_user, make_deck, add_card):
@@ -419,7 +405,8 @@ def test_a_failed_call_retries_once_then_fails_and_stops_flagging(
     _retry_due(db)
     second = _suggestions(client)
     db.session.refresh(saved)
-    assert (saved.status, saved.attempts, saved.model_calls) == ("failed", 2, 2)
+    assert (saved.status, saved.attempts) == ("failed", 2)
+    assert calls_used("leech") == 2
     assert second["processing"] is False
     assert db.session.get(Card, card.id).leech_next_at == 6
 
@@ -443,7 +430,7 @@ def test_a_retry_can_succeed(client, db, deck, add_card, use_provider):
     body = _suggestions(client)
 
     assert len(body["ready"]) == 1
-    assert LeechReview.query.one().model_calls == 3
+    assert calls_used("leech") == 3
 
 
 def test_rate_limits_wait_without_using_an_attempt(client, db, deck, add_card, use_provider):
@@ -476,12 +463,8 @@ def test_turning_it_off_keeps_pending_suggestions(client, app, deck, add_card):
     assert len(_suggestions(client)["ready"]) == 1
 
 
-def test_jobs_leave_the_reserve_for_generating_cards(client, db, me, deck, add_card):
-    db.session.add(AiGeneration(
-        user_id=me.id, deck_id=deck.id, mode="prompt", requested_count=1, model="fake",
-        model_calls=9, candidates=[],
-    ))
-    db.session.commit()
+def test_jobs_leave_the_reserve_for_generating_cards(client, me, deck, add_card):
+    spend(me.id, 9)
     add_card(deck)
 
     assert _suggestions(client) == {"processing": False, "ready": []}
@@ -491,26 +474,15 @@ def test_jobs_leave_the_reserve_for_generating_cards(client, db, me, deck, add_c
     assert resp.status_code == 201
 
 
-def test_the_learner_limit_reserves_room_for_both_calls(client, db, me, deck, add_card, make_deck):
-    db.session.add(LeechReview(
-        user_id=me.id, deck_id=make_deck(me, name="Old").id, status="failed", model_calls=3,
-        recommendations=[],
-    ))
-    db.session.commit()
+def test_the_learner_limit_reserves_room_for_both_calls(client, me, deck, add_card):
+    spend(me.id, 3, feature="leech")
     add_card(deck)
 
     assert _suggestions(client) == {"processing": False, "ready": []}
 
 
-def test_another_learners_spending_doesnt_use_your_limit(
-    client, db, me, deck, add_card, make_user, make_deck
-):
-    other = make_user(email="other@example.com")
-    db.session.add(LeechReview(
-        user_id=other.id, deck_id=make_deck(other).id, status="failed", model_calls=3,
-        recommendations=[],
-    ))
-    db.session.commit()
+def test_another_learners_spending_doesnt_use_your_limit(client, me, deck, add_card, make_user):
+    spend(make_user(email="other@example.com").id, 3, feature="leech")
     add_card(deck)
 
     assert len(_suggestions(client)["ready"]) == 1
@@ -520,7 +492,7 @@ def test_a_full_worker_leaves_the_job_queued(app):
     app.config["AI_LEECH_RUN_INLINE"] = False
     slots = [_job_slots.acquire(blocking=False) for _ in range(MAX_CONCURRENT_JOBS)]
     try:
-        with patch("app.leech_jobs.threading.Thread") as thread:
+        with patch("app.services.leech_reviews.threading.Thread") as thread:
             _start_thread(1)
         thread.assert_not_called()
     finally:
@@ -533,7 +505,7 @@ def test_a_failed_job_discards_its_checkpoint(client, deck, add_card, use_provid
     add_card(deck)
     use_provider(Scripted(AIUnavailable()))
     discarded = []
-    monkeypatch.setattr("app.leech_jobs.discard_threads", lambda url, ids: discarded.extend(ids))
+    monkeypatch.setattr("app.services.leech_reviews.discard_threads", lambda url, ids: discarded.extend(ids))
 
     _suggestions(client)
 
@@ -543,7 +515,7 @@ def test_a_failed_job_discards_its_checkpoint(client, deck, add_card, use_provid
 def test_a_paused_job_keeps_its_checkpoint(client, deck, add_card, monkeypatch):
     add_card(deck)
     discarded = []
-    monkeypatch.setattr("app.leech_jobs.discard_threads", lambda url, ids: discarded.extend(ids))
+    monkeypatch.setattr("app.services.leech_reviews.discard_threads", lambda url, ids: discarded.extend(ids))
 
     _suggestions(client)
 
@@ -576,7 +548,7 @@ def test_a_failed_resume_still_applies_the_decisions(client, deck, add_card, mon
     def fail(*args):
         raise RuntimeError("down")
 
-    monkeypatch.setattr("app.api.leeches.resume_review", fail)
+    monkeypatch.setattr("app.services.leech_reviews.resume_review", fail)
 
     assert _decide(client, review["id"], [{"card_id": card.id, "option": None}]).status_code == 200
     assert LeechReview.query.one().status == "completed"
@@ -588,7 +560,7 @@ def test_a_failed_commit_leaves_the_review_ready_to_retry(client, db, deck, add_
     _suggestions(client)
     review = _review(client, deck.id)
     resumed = []
-    monkeypatch.setattr("app.api.leeches.resume_review", lambda *args: resumed.append(args))
+    monkeypatch.setattr("app.services.leech_reviews.resume_review", lambda *args: resumed.append(args))
 
     with patch.object(db.session, "commit", side_effect=RuntimeError("down")):
         resp = _decide(client, review["id"], [{"card_id": card_id, "option": None}])
@@ -601,7 +573,7 @@ def test_a_failed_commit_leaves_the_review_ready_to_retry(client, db, deck, add_
 
 def test_an_unexpected_error_counts_as_a_failure(client, deck, add_card, monkeypatch):
     add_card(deck)
-    monkeypatch.setattr("app.leech_jobs.start_review", lambda *args: 1 / 0)
+    monkeypatch.setattr("app.services.leech_reviews.start_review", lambda *args: 1 / 0)
 
     _suggestions(client)
 
@@ -631,12 +603,9 @@ def test_a_card_without_a_fix_stops_flagging_while_the_other_waits(
     assert db.session.get(Card, unfixed.id).leech_next_at == 7
 
 
-def test_the_leech_budget_makes_jobs_wait(client, app, db, me, deck, add_card):
+def test_the_leech_budget_makes_jobs_wait(client, app, me, deck, add_card):
     app.config["AI_LEECH_DAILY_LIMIT"] = 1
-    db.session.add(LeechReview(
-        user_id=me.id, deck_id=deck.id, status="failed", model_calls=1, recommendations=[],
-    ))
-    db.session.commit()
+    spend(me.id, 1, feature="leech")
     add_card(deck)
 
     body = _suggestions(client)
@@ -645,22 +614,15 @@ def test_the_leech_budget_makes_jobs_wait(client, app, db, me, deck, add_card):
     assert LeechReview.query.filter_by(status="queued").count() == 1
 
 
-def test_the_site_cap_makes_jobs_wait(client, db, me, deck, add_card):
-    db.session.add(AiGeneration(
-        user_id=me.id, deck_id=deck.id, mode="prompt", requested_count=1, model="fake",
-        model_calls=18, candidates=[],
-    ))
-    db.session.commit()
+def test_the_model_limit_makes_jobs_wait(client, me, deck, add_card):
+    spend(me.id, 18)
     add_card(deck)
 
     assert _suggestions(client) == {"processing": False, "ready": []}
 
 
-def test_reviews_count_toward_the_generate_routes_site_cap(client, db, me, deck):
-    db.session.add(LeechReview(
-        user_id=me.id, deck_id=deck.id, status="completed", model_calls=18, recommendations=[],
-    ))
-    db.session.commit()
+def test_reviews_count_toward_the_generate_routes_model_limit(client, me, deck):
+    spend(me.id, 18, feature="leech")
 
     resp = client.post(
         f"/api/decks/{deck.id}/generate", json={"mode": "prompt", "count": 1, "prompt": "Cells"}
@@ -719,7 +681,7 @@ def test_a_lost_job_on_its_last_attempt_fails(client, db, me, deck, add_card):
 
 def test_outside_tests_a_job_runs_in_a_thread(app):
     app.config["AI_LEECH_RUN_INLINE"] = False
-    with patch("app.leech_jobs.threading.Thread") as thread:
+    with patch("app.services.leech_reviews.threading.Thread") as thread:
         _start_thread(1)
     thread.return_value.start.assert_called_once()
     _job_slots.release()  # the fake thread never ran, so nothing released its slot
@@ -739,7 +701,7 @@ def test_the_review_includes_the_shared_cause(client, deck, add_card):
     add_card(deck, front="Two?")
     _suggestions(client)
 
-    assert _review(client, deck.id)["shared_cause"] == "Sample shared cause."
+    assert _review(client, deck.id)["shared_cause"].startswith("Sample shared_cause ")
 
 
 def test_a_rewrite_replaces_the_card_and_starts_a_new_schedule(client, deck, add_card):

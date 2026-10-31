@@ -45,12 +45,26 @@ def _env(name: str, default: str) -> str:
 RENAMED_SETTINGS = {
     "AI_PROVIDER": "AI_WRITER_PROVIDER and AI_JUDGE_PROVIDER",
     "GEMINI_MODEL": "AI_WRITER_MODEL",
+    "AI_SITE_DAILY_LIMIT": "AI_MODEL_DAILY_LIMIT",
+    "AI_LEECH_SITE_RESERVE": "AI_LEECH_MODEL_RESERVE",
 }
 
 
 def renamed_settings_in_use() -> dict[str, str]:
     """Old setting names still in the environment, which the app ignores, and their new names."""
     return {old: new for old, new in RENAMED_SETTINGS.items() if _env(old, "")}
+
+
+def _model_limits(text: str) -> dict[str, int]:
+    """Parse "model:limit,model:limit". A malformed value stops the app from starting."""
+    limits = {}
+    for item in (part.strip() for part in text.split(",")):
+        if item:
+            model, separator, limit = item.partition(":")
+            if not separator:
+                raise ValueError(f"AI_MODEL_DAILY_LIMITS needs model:limit, got {item!r}")
+            limits[model.strip()] = int(limit)
+    return limits
 
 
 class Config:
@@ -79,22 +93,32 @@ class Config:
     AI_WRITER_MODEL = _env("AI_WRITER_MODEL", "gemini-3.5-flash-lite")
     AI_JUDGE_PROVIDER = _env("AI_JUDGE_PROVIDER", "gemini")
     AI_JUDGE_MODEL = _env("AI_JUDGE_MODEL", "gemini-3.8-flash")
+    # How hard each role's model thinks. Higher is slower, and every call has a 45 s timeout.
+    AI_WRITER_THINKING = _env("AI_WRITER_THINKING", "low")
+    AI_JUDGE_THINKING = _env("AI_JUDGE_THINKING", "low")
     GEMINI_API_KEY = _env("GEMINI_API_KEY", "")  # secret: the environment only
     AI_DAILY_LIMIT = int(_env("AI_DAILY_LIMIT", "10"))  # generations per user, rolling 24 h
-    # The whole site's model calls, rolling 24 h. Google's free quota is per project and per
-    # model, and its docs no longer publish the numbers: read them in AI Studio before raising
-    # this. 18 dates from a 20-a-day limit. Best effort, since a call that fails at Google
-    # spends quota without saving a row (A19).
-    AI_SITE_DAILY_LIMIT = int(_env("AI_SITE_DAILY_LIMIT", "18"))
+    # Calls per model across all features, rolling 24 h, as "model:limit,model:limit". Unlisted
+    # models get AI_MODEL_DAILY_LIMIT. Google's free quota is per project and per model, and its
+    # docs no longer publish the numbers. The defaults sit under third-party figures of 500 and
+    # 20 a day, so confirm them in AI Studio.
+    AI_MODEL_DAILY_LIMIT = int(_env("AI_MODEL_DAILY_LIMIT", "18"))
+    AI_MODEL_DAILY_LIMITS = _model_limits(
+        _env("AI_MODEL_DAILY_LIMITS", "gemini-3.5-flash-lite:450,gemini-3.8-flash:18")
+    )
     AI_MAX_CARDS = 25  # cards per generate request
     # Set to "false" to stop the background jobs. Pending suggestions can still be reviewed.
     AI_LEECH_ENABLED = _env("AI_LEECH_ENABLED", "true").lower() != "false"
-    # Leech Doctor calls, rolling 24 h: site-wide and per learner. Also counted by the site limit.
+    # Leech Doctor calls, rolling 24 h: site-wide and per learner.
     AI_LEECH_DAILY_LIMIT = int(_env("AI_LEECH_DAILY_LIMIT", "10"))
     AI_LEECH_USER_DAILY_LIMIT = int(_env("AI_LEECH_USER_DAILY_LIMIT", "4"))
-    # Site calls background jobs leave for generating cards: the worst case of one long file.
-    AI_LEECH_SITE_RESERVE = int(_env("AI_LEECH_SITE_RESERVE", "9"))
+    # Calls per model that background jobs leave for learners' own requests.
+    AI_LEECH_MODEL_RESERVE = int(_env("AI_LEECH_MODEL_RESERVE", "9"))
     AI_LEECH_RUN_INLINE = False  # tests run jobs in the request instead of a thread
+    # Set to "false" to turn off the tutor. Its calls, rolling 24 h: site-wide and per learner.
+    AI_TUTOR_ENABLED = _env("AI_TUTOR_ENABLED", "true").lower() != "false"
+    AI_TUTOR_DAILY_LIMIT = int(_env("AI_TUTOR_DAILY_LIMIT", "100"))
+    AI_TUTOR_USER_DAILY_LIMIT = int(_env("AI_TUTOR_USER_DAILY_LIMIT", "20"))
     # "single": one model call. "graph": the self-correcting pipeline in app/ai/pipeline.py,
     # up to 5 calls a request plus 4 for a long file, with the checks on AI_JUDGE_MODEL.
     AI_PIPELINE = _env("AI_PIPELINE", "single")
@@ -116,9 +140,13 @@ class TestConfig(Config):
     AI_LEECH_ENABLED = True
     AI_LEECH_DAILY_LIMIT = 10
     AI_LEECH_USER_DAILY_LIMIT = 4
-    AI_LEECH_SITE_RESERVE = 9
+    AI_LEECH_MODEL_RESERVE = 9
     AI_LEECH_RUN_INLINE = True
+    AI_TUTOR_ENABLED = True
+    AI_TUTOR_DAILY_LIMIT = 100
+    AI_TUTOR_USER_DAILY_LIMIT = 20
     AI_PIPELINE = "single"
     GEMINI_API_KEY = ""
     AI_DAILY_LIMIT = 10
-    AI_SITE_DAILY_LIMIT = 18
+    AI_MODEL_DAILY_LIMIT = 18
+    AI_MODEL_DAILY_LIMITS = {}
