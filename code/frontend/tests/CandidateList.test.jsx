@@ -166,3 +166,15 @@ test('an error shows its message in an alert', () => {
 
   expect(screen.getByRole('alert').textContent).toBe('Generation not found.');
 });
+
+test('a batch the accuracy check skipped says so', () => {
+  renderList({ ...generationWith(['pending']), verification: 'skipped' });
+
+  expect(screen.getByText(/accuracy check didn't run/)).toBeTruthy();
+});
+
+test('a checked batch shows no accuracy warning', () => {
+  renderList({ ...generationWith(['pending']), verification: 'passed' });
+
+  expect(screen.queryByText(/accuracy check didn't run/)).toBeNull();
+});

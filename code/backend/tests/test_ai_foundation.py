@@ -108,7 +108,7 @@ def test_a_generation_serializes_to_the_c3_shape(db, make_user, make_deck):
     payload = generation.to_dict()
 
     assert list(payload) == [
-        "id", "deck_id", "mode", "requested_count", "model", "created_at", "cards",
+        "id", "deck_id", "mode", "requested_count", "model", "verification", "created_at", "cards",
     ]
     assert payload["deck_id"] == deck.id
     assert payload["mode"] == "prompt"

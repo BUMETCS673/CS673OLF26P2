@@ -65,14 +65,18 @@ class Config:
     # without a key; generating answers 503 until one is set. See app/ai/provider.py.
     AI_PROVIDER = _env("AI_PROVIDER", "gemini")  # or "fake": sample cards, no Google
     GEMINI_API_KEY = _env("GEMINI_API_KEY", "")  # secret: the environment only
-    GEMINI_MODEL = _env("GEMINI_MODEL", "gemini-3.5-flash")
+    GEMINI_MODEL = _env("GEMINI_MODEL", "gemini-3.5-flash-lite")
     AI_DAILY_LIMIT = int(_env("AI_DAILY_LIMIT", "10"))  # generations per user, rolling 24 h
-    # The whole site's generations, rolling 24 h. Google's free quota is per project: 20 a
-    # day for gemini-3.5-flash, so 18 leaves two for smoke checks on the same key. Best
-    # effort, since a call that fails at Google spends quota without saving a row (A19).
-    # Raise it if GEMINI_MODEL moves to Flash-Lite (500 a day).
+    # The whole site's model calls, rolling 24 h. Google's free quota is per project and per
+    # model, and its docs no longer publish the numbers: read them in AI Studio before raising
+    # this. 18 dates from a 20-a-day limit. Best effort, since a call that fails at Google
+    # spends quota without saving a row (A19).
     AI_SITE_DAILY_LIMIT = int(_env("AI_SITE_DAILY_LIMIT", "18"))
     AI_MAX_CARDS = 25  # cards per generate request
+    # "single": one model call. "graph": the self-correcting pipeline in app/ai/pipeline.py,
+    # up to 5 calls a request, with the checks on AI_JUDGE_MODEL.
+    AI_PIPELINE = _env("AI_PIPELINE", "single")
+    AI_JUDGE_MODEL = _env("AI_JUDGE_MODEL", "gemini-3.8-flash")
 
 
 class TestConfig(Config):
@@ -87,6 +91,7 @@ class TestConfig(Config):
     # someone's code/.env can't reach a test that switches AI_PROVIDER to "gemini". The
     # limits are pinned so a value left in .env can't change what the cap tests count to.
     AI_PROVIDER = "fake"
+    AI_PIPELINE = "single"
     GEMINI_API_KEY = ""
     AI_DAILY_LIMIT = 10
     AI_SITE_DAILY_LIMIT = 18
