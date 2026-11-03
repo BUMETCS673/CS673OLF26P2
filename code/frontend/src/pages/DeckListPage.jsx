@@ -31,7 +31,7 @@ export default function DeckListPage() {
     onOpenDeck={(id) => navigate(`/decks/${id}`)}
     onStudyDeck={(id) => navigate(`/decks/${id}/study`)}
     onDeckCreated={(id) => navigate(`/decks/${id}`, { state: { startAdding: true } })}
-    onReviewSuggestions={(id) => navigate(`/decks/${id}/leeches`)} />
+    onReviewSuggestions={(id) => navigate(`/decks/${id}/problem-cards`)} />
   </div>;
 }
 

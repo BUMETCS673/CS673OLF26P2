@@ -1,131 +1,152 @@
-"""Shared pytest fixtures. WS1 and WS2 build their tests on these.
+"""Shared fixtures. Tests run against real Postgres with pgvector, from TEST_DATABASE_URL.
 
-Tests run against an in-memory SQLite database, so `pytest` works without Docker and
-each test starts from empty tables. Point TEST_DATABASE_URL at Postgres to run the same
-suite against the real thing.
-
-    cd code/backend
-    pip install -r requirements.txt
-    pytest
-
-What you get:
-
-    def test_something(client, make_user, login_as):
-        user = make_user(email="a@example.com", password="password123")
-        login_as(user)
-        assert client.get("/api/decks").status_code != 401
+Each test runs inside a transaction that's rolled back afterward, so tests can't affect each
+other, even though services commit: their commits only release a savepoint.
 """
 
 import os
-import sqlite3
-import sys
+from datetime import timedelta
 
 import pytest
-from sqlalchemy import event
-from sqlalchemy.engine import Engine
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
-# So `import app` works when pytest is run from code/backend.
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from app.ai.checkpoints import close_checkpointers
+from app.core.database import CONNECT_ARGS, get_session
+from app.core.security import hash_session_token, new_session_token
+from app.core.settings import Settings
+from app.dependencies import SESSION_COOKIE
+from app.main import app
+from app.models import Base, Card, Deck, User, UserSession, utcnow
+from app.repositories.users import UserRepository
 
-from app import create_app  # noqa: E402
-from app.config import TestConfig  # noqa: E402
-from app.extensions import db as _db  # noqa: E402
-from app.models import Card, Deck, User  # noqa: E402
-
-
-@event.listens_for(Engine, "connect")
-def _enforce_sqlite_foreign_keys(dbapi_connection, connection_record):
-    """SQLite ignores foreign keys unless you ask it not to.
-
-    Without this, "deleting a deck deletes its cards" would pass in Postgres and
-    quietly do nothing in the tests.
-    """
-    if isinstance(dbapi_connection, sqlite3.Connection):
-        cursor = dbapi_connection.cursor()
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
+TEST_DATABASE_URL = Settings(
+    database_url=os.environ.get(
+        "TEST_DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/cadence_test"
+    )
+).database_url
 
 
-@pytest.fixture
-def app():
-    app = create_app(TestConfig)
-    with app.app_context():
-        _db.create_all()
-        yield app
-        _db.session.remove()
-        _db.drop_all()
+@pytest.fixture(scope="session")
+async def engine():
+    engine = create_async_engine(TEST_DATABASE_URL, connect_args=CONNECT_ARGS)
+    async with engine.begin() as connection:
+        await connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        await connection.run_sync(Base.metadata.drop_all)
+        await connection.run_sync(Base.metadata.create_all)
+    yield engine
+    await close_checkpointers()
+    await engine.dispose()
 
 
 @pytest.fixture
-def client(app):
-    return app.test_client()
+async def connection(engine):
+    async with engine.connect() as connection:
+        transaction = await connection.begin()
+        yield connection
+        await transaction.rollback()
+
+
+def _session_on(connection) -> AsyncSession:
+    return AsyncSession(
+        bind=connection, expire_on_commit=False, join_transaction_mode="create_savepoint"
+    )
 
 
 @pytest.fixture
-def db(app):
-    return _db
+async def session(connection):
+    async with _session_on(connection) as session:
+        yield session
 
 
 @pytest.fixture
-def make_user(db):
-    """Create a user directly, without going through the register endpoint."""
+def session_factory(connection):
+    """Like the app's factory, but its sessions stay in the test's transaction."""
 
-    def _make_user(email="user@example.com", password="password123", display_name=None):
-        # Deliberately passes the email through as given: the model normalizes it, and
-        # a fixture that did it here would hide a model that stopped doing its job.
-        user = User(email=email, display_name=display_name)
-        user.set_password(password)
-        db.session.add(user)
-        db.session.commit()
+    def _factory() -> AsyncSession:
+        return _session_on(connection)
+
+    return _factory
+
+
+@pytest.fixture
+async def client(connection):
+    async def test_session():
+        # A new session per request, as in production, so nothing is cached between requests.
+        async with _session_on(connection) as session:
+            yield session
+
+    app.dependency_overrides[get_session] = test_session
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        yield client
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def make_user(session):
+    async def _make_user(email="user@example.com") -> User:
+        user = User(email=email, password_hash="not-a-real-hash")
+        session.add(user)
+        await session.commit()
         return user
 
     return _make_user
 
 
 @pytest.fixture
-def login_as(client):
-    """Sign a user in without needing WS1's login endpoint.
+def login_as(client, session):
+    """Sign a user in without going through the login route, which is slow on purpose."""
 
-    Sets the session key Flask-Login reads, which is what a real login ends up doing.
-    """
-
-    def _login_as(user):
-        with client.session_transaction() as session:
-            session["_user_id"] = str(user.id)
-            session["_fresh"] = True
+    async def _login_as(user: User) -> None:
+        token = new_session_token()
+        session.add(
+            UserSession(
+                token_hash=hash_session_token(token),
+                user_id=user.id,
+                expires_at=utcnow() + timedelta(days=1),
+            )
+        )
+        await session.commit()
+        client.cookies.set(SESSION_COOKIE, token)
 
     return _login_as
 
 
 @pytest.fixture
-def make_deck(db):
-    def _make_deck(user, name="Spanish 101", description=None, cards=()):
-        deck = Deck(
-            user=user,
-            name=name,
-            description=description,
-            cards=[Card(front=front, back=back) for front, back in cards],
-        )
-        db.session.add(deck)
-        db.session.commit()
+async def me(make_user, login_as) -> User:
+    user = await make_user(email="me@example.com")
+    await login_as(user)
+    return user
+
+
+@pytest.fixture
+def trust_everyone(monkeypatch):
+    """For tests about sharing, where new accounts would otherwise never share anything."""
+
+    async def trusted(_repository, _user_id):
+        return True
+
+    monkeypatch.setattr(UserRepository, "is_trusted", trusted)
+
+
+@pytest.fixture
+def make_deck(session):
+    async def _make_deck(user: User, name="Spanish 101", description=None) -> Deck:
+        deck = Deck(user_id=user.id, name=name, description=description)
+        session.add(deck)
+        await session.commit()
         return deck
 
     return _make_deck
 
 
 @pytest.fixture
-def make_card(db):
-    """Create a card in any scheduling state (Lab 3, Step 0a).
-
-        make_card(deck, state="review", due_at=utcnow() - timedelta(days=3), interval_days=10)
-
-    Any of the six scheduling fields can be passed; the rest keep the model's defaults.
-    """
-
-    def _make_card(deck, front="q", back="a", **schedule):
-        card = Card(deck=deck, front=front, back=back, **schedule)
-        db.session.add(card)
-        db.session.commit()
+def make_card(session):
+    async def _make_card(deck: Deck, front="Question?", back="Answer", **fields) -> Card:
+        card = Card(deck_id=deck.id, front=front, back=back, **fields)
+        session.add(card)
+        await session.commit()
         return card
 
     return _make_card

@@ -14,5 +14,6 @@ export function createDecksApi(request) {
     createCard: (deckId, body) => request(`/api/decks/${id(deckId)}/cards`, { method: 'POST', body }),
     updateCard: (cardId, body) => request(`/api/cards/${id(cardId)}`, { method: 'PATCH', body }),
     deleteCard: (cardId) => request(`/api/cards/${id(cardId)}`, { method: 'DELETE' }),
+    reportCard: (cardId) => request(`/api/cards/${id(cardId)}/report`, { method: 'POST' }),
   };
 }

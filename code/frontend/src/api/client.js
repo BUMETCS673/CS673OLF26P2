@@ -51,6 +51,8 @@ export class ApiError extends Error {
 
 async function send(path, method, body) {
   let response;
+  // The browser sets a FormData's Content-Type itself, because it includes the boundary.
+  const isJson = body !== undefined && !(body instanceof FormData);
 
   try {
     response = await fetch(`${BASE}${path}`, {
@@ -58,8 +60,8 @@ async function send(path, method, body) {
       // The session cookie is HttpOnly, so scripts can't read it -- the browser has to
       // be told to send it, and this is how.
       credentials: "include",
-      headers: body === undefined ? undefined : { "Content-Type": "application/json" },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      headers: isJson ? { "Content-Type": "application/json" } : undefined,
+      body: isJson ? JSON.stringify(body) : body,
     });
   } catch {
     // fetch() only rejects when the request never got an answer at all: the backend is

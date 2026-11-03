@@ -1,74 +1,38 @@
-"""The `ai_generations` table: one row per batch of cards the AI suggested.
+"""The `ai_generations` table: one row per batch of suggested cards, waiting for review."""
 
-The suggestions wait here as `candidates` until the learner accepts or rejects each one
-(decision A6 in code/plans/ITERATION_3_PLAN.md). Only accepting turns one into a `Card`.
-The rows also count toward the daily cap, by `created_at`.
-"""
+from datetime import datetime
 
-# AI Utilization: ~100% of this file's code
-# AI Tools Used: Claude Code (Claude Opus 5.5)
-# AI-Assisted Activities:
-#   Data model development
-# Human role: plan approval, code review, and hands-on testing by Miles Cameron.
+from sqlalchemy import DateTime, ForeignKey, String
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import Mapped, mapped_column
 
-from app.extensions import db
-from app.models.base import iso, utcnow
+from app.models.base import Base, utcnow
 
 
-class AiGeneration(db.Model):
+class AiGeneration(Base):
     __tablename__ = "ai_generations"
 
-    id = db.Column(db.Integer, primary_key=True)
-    # On the row itself, so the daily cap is one count over this table with no join.
-    user_id = db.Column(
-        db.Integer, db.ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # Unique, so a job retried after saving can't create a second batch.
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("jobs.id", ondelete="SET NULL"), unique=True
     )
-    # No relationship from Deck or User: the database's cascade removes a deck's
-    # generations, just as it removes its cards.
-    deck_id = db.Column(
-        db.Integer, db.ForeignKey("decks.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    mode = db.Column(db.String(16), nullable=False)             # "prompt" | "file" | "suggest"
-    prompt = db.Column(db.String(2000), nullable=True)          # the prompt, or a file's focus note
-    source_filename = db.Column(db.String(255), nullable=True)  # the file's name, never its contents
-    requested_count = db.Column(db.Integer, nullable=False)
-    model = db.Column(db.String(64), nullable=False)            # the provider's name: a Gemini model, or "fake"
-    # "passed" | "skipped" (the judge couldn't answer), or null on the single-call path.
-    verification = db.Column(db.String(16), nullable=True)
-    # True when no candidates survived. Excluded from the per-user cap.
-    empty = db.Column(db.Boolean, nullable=False, default=False, server_default=db.false())
-    # Hash of the prompt text, from app.ai.pipeline.PIPELINE_PROMPT_VERSION. Null on older rows.
-    prompt_version = db.Column(db.String(16), nullable=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    deck_id: Mapped[int] = mapped_column(ForeignKey("decks.id", ondelete="CASCADE"), index=True)
+    mode: Mapped[str] = mapped_column(String(16))  # "prompt" | "file"
+    prompt: Mapped[str | None] = mapped_column(String(2000))  # the prompt, or a file's topic
+    source_filename: Mapped[str | None] = mapped_column(String(255))
+    requested_count: Mapped[int]
+    model: Mapped[str] = mapped_column(String(64))
+    verification: Mapped[str | None] = mapped_column(String(16))  # "passed" | "skipped"
+    empty: Mapped[bool] = mapped_column(default=False)  # no cards survived, so it isn't counted
+    prompt_version: Mapped[str | None] = mapped_column(String(16))
     # [{"front", "back", "status"}], status "pending" | "accepted" | "rejected".
-    # SQLAlchemy doesn't notice an in-place change to a JSON value, so build a new list
-    # and assign it (rule 20).
-    candidates = db.Column(db.JSON, nullable=False)
-    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow, index=True)
-
-    def to_dict(self) -> dict:
-        """The Generation shape in C3.
-
-        Each candidate is numbered by its position, which never changes. `user_id`,
-        `prompt` and `source_filename` stay on the server.
-        """
-        return {
-            "id": self.id,
-            "deck_id": self.deck_id,
-            "mode": self.mode,
-            "requested_count": self.requested_count,
-            "model": self.model,
-            "verification": self.verification,
-            "created_at": iso(self.created_at),
-            "cards": [
-                {
-                    "index": index,
-                    "front": candidate["front"],
-                    "back": candidate["back"],
-                    "status": candidate["status"],
-                }
-                for index, candidate in enumerate(self.candidates)
-            ],
-        }
-
-    def __repr__(self) -> str:
-        return f"<AiGeneration {self.id} deck={self.deck_id} mode={self.mode}>"
+    # SQLAlchemy doesn't notice an in-place change, so build a new list and assign it.
+    candidates: Mapped[list[dict]] = mapped_column(JSONB)
+    # The knowledge chunks the run read. A batch shares them, since the writer doesn't say which
+    # card used which one.
+    source_chunk_ids: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, index=True
+    )

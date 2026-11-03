@@ -1,11 +1,13 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { createLeechesApi } from '../api/leeches.js';
+import { createProblemCardsApi } from '../api/problemCards.js';
 import { useApi } from '../api/useApi.js';
 import { useAuth } from '../auth/AuthContext';
 
-export const POLL_MS = 10_000;
-export const MAX_POLLS = 12;  // two minutes, then wait for the next page change or tab return
+// A review's job waits 10 minutes to gather cards, so this outlasts that and the run itself. A
+// review waiting on budget takes hours, so polling then stops until a page change or tab return.
+export const POLL_MS = 30_000;
+export const MAX_POLLS = 30;  // 15 minutes
 
 const EMPTY = { processing: false, ready: [] };
 const noop = () => {};
@@ -23,15 +25,15 @@ export const SuggestionsContext = createContext({
 export const useSuggestions = () => useContext(SuggestionsContext);
 
 /**
- * One shared store for Leech Doctor suggestions, so the notice, the home card and the deck banner
+ * One shared store for Problem Cards suggestions, so the notice, the home card and the deck banner
  * always agree and update without a page reload.
  *
- * Each check also drives the server's queue. Checks run on page changes and tab returns, and every
- * POLL_MS while a job is running, but not during a study session, so jobs wait for it to end.
+ * Checks only read. They run on page changes and tab returns, and every POLL_MS while a review is
+ * on its way, but not during a study session, so nothing interrupts it.
  */
 export function SuggestionsProvider({ children }) {
   const { user } = useAuth();
-  const api = useApi(createLeechesApi);
+  const api = useApi(createProblemCardsApi);
   const { pathname } = useLocation();
   const userId = user?.id;
   const [loaded, setLoaded] = useState({ ...EMPTY, owner: null });
@@ -46,7 +48,7 @@ export function SuggestionsProvider({ children }) {
 
   const refresh = useCallback(async () => {
     try {
-      const next = await api.refreshSuggestions();
+      const next = await api.getSuggestions();
       const ready = next.ready ?? [];
       if (known.current !== null) {
         const arrived = ready.find((item) => !known.current.has(item.review_id));
@@ -76,7 +78,7 @@ export function SuggestionsProvider({ children }) {
   }, [user, studying, refresh]);
 
   useEffect(() => {
-    // Checks drive the queue, so one during a session could start a job before it ends.
+    // No checks during a session, so a notice can't appear in the middle of studying.
     if (!data.processing || !user || studying) return undefined;
     let polls = 0;
     const timer = setInterval(() => {

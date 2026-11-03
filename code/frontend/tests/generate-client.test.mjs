@@ -25,19 +25,31 @@ function mockFetch(respond) {
   return calls;
 }
 
+// As the server sends it. The client adds `cards`, which are the candidates with their positions.
 const GENERATION = {
   id: 7, deck_id: 3, mode: 'prompt', requested_count: 1, model: 'fake',
   created_at: '2026-10-09T14:00:00Z',
-  cards: [{ index: 0, front: 'Sample question 1', back: 'Sample answer 1', status: 'pending' }],
+  candidates: [{ front: 'Sample question 1', back: 'Sample answer 1', status: 'pending' }],
+};
+const WITH_INDEXES = { ...GENERATION, cards: [{ ...GENERATION.candidates[0], index: 0 }] };
+
+// Generating starts job 9. Node has no EventSource, so the client polls the job instead.
+const server = (url) => {
+  if (url.endsWith('/generate')) return json({ job_id: 9 }, 202);
+  if (url === '/api/jobs/9') return json({ id: 9, status: 'done', result: { generation_id: 7 } });
+  if (url.endsWith('/accept')) return json({ cards: [], generation: GENERATION });
+  return json(GENERATION);
 };
 
 test('generate is a POST to /api/decks/:id/generate with the session cookie and the body', async () => {
-  const calls = mockFetch(() => json(GENERATION, 201));
+  const calls = mockFetch(server);
   const api = createAuthenticatedApi(createGenerateApi, () => {});
   const body = { mode: 'prompt', count: 1, prompt: 'Capitals' };
 
-  assert.deepEqual(await api.generate(3, body), GENERATION);
-  assert.equal(calls.length, 1);
+  assert.deepEqual(await api.generate(3, body), WITH_INDEXES);
+  assert.deepEqual(calls.map((call) => call.url), [
+    '/api/decks/3/generate', '/api/jobs/9', '/api/generations/7',
+  ]);
   assert.equal(calls[0].url, '/api/decks/3/generate');
   assert.equal(calls[0].method, 'POST');
   assert.equal(calls[0].credentials, 'include');
@@ -46,11 +58,11 @@ test('generate is a POST to /api/decks/:id/generate with the session cookie and 
 });
 
 test('acceptCards and rejectCards POST the indexes to the generation', async () => {
-  const calls = mockFetch(() => json(GENERATION));
+  const calls = mockFetch(server);
   const api = createAuthenticatedApi(createGenerateApi, () => {});
 
-  await api.acceptCards(7, [0, 2]);
-  await api.rejectCards(7, [1]);
+  assert.deepEqual((await api.acceptCards(7, [0, 2])).generation, WITH_INDEXES);
+  assert.deepEqual(await api.rejectCards(7, [1]), WITH_INDEXES);
 
   assert.deepEqual(calls.map((call) => [call.url, call.method, JSON.parse(call.body)]), [
     ['/api/generations/7/accept', 'POST', { indexes: [0, 2] }],

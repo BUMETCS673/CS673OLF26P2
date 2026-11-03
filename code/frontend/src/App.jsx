@@ -33,7 +33,7 @@ import ProtectedRoute, { GuestOnlyRoute } from "./auth/ProtectedRoute";
 import DeckDetailPage from "./pages/DeckDetailPage";
 import DeckListPage from "./pages/DeckListPage";
 import GeneratePage from "./pages/GeneratePage";
-import LeechReviewPage from "./pages/LeechReviewPage";
+import ProblemCardsReviewPage from "./pages/ProblemCardsReviewPage";
 import SuggestionsNotice from "./components/SuggestionsNotice";
 import { SuggestionsProvider } from "./suggestions/SuggestionsContext";
 import LoginPage from "./pages/LoginPage";
@@ -99,10 +99,10 @@ export default function App() {
           }
         />
         <Route
-          path="/decks/:id/leeches"
+          path="/decks/:id/problem-cards"
           element={
             <ProtectedRoute>
-              <LeechReviewPage />
+              <ProblemCardsReviewPage />
             </ProtectedRoute>
           }
         />

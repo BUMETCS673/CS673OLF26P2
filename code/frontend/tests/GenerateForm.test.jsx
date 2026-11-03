@@ -12,7 +12,7 @@
 // Human role: plan approval, code review, and hands-on testing by Miles Cameron.
 
 import { afterEach, expect, test, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import GenerateForm from '../src/components/generate/GenerateForm.jsx';
 
 afterEach(() => {
@@ -21,37 +21,52 @@ afterEach(() => {
 });
 
 const DECK = { id: 2, name: 'Travel Spanish', description: null, card_count: 12 };
-const UNSUPPORTED = 'Only PDF, TXT and MD files are supported. Save other documents as a PDF first.';
 const COUNT_RANGE = 'Choose between 1 and 25 cards.';
 const PRIVACY = "Your prompt or file is sent to Google Gemini. Don't include personal or confidential information.";
 
-function renderForm(props = {}) {
+const MATERIAL = {
+  id: 7, filename: 'notes.pdf', status: 'ready', stage: 'finding_topics',
+  chunks_done: 3, chunks_total: 3, suggested_topics: ['Mitosis', 'Enzymes'], error: null,
+};
+const QUESTION = 'What do you want to focus on?';
+
+function renderForm(props = {}, uploaded = MATERIAL) {
   const onGenerate = vi.fn().mockResolvedValue(undefined);
-  render(<GenerateForm deck={DECK} cardCount={12} busy={false} error={null} onGenerate={onGenerate} {...props} />);
-  return { onGenerate: props.onGenerate ?? onGenerate };
+  const materialsApi = {
+    upload: vi.fn().mockResolvedValue(uploaded),
+    getMaterial: vi.fn().mockResolvedValue(uploaded),
+  };
+  render(<GenerateForm deck={DECK} busy={false} error={null} onGenerate={onGenerate}
+    materialsApi={materialsApi} {...props} />);
+  return { onGenerate: props.onGenerate ?? onGenerate, materialsApi };
 }
 
 const radio = (name) => screen.getByRole('radio', { name });
 const generateButton = () => screen.getByRole('button', { name: 'Generate' });
 const generate = () => fireEvent.click(generateButton());
 const fill = (label, value) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
-const textFile = (text, name, type = '') => new File([text], name, { type });
+const FILE = new File(['Cells divide.'], 'notes.pdf');
 
-/** Chooses `file` in file mode, and waits for the read to finish. */
-async function chooseFile(file) {
+function chooseFile(file = FILE) {
   fireEvent.click(radio('Upload a file'));
   fireEvent.change(screen.getByLabelText('File'), { target: { files: [file] } });
-  await waitFor(() => expect(generateButton().disabled).toBe(false));
+}
+
+/** Chooses a file, clicks Generate, and waits for the topic question. */
+async function upToTheQuestion() {
+  chooseFile();
+  generate();
+  return screen.findByLabelText(QUESTION);
 }
 
 // --- the form as it first appears ----------------------------------------------------
 
-test('it starts on Write a prompt, with three modes, 10 cards and a Topic box', () => {
+test('it starts on Write a prompt, with two modes, 10 cards and a Topic box', () => {
   renderForm();
 
   const group = screen.getByRole('group', { name: 'Generate from' });
   expect(group).toBeTruthy();
-  expect(radio('Suggest more content').checked).toBe(false);
+  expect(screen.getAllByRole('radio')).toHaveLength(2);
   expect(radio('Write a prompt').checked).toBe(true);
   expect(radio('Upload a file').checked).toBe(false);
   expect(screen.getByLabelText('How many cards?').value).toBe('10');
@@ -62,45 +77,97 @@ test('it starts on Write a prompt, with three modes, 10 cards and a Topic box', 
 test('the privacy line shows in every mode', () => {
   renderForm();
 
-  for (const mode of ['Write a prompt', 'Upload a file', 'Suggest more content']) {
+  for (const mode of ['Write a prompt', 'Upload a file']) {
     fireEvent.click(radio(mode));
     expect(screen.getByText(PRIVACY)).toBeTruthy();
   }
 });
 
-// --- Suggest more content -------------------------------------------------------------
+// --- Suggest something ----------------------------------------------------------------
 
-test('with 4 cards, Suggest more content is disabled and says how many more it needs', () => {
-  renderForm({ cardCount: 4 });
+const suggestButton = () => screen.getByRole('button', { name: 'Suggest something' });
 
-  expect(radio('Suggest more content').disabled).toBe(true);
-  expect(screen.getByText('Add 6 more cards to unlock suggestions.')).toBeTruthy();
+function renderSuggesting(onSuggest = vi.fn().mockResolvedValue({ topics: ['Mitosis', 'ATP'] })) {
+  return { ...renderForm({ onSuggest }), onSuggest };
+}
+
+test('Suggest something shows topics, and doesnt generate anything', async () => {
+  const { onGenerate, onSuggest } = renderSuggesting();
+
+  fireEvent.click(suggestButton());
+
+  expect(await screen.findByRole('button', { name: 'Mitosis' })).toBeTruthy();
+  expect(onSuggest).toHaveBeenCalledTimes(1);
+  expect(onGenerate).not.toHaveBeenCalled();
 });
 
-test('with 9 cards, it needs 1 more card', () => {
-  renderForm({ cardCount: 9 });
+test('it says when its thinking, and locks the button until the answer', async () => {
+  let answer;
+  renderSuggesting(() => new Promise((resolve) => { answer = resolve; }));
 
-  expect(screen.getByText('Add 1 more card to unlock suggestions.')).toBeTruthy();
+  fireEvent.click(suggestButton());
+
+  expect(screen.getByText('Thinking of topics…')).toBeTruthy();
+  expect(suggestButton().disabled).toBe(true);
+
+  answer({ topics: ['Mitosis'] });
+
+  expect(await screen.findByRole('button', { name: 'Mitosis' })).toBeTruthy();
+  expect(suggestButton().disabled).toBe(false);
+  expect(screen.queryByText('Thinking of topics…')).toBeNull();
 });
 
-test('with 10 cards, Suggest more content is enabled and the hint goes', () => {
-  renderForm({ cardCount: 10 });
+test('picking a topic fills the prompt, and Generate sends it', async () => {
+  const { onGenerate } = renderSuggesting();
+  fireEvent.click(suggestButton());
 
-  expect(radio('Suggest more content').disabled).toBe(false);
-  expect(screen.queryByText(/to unlock suggestions/)).toBeNull();
-});
+  fireEvent.click(await screen.findByRole('button', { name: 'Mitosis' }));
 
-test('with 12 cards, Suggest sends the mode and the count, and nothing else', () => {
-  const { onGenerate } = renderForm({ cardCount: 12 });
-  fill('Topic', 'Left over from prompt mode');
+  expect(screen.getByLabelText('Topic').value).toBe('Mitosis');
+  expect(screen.queryByRole('button', { name: 'ATP' })).toBeNull();
+  expect(onGenerate).not.toHaveBeenCalled();
 
-  fireEvent.click(radio('Suggest more content'));
-  fill('How many cards?', '5');
   generate();
+  expect(onGenerate).toHaveBeenCalledWith({ mode: 'prompt', count: 10, prompt: 'Mitosis' });
+});
 
-  expect(screen.queryByLabelText('Topic')).toBeNull();
-  expect(onGenerate).toHaveBeenCalledTimes(1);
-  expect(onGenerate).toHaveBeenCalledWith({ mode: 'suggest', count: 5 });
+test('picking a topic from file mode moves to prompt mode', async () => {
+  renderSuggesting();
+  fireEvent.click(radio('Upload a file'));
+  fireEvent.click(suggestButton());
+
+  fireEvent.click(await screen.findByRole('button', { name: 'ATP' }));
+
+  expect(radio('Write a prompt').checked).toBe(true);
+  expect(screen.getByLabelText('Topic').value).toBe('ATP');
+});
+
+test('a failed request shows its message, and can be tried again', async () => {
+  const onSuggest = vi.fn()
+    .mockRejectedValueOnce(new Error('The AI service didnt respond.'))
+    .mockResolvedValueOnce({ topics: ['Mitosis'] });
+  renderSuggesting(onSuggest);
+
+  fireEvent.click(suggestButton());
+  expect((await screen.findByRole('alert')).textContent).toBe('The AI service didnt respond.');
+
+  fireEvent.click(suggestButton());
+  expect(await screen.findByRole('button', { name: 'Mitosis' })).toBeTruthy();
+  expect(screen.queryByRole('alert')).toBeNull();
+});
+
+test('an empty answer says so', async () => {
+  renderSuggesting(vi.fn().mockResolvedValue({ topics: [] }));
+
+  fireEvent.click(suggestButton());
+
+  expect(await screen.findByText('No suggestions this time. Try again.')).toBeTruthy();
+});
+
+test('Suggest something is locked while cards are generating', () => {
+  renderForm({ busy: true });
+
+  expect(suggestButton().disabled).toBe(true);
 });
 
 // --- Write a prompt -------------------------------------------------------------------
@@ -193,189 +260,154 @@ test('counts of 1 and 25 are allowed', () => {
 
 // --- Upload a file --------------------------------------------------------------------
 
-test('Upload a file shows a File input and a Focus box, and no Topic', () => {
+test('Upload a file starts with only the File input', () => {
   renderForm();
 
   fireEvent.click(radio('Upload a file'));
 
-  expect(screen.getByLabelText('File').getAttribute('accept')).toBe('.pdf,.txt,.md');
-  expect(screen.getByLabelText('Focus (optional)')).toBeTruthy();
+  expect(screen.getByLabelText('File')).toBeTruthy();
   expect(screen.queryByLabelText('Topic')).toBeNull();
+  expect(screen.queryByLabelText('How many cards?')).toBeNull();
+  expect(screen.queryByLabelText(QUESTION)).toBeNull();
 });
 
-test('an .md file is read and sent as base64, with its type and no focus', async () => {
-  const { onGenerate } = renderForm();
-  fill('Topic', 'Left over from prompt mode');
-
-  await chooseFile(textFile('# Hi', 'notes.md'));
-  generate();
-
-  expect(onGenerate).toHaveBeenCalledTimes(1);
-  expect(onGenerate).toHaveBeenCalledWith({
-    mode: 'file',
-    count: 10,
-    file: { name: 'notes.md', mime_type: 'text/markdown', data: 'IyBIaQ==' },
-  });
-});
-
-test('the type comes from the extension, never from what the browser says', async () => {
-  const { onGenerate } = renderForm();
-
-  // A browser may call .md text/x-markdown, or leave the type empty.
-  await chooseFile(textFile('%PDF-1.7', 'Chapter 2.PDF', 'text/x-markdown'));
-  generate();
-
-  expect(onGenerate.mock.calls[0][0].file).toEqual({
-    name: 'Chapter 2.PDF', mime_type: 'application/pdf', data: btoa('%PDF-1.7'),
-  });
-});
-
-test('a .txt file is text/plain, and a focus note is sent trimmed', async () => {
-  const { onGenerate } = renderForm();
-
-  await chooseFile(textFile('Mitochondria', 'cells.txt'));
-  fill('Focus (optional)', '  Chapter 2 only  ');
-  generate();
-
-  expect(onGenerate).toHaveBeenCalledWith({
-    mode: 'file',
-    count: 10,
-    file: { name: 'cells.txt', mime_type: 'text/plain', data: btoa('Mitochondria') },
-    focus: 'Chapter 2 only',
-  });
-});
-
-test('file mode with no file is caught', () => {
-  const { onGenerate } = renderForm();
-
+test('Generate with no file says to choose one, and uploads nothing', () => {
+  const { materialsApi } = renderForm();
   fireEvent.click(radio('Upload a file'));
+
   generate();
 
-  expect(onGenerate).not.toHaveBeenCalled();
+  expect(materialsApi.upload).not.toHaveBeenCalled();
   expect(screen.getByText('Choose a PDF, TXT or MD file.')).toBeTruthy();
-  expect(screen.getByLabelText('File').getAttribute('aria-invalid')).toBe('true');
+  expect(globalThis.document.activeElement).toBe(screen.getByLabelText('File'));
 });
 
-test('a file over 4 MB is refused before it is read, and Generate sends nothing', async () => {
-  const read = vi.spyOn(globalThis.FileReader.prototype, 'readAsDataURL');
-  const { onGenerate } = renderForm();
-  const big = new File([new Uint8Array(4 * 1024 * 1024 + 1)], 'big.pdf', { type: 'application/pdf' });
+test('choosing a file alone doesnt upload it', () => {
+  const { materialsApi } = renderForm();
 
-  fireEvent.click(radio('Upload a file'));
-  fireEvent.change(screen.getByLabelText('File'), { target: { files: [big] } });
-  generate();
+  chooseFile();
 
-  expect(read).not.toHaveBeenCalled();
-  expect(onGenerate).not.toHaveBeenCalled();
-  expect(screen.getByText('The file must be 4 MB or smaller.')).toBeTruthy();
+  expect(materialsApi.upload).not.toHaveBeenCalled();
 });
 
-test('a file of exactly 4 MB is accepted', async () => {
-  const { onGenerate } = renderForm();
+test('the first Generate uploads the file, and sends no cards request', async () => {
+  const { materialsApi, onGenerate } = renderForm();
 
-  await chooseFile(new File([new Uint8Array(4 * 1024 * 1024)], 'max.pdf'));
-  generate();
+  await upToTheQuestion();
 
-  expect(onGenerate).toHaveBeenCalledTimes(1);
-});
-
-test('a .docx is refused with C2\'s message', () => {
-  const { onGenerate } = renderForm();
-
-  fireEvent.click(radio('Upload a file'));
-  fireEvent.change(screen.getByLabelText('File'), { target: { files: [textFile('x', 'report.docx')] } });
-
-  expect(screen.getByText(UNSUPPORTED)).toBeTruthy();
-  generate();
-  expect(onGenerate).not.toHaveBeenCalled();
-  expect(screen.getByText(UNSUPPORTED)).toBeTruthy();
-});
-
-test('a refused file replaces a good one', async () => {
-  const { onGenerate } = renderForm();
-  await chooseFile(textFile('# Hi', 'notes.md'));
-
-  fireEvent.change(screen.getByLabelText('File'), { target: { files: [textFile('x', 'notes')] } });
-  generate();
-
-  expect(screen.getByText(UNSUPPORTED)).toBeTruthy();
+  expect(materialsApi.upload).toHaveBeenCalledWith(FILE);
   expect(onGenerate).not.toHaveBeenCalled();
 });
 
-test('a focus note over 500 characters is caught', async () => {
-  const { onGenerate } = renderForm();
-  await chooseFile(textFile('# Hi', 'notes.md'));
+test('Generate is disabled while the file uploads and processes', async () => {
+  renderForm({}, { ...MATERIAL, status: 'processing', stage: 'reading' });
 
-  fill('Focus (optional)', 'x'.repeat(501));
+  chooseFile();
   generate();
-
-  expect(onGenerate).not.toHaveBeenCalled();
-  expect(screen.getByText('Keep the focus note to 500 characters or fewer.')).toBeTruthy();
-});
-
-test('Generate waits while a file is being read', () => {
-  vi.spyOn(globalThis.FileReader.prototype, 'readAsDataURL').mockImplementation(() => {});
-  const { onGenerate } = renderForm();
-
-  fireEvent.click(radio('Upload a file'));
-  fireEvent.change(screen.getByLabelText('File'), { target: { files: [textFile('# Hi', 'notes.md')] } });
-
   expect(generateButton().disabled).toBe(true);
-  expect(screen.getByText('Reading notes.md…')).toBeTruthy();
-  fireEvent.submit(generateButton().closest('form'));
-  expect(onGenerate).not.toHaveBeenCalled();
+
+  expect(await screen.findByText('Reading your file…')).toBeTruthy();
+  expect(generateButton().disabled).toBe(true);
+  expect(screen.queryByLabelText(QUESTION)).toBeNull();
 });
 
-test('a file that cannot be read says so', async () => {
-  vi.spyOn(globalThis.FileReader.prototype, 'readAsDataURL').mockImplementation(function fail() {
-    setTimeout(() => this.onerror(new globalThis.ProgressEvent('error')));
-  });
+test('once ready, it asks for the topic and the count', async () => {
   renderForm();
 
-  fireEvent.click(radio('Upload a file'));
-  fireEvent.change(screen.getByLabelText('File'), { target: { files: [textFile('# Hi', 'notes.md')] } });
+  await upToTheQuestion();
 
-  expect(await screen.findByText("That file couldn't be read.")).toBeTruthy();
-  expect(generateButton().disabled).toBe(false);
+  expect(screen.getByLabelText('How many cards?').value).toBe('10');
+  expect(screen.getByRole('button', { name: 'Mitosis' })).toBeTruthy();
 });
 
-test('a slow read never replaces a file chosen after it', () => {
-  const held = [];
-  vi.spyOn(globalThis.FileReader.prototype, 'readAsDataURL').mockImplementation(function hold() {
-    held.push(this);
-  });
-  /** Finishes a held read with `base64` as its data. */
-  const finish = (reader, base64) => act(() => {
-    Object.defineProperty(reader, 'result', { value: `data:text/markdown;base64,${base64}` });
-    reader.onload();
-  });
-  const { onGenerate } = renderForm();
-  fireEvent.click(radio('Upload a file'));
-  const input = screen.getByLabelText('File');
+test('the second Generate sends the document, the trimmed topic and the count', async () => {
+  const { onGenerate, materialsApi } = renderForm();
+  await upToTheQuestion();
 
-  fireEvent.change(input, { target: { files: [textFile('old', 'old.md')] } });
-  fireEvent.change(input, { target: { files: [textFile('new', 'new.md')] } });
-  finish(held[1], btoa('new'));
-  finish(held[0], btoa('old'));
+  fill(QUESTION, '  Cell cycle ');
+  fill('How many cards?', '4');
   generate();
 
-  expect(onGenerate.mock.calls[0][0].file).toEqual({
-    name: 'new.md', mime_type: 'text/markdown', data: btoa('new'),
+  expect(onGenerate).toHaveBeenCalledWith({
+    mode: 'file', count: 4, document_id: 7, topic: 'Cell cycle',
   });
+  expect(materialsApi.upload).toHaveBeenCalledTimes(1);
 });
 
-test('choosing no file after a good one leaves no file', async () => {
+test('a suggested topic can be sent', async () => {
   const { onGenerate } = renderForm();
-  await chooseFile(textFile('# Hi', 'notes.md'));
+  await upToTheQuestion();
 
-  fireEvent.change(screen.getByLabelText('File'), { target: { files: [] } });
+  fireEvent.click(screen.getByRole('button', { name: 'Enzymes' }));
+  generate();
+
+  expect(onGenerate.mock.calls[0][0].topic).toBe('Enzymes');
+});
+
+test('a topic is required, and typing clears the message', async () => {
+  const { onGenerate } = renderForm();
+  const input = await upToTheQuestion();
+
   generate();
 
   expect(onGenerate).not.toHaveBeenCalled();
+  expect(screen.getByText('Say what you want to focus on.')).toBeTruthy();
+  expect(globalThis.document.activeElement).toBe(input);
+
+  fill(QUESTION, 'M');
+  expect(screen.queryByText('Say what you want to focus on.')).toBeNull();
+});
+
+test('a failed file shows why, and Generate tries it again', async () => {
+  const failed = { ...MATERIAL, status: 'failed', error: 'It failed.' };
+  const { materialsApi } = renderForm({}, failed);
+
+  chooseFile();
+  generate();
+  expect(await screen.findByText('It failed.')).toBeTruthy();
+  expect(generateButton().disabled).toBe(false);
+
+  generate();
+  expect(materialsApi.upload).toHaveBeenCalledTimes(2);
+});
+
+test('a refused upload shows the server message', async () => {
+  const { materialsApi } = renderForm();
+  materialsApi.upload.mockRejectedValue(new Error('You have reached the limit.'));
+
+  chooseFile();
+  generate();
+
+  expect(await screen.findByText('You have reached the limit.')).toBeTruthy();
+});
+
+test('choosing another file goes back to the first step', async () => {
+  renderForm();
+  await upToTheQuestion();
+  fill(QUESTION, 'Mitosis');
+
+  fireEvent.change(screen.getByLabelText('File'), {
+    target: { files: [new File(['ATP'], 'other.txt')] },
+  });
+
+  expect(screen.queryByLabelText(QUESTION)).toBeNull();
+  expect(screen.queryByLabelText('How many cards?')).toBeNull();
+});
+
+test('leaving file mode forgets the file', async () => {
+  const { materialsApi } = renderForm();
+  await upToTheQuestion();
+
+  fireEvent.click(radio('Write a prompt'));
+  fireEvent.click(radio('Upload a file'));
+  generate();
+
+  expect(screen.queryByLabelText(QUESTION)).toBeNull();
+  expect(materialsApi.upload).toHaveBeenCalledTimes(1);
   expect(screen.getByText('Choose a PDF, TXT or MD file.')).toBeTruthy();
 });
 
-test('switching modes keeps what was typed', () => {
+test('switching modes keeps what was typed in the prompt', () => {
   renderForm();
   fill('Topic', 'Cells');
 
@@ -385,38 +417,15 @@ test('switching modes keeps what was typed', () => {
   expect(screen.getByLabelText('Topic').value).toBe('Cells');
 });
 
-test('a file chosen before switching modes is not sent, since the input comes back empty', async () => {
-  const { onGenerate } = renderForm();
-  await chooseFile(textFile('# Hi', 'notes.md'));
+test('a topic the file doesnt cover shows beside the topic, not as an alert', async () => {
+  const message = "That file doesn't seem to cover this topic. Try another one.";
+  renderForm({ error: { status: 422, code: 'validation_error', message, field: 'topic' } });
 
-  fireEvent.click(radio('Write a prompt'));
-  fireEvent.click(radio('Upload a file'));
-  generate();
+  const input = await upToTheQuestion();
 
-  expect(onGenerate).not.toHaveBeenCalled();
-  expect(screen.getByText('Choose a PDF, TXT or MD file.')).toBeTruthy();
-});
-
-test('a read still running when the mode changes is dropped', () => {
-  const held = [];
-  vi.spyOn(globalThis.FileReader.prototype, 'readAsDataURL').mockImplementation(function hold() {
-    held.push(this);
-  });
-  const { onGenerate } = renderForm();
-  fireEvent.click(radio('Upload a file'));
-  fireEvent.change(screen.getByLabelText('File'), { target: { files: [textFile('# Hi', 'notes.md')] } });
-
-  fireEvent.click(radio('Write a prompt'));
-  expect(generateButton().disabled).toBe(false);
-  fireEvent.click(radio('Upload a file'));
-  act(() => {
-    Object.defineProperty(held[0], 'result', { value: `data:text/markdown;base64,${btoa('# Hi')}` });
-    held[0].onload();
-  });
-  generate();
-
-  expect(onGenerate).not.toHaveBeenCalled();
-  expect(screen.getByText('Choose a PDF, TXT or MD file.')).toBeTruthy();
+  expect(screen.getByText(message)).toBeTruthy();
+  expect(input.getAttribute('aria-invalid')).toBe('true');
+  expect(screen.queryByRole('alert')).toBeNull();
 });
 
 // --- busy and errors from the server ------------------------------------------------
@@ -442,15 +451,12 @@ test('a rate_limited error shows its message in the alert', () => {
 });
 
 test.each([
-  ['prompt', 'Write a prompt', 'Topic'],
-  ['count', 'Write a prompt', 'How many cards?'],
-  ['file', 'Upload a file', 'File'],
-  ['focus', 'Upload a file', 'Focus (optional)'],
-])('a server error naming %s marks that input invalid', (field, mode, label) => {
+  ['prompt', 'Topic'],
+  ['count', 'How many cards?'],
+])('a server error naming %s marks that input invalid', (field, label) => {
   renderForm({ error: { status: 422, code: 'validation_error', message: 'Not valid.', field } });
-
-  fireEvent.click(radio(mode));
 
   expect(screen.getByLabelText(label).getAttribute('aria-invalid')).toBe('true');
   expect(screen.getByRole('alert').textContent).toBe('Not valid.');
 });
+

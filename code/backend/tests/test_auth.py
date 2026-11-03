@@ -1,292 +1,203 @@
-"""WS1 — the four auth endpoints.
+"""POST /api/auth/register, /login and /logout, and GET /me."""
 
-The six tests the plan asks for are the first six here; the rest cover the validation
-rules and the "don't leak information" requirement from Security basics #5.
-"""
+from datetime import timedelta
 
 import pytest
+from sqlalchemy import select
 
-from app.models import User
+from app.core.security import hash_session_token
+from app.models import User, UserSession, utcnow
 
-GOOD = {"email": "miles@bu.edu", "password": "password123", "display_name": "Miles"}
-
-
-@pytest.fixture
-def register(client):
-    def _register(**overrides):
-        return client.post("/api/auth/register", json={**GOOD, **overrides})
-
-    return _register
+EMAIL = "miles@bu.edu"
+PASSWORD = "correct horse"
 
 
-# --- the six the plan asks for ------------------------------------------------------
-
-
-def test_register_creates_an_account(client, register):
-    response = register()
-
-    assert response.status_code == 201
-    body = response.get_json()
-    assert body["email"] == "miles@bu.edu"
-    assert body["display_name"] == "Miles"
-    assert body["id"] is not None
-    assert User.query.count() == 1
-
-
-def test_registering_a_taken_email_is_a_conflict_not_a_crash(register):
-    register()
-
-    response = register(display_name="Someone Else")
-
-    assert response.status_code == 409
-    assert response.get_json()["error"]["code"] == "conflict"
-    assert User.query.count() == 1
-
-
-def test_login_with_the_wrong_password_is_rejected(client, register):
-    register()
-
-    response = client.post("/api/auth/login", json={"email": GOOD["email"], "password": "wrong"})
-
-    assert response.status_code == 401
-    assert response.get_json()["error"]["code"] == "unauthorized"
-
-
-def test_me_is_401_when_signed_out(client):
-    response = client.get("/api/auth/me")
-
-    assert response.status_code == 401
-    assert response.get_json()["error"]["code"] == "unauthorized"
-
-
-def test_me_returns_the_signed_in_user(client, register):
-    register()
-    client.post("/api/auth/login", json={"email": GOOD["email"], "password": GOOD["password"]})
-
-    response = client.get("/api/auth/me")
-
-    assert response.status_code == 200
-    assert response.get_json()["email"] == "miles@bu.edu"
-
-
-def test_logout_then_me_is_401(client, register):
-    register()
-
-    logout = client.post("/api/auth/logout")
-    response = client.get("/api/auth/me")
-
-    assert logout.status_code == 204
-    assert response.status_code == 401
-
-
-# --- sessions -----------------------------------------------------------------------
-
-
-def test_register_signs_you_in(client, register):
-    register()
-
-    assert client.get("/api/auth/me").status_code == 200
-
-
-def test_login_signs_you_in(client, register):
-    register()
-    client.post("/api/auth/logout")
-
-    response = client.post(
-        "/api/auth/login", json={"email": GOOD["email"], "password": GOOD["password"]}
+def _register(client, email=EMAIL, password=PASSWORD, **extra):
+    return client.post(
+        "/api/auth/register", json={"email": email, "password": password, **extra}
     )
 
-    assert response.status_code == 200
-    assert client.get("/api/auth/me").status_code == 200
+
+def _login(client, email=EMAIL, password=PASSWORD):
+    return client.post("/api/auth/login", json={"email": email, "password": password})
 
 
-def test_logout_while_signed_out_is_still_204(client):
-    assert client.post("/api/auth/logout").status_code == 204
+def _error(resp):
+    return resp.json()["error"]
 
 
-# --- security basics ----------------------------------------------------------------
+async def test_registering_returns_the_user_and_signs_them_in(client):
+    resp = await _register(client, display_name="  Miles ")
+
+    assert resp.status_code == 201
+    body = resp.json()
+    assert (body["email"], body["display_name"]) == (EMAIL, "Miles")
+    assert body["created_at"].endswith("Z")
+    assert "password" not in str(body)
+    assert (await client.get("/api/auth/me")).json()["id"] == body["id"]
 
 
-def test_the_password_is_never_returned(client, register):
-    body = register().get_json()
+async def test_the_cookie_is_http_only_and_same_site(client):
+    resp = await _register(client)
 
-    assert not any("password" in key for key in body)
-
-
-def test_the_password_is_hashed_not_stored(register):
-    register()
-
-    assert User.query.first().password_hash != GOOD["password"]
+    cookie = resp.headers["set-cookie"].lower()
+    assert "httponly" in cookie
+    assert "samesite=lax" in cookie
 
 
-def test_an_unknown_email_and_a_wrong_password_look_identical(client, register):
-    """Two different messages would let someone discover which emails have accounts."""
-    register()
+async def test_the_password_and_token_are_only_stored_hashed(client, session):
+    resp = await _register(client)
 
-    unknown = client.post("/api/auth/login", json={"email": "nobody@bu.edu", "password": "whatever1"})
-    wrong = client.post("/api/auth/login", json={"email": GOOD["email"], "password": "whatever1"})
-
-    assert unknown.status_code == wrong.status_code == 401
-    assert unknown.get_json() == wrong.get_json()
-
-
-def test_email_is_stored_lowercase_and_trimmed(client, register):
-    register(email="  Miles@BU.edu  ")
-
-    assert User.query.first().email == "miles@bu.edu"
+    user = await session.scalar(select(User))
+    assert PASSWORD not in user.password_hash
+    token = resp.cookies["session"]
+    stored = await session.scalar(select(UserSession))
+    assert stored.token_hash == hash_session_token(token)
+    assert stored.token_hash != token
 
 
-def test_you_can_log_in_with_any_casing_of_your_email(client, register):
-    register(email="miles@bu.edu")
-    client.post("/api/auth/logout")
+async def test_an_email_is_normalized(client):
+    resp = await _register(client, email="  Miles@BU.edu ")
 
-    response = client.post(
-        "/api/auth/login", json={"email": "MILES@BU.EDU", "password": GOOD["password"]}
-    )
-
-    assert response.status_code == 200
+    assert resp.json()["email"] == EMAIL
 
 
-# --- validation ---------------------------------------------------------------------
+async def test_a_second_registration_is_409_in_any_case(client):
+    await _register(client)
+
+    resp = await _register(client, email="MILES@BU.EDU")
+
+    assert resp.status_code == 409
+    assert _error(resp)["code"] == "conflict"
 
 
 @pytest.mark.parametrize(
-    "overrides, field",
+    ("body", "field", "message"),
     [
-        ({"email": "not-an-email"}, "email"),
-        ({"email": ""}, "email"),
-        ({"email": "a@b.com", "password": "short"}, "password"),
-        ({"password": ""}, "password"),
-        ({"email": "a@" + "b" * 260 + ".com"}, "email"),
-        # shapes that aren't addresses -- "contains @" used to be the whole check
-        ({"email": "@"}, "email"),
-        ({"email": "a@"}, "email"),
-        ({"email": "@b.com"}, "email"),
-        ({"email": "a@b"}, "email"),
-        ({"email": "a b@c.com"}, "email"),
-        # eight spaces used to pass the length check and become a real password
-        ({"password": "        "}, "password"),
-        ({"password": "p" * 129}, "password"),
+        ({"password": PASSWORD}, "email", "email is required."),
+        ({"email": 7, "password": PASSWORD}, "email", "email is required."),
+        ({"email": "  ", "password": PASSWORD}, "email", "email is required."),
+        ({"email": "nope", "password": PASSWORD}, "email", "email must look like name@example.com."),
+        ({"email": EMAIL}, "password", "password is required."),
+        ({"email": EMAIL, "password": "short"}, "password", "password must be at least 8 characters."),
+        ({"email": EMAIL, "password": "x" * 129}, "password", "password must be at most 128 characters."),
+        ({"email": EMAIL, "password": " " * 8}, "password", "password can't be only spaces."),
+        (
+            {"email": EMAIL, "password": PASSWORD, "display_name": "x" * 121},
+            "display_name",
+            "display_name must be at most 120 characters.",
+        ),
     ],
 )
-def test_register_rejects_bad_input(register, overrides, field):
-    response = register(**overrides)
+async def test_a_bad_registration_is_422_naming_the_field(client, body, field, message):
+    resp = await client.post("/api/auth/register", json=body)
 
-    assert response.status_code == 422
-    body = response.get_json()
-    assert body["error"]["code"] == "validation_error"
-    assert body["error"]["field"] == field
+    assert resp.status_code == 422
+    assert _error(resp) == {"code": "validation_error", "message": message, "field": field}
 
 
-def test_register_requires_a_body(client):
-    response = client.post("/api/auth/register", data="not json", content_type="application/json")
+async def test_spaces_inside_a_password_are_kept(client):
+    await _register(client, password="  spaced out  ")
 
-    assert response.status_code == 400
-    assert response.get_json()["error"]["code"] == "bad_request"
+    assert (await _login(client, password="  spaced out  ")).status_code == 200
+    assert (await _login(client, password="spaced out")).status_code == 401
 
 
-def test_register_without_a_json_content_type_is_a_400(client):
-    """A curl without -H 'Content-Type: application/json' is the common way to hit this.
-
-    Flask answers a bare get_json() with a 415, whose code isn't in the contract;
-    these endpoints read bodies with json_object(), so it stays a 400.
-    """
-    response = client.post(
-        "/api/auth/register", data='{"email": "a@b.com", "password": "password123"}'
+@pytest.mark.parametrize("data", [b"not json", b"[1, 2]"])
+async def test_a_body_that_isnt_an_object_is_400(client, data):
+    resp = await client.post(
+        "/api/auth/register", content=data, headers={"Content-Type": "application/json"}
     )
 
-    assert response.status_code == 400
-    assert response.get_json()["error"]["code"] == "bad_request"
+    assert resp.status_code == 400
+    assert _error(resp)["code"] == "bad_request"
 
 
-def test_a_password_keeps_its_spaces(register, client):
-    """Only an all-blank password is rejected; we never trim what gets stored.
+async def test_logging_in_works_with_any_email_case(client):
+    await _register(client)
+    client.cookies.clear()
 
-    Trimming would quietly change someone's password, so " hunter2 " stays as typed
-    and is the only thing that logs you in.
-    """
-    assert register(email="spaces@bu.edu", password=" hunter2 ").status_code == 201
-    client.post("/api/auth/logout")
+    resp = await _login(client, email=" MILES@bu.edu")
 
-    assert client.post(
-        "/api/auth/login", json={"email": "spaces@bu.edu", "password": "hunter2"}
-    ).status_code == 401
-    assert client.post(
-        "/api/auth/login", json={"email": "spaces@bu.edu", "password": " hunter2 "}
-    ).status_code == 200
-
-
-def test_a_password_at_the_length_limit_is_allowed(register):
-    assert register(password="p" * 128).status_code == 201
+    assert resp.status_code == 200
+    assert (await client.get("/api/auth/me")).status_code == 200
 
 
 @pytest.mark.parametrize(
-    "body, status, code",
-    [
-        ({"email": GOOD["email"]}, 422, "validation_error"),              # no password
-        ({"password": GOOD["password"]}, 422, "validation_error"),        # no email
-        ({"email": 123, "password": GOOD["password"]}, 422, "validation_error"),
-        ({"email": GOOD["email"], "password": 123}, 422, "validation_error"),
-        ({"email": "", "password": GOOD["password"]}, 422, "validation_error"),
-    ],
+    ("email", "password"),
+    [(EMAIL, "wrong password"), ("nobody@bu.edu", PASSWORD), (EMAIL, "x" * 129)],
 )
-def test_login_rejects_bad_input(client, register, body, status, code):
-    """Login had no bad-input coverage at all -- every test sent a well-formed body."""
-    register()
-    client.post("/api/auth/logout")
+async def test_a_failed_login_says_the_same_thing_every_time(client, email, password):
+    await _register(client)
+    client.cookies.clear()
 
-    response = client.post("/api/auth/login", json=body)
+    resp = await _login(client, email, password)
 
-    assert response.status_code == status
-    assert response.get_json()["error"]["code"] == code
-
-
-def test_login_requires_a_body(client):
-    assert client.post(
-        "/api/auth/login", data="not json", content_type="application/json"
-    ).status_code == 400
+    assert resp.status_code == 401
+    assert _error(resp)["message"] == "Invalid email or password."
+    assert "set-cookie" not in resp.headers
 
 
-def test_login_without_a_json_content_type_is_a_400(client):
-    response = client.post(
-        "/api/auth/login", data='{"email": "a@b.com", "password": "password123"}'
-    )
+async def test_me_is_401_when_signed_out(client):
+    resp = await client.get("/api/auth/me")
 
-    assert response.status_code == 400
-    assert response.get_json()["error"]["code"] == "bad_request"
+    assert resp.status_code == 401
+    assert _error(resp)["code"] == "unauthorized"
 
 
-def test_an_over_long_password_at_login_is_the_normal_401(client, register):
-    """Rejected without hashing, but it must look like any other failed login.
+async def test_me_is_401_for_a_made_up_cookie(client):
+    client.cookies.set("session", "made-up")
 
-    A different status here would tell an attacker their guess was merely too long
-    rather than wrong, and 422 would split the uniform failure message.
-    """
-    register()
-    client.post("/api/auth/logout")
-
-    response = client.post(
-        "/api/auth/login", json={"email": GOOD["email"], "password": "p" * 5000}
-    )
-
-    assert response.status_code == 401
-    assert response.get_json()["error"]["message"] == "Invalid email or password."
+    assert (await client.get("/api/auth/me")).status_code == 401
 
 
-def test_a_password_of_exactly_eight_characters_is_allowed(register):
-    assert register(password="12345678").status_code == 201
+async def test_logging_out_ends_the_session_on_the_server(client, session):
+    resp = await _register(client)
+    token = resp.cookies["session"]
+
+    assert (await client.post("/api/auth/logout")).status_code == 204
+
+    assert await session.scalar(select(UserSession)) is None
+    client.cookies.set("session", token)  # even if someone kept the old cookie
+    assert (await client.get("/api/auth/me")).status_code == 401
 
 
-def test_display_name_is_optional(client):
-    response = client.post(
-        "/api/auth/register", json={"email": "a@b.com", "password": "password123"}
-    )
-
-    assert response.status_code == 201
-    assert response.get_json()["display_name"] is None
+async def test_logging_out_twice_is_fine(client):
+    assert (await client.post("/api/auth/logout")).status_code == 204
+    assert (await client.post("/api/auth/logout")).status_code == 204
 
 
-def test_a_non_string_field_is_a_422_not_a_500(register):
-    response = register(email=12345)
+async def test_an_expired_session_doesnt_count(client, session):
+    await _register(client)
+    stored = await session.scalar(select(UserSession))
+    stored.expires_at = utcnow() - timedelta(minutes=1)
+    await session.commit()
 
-    assert response.status_code == 422
+    assert (await client.get("/api/auth/me")).status_code == 401
+
+
+async def test_logging_in_clears_that_users_expired_sessions(client, session):
+    await _register(client)
+    stored = await session.scalar(select(UserSession))
+    stored.expires_at = utcnow() - timedelta(minutes=1)
+    await session.commit()
+    client.cookies.clear()
+
+    await _login(client)
+
+    assert len((await session.scalars(select(UserSession))).all()) == 1
+
+
+async def test_an_unknown_url_uses_the_same_error_shape(client):
+    resp = await client.get("/api/nothing-here")
+
+    assert resp.status_code == 404
+    assert _error(resp)["code"] == "not_found"
+
+
+async def test_a_wrong_method_uses_the_same_error_shape(client):
+    resp = await client.get("/api/auth/login")
+
+    assert resp.status_code == 405
+    assert _error(resp)["code"] == "method_not_allowed"
+    assert "allow" in resp.headers

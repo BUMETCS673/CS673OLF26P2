@@ -1,226 +1,217 @@
-"""Tests for the deck endpoints (WS2)."""
+"""The deck routes."""
 
-from app.models import Card, Deck
+from datetime import timedelta
 
+import pytest
+from sqlalchemy import event
 
-def _login(make_user, login_as, email="a@example.com"):
-    user = make_user(email=email)
-    login_as(user)
-    return user
+from app.models import Card, utcnow
+from app.scheduler import NEW_CARDS_PER_SESSION, REVIEWS_PER_SESSION
 
-
-# ---- auth ----------------------------------------------------------------
-
-
-def test_every_deck_route_requires_login(client):
-    assert client.get("/api/decks").status_code == 401
-    assert client.post("/api/decks", json={"name": "x"}).status_code == 401
-    assert client.get("/api/decks/1").status_code == 401
-    assert client.patch("/api/decks/1", json={"name": "x"}).status_code == 401
-    res = client.delete("/api/decks/1")
-    assert res.status_code == 401
+ZERO = {"learning": 0, "review": 0, "new": 0}
 
 
-# ---- list ----------------------------------------------------------------
+def _error(resp):
+    return resp.json()["error"]
 
 
-def test_list_returns_only_my_decks(client, make_user, login_as, make_deck):
-    me = _login(make_user, login_as)
-    other = make_user(email="b@example.com")
-    make_deck(me, name="Mine", cards=[("q", "a"), ("q2", "a2")])
-    make_deck(other, name="Not mine")
-
-    res = client.get("/api/decks")
-
-    assert res.status_code == 200
-    data = res.get_json()
-    assert [d["name"] for d in data] == ["Mine"]
-    assert data[0]["card_count"] == 2
-
-
-def test_list_is_empty_for_new_user(client, make_user, login_as):
-    _login(make_user, login_as)
-    res = client.get("/api/decks")
-    assert res.status_code == 200
-    assert res.get_json() == []
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("get", "/api/decks"),
+        ("post", "/api/decks"),
+        ("get", "/api/decks/1"),
+        ("patch", "/api/decks/1"),
+        ("delete", "/api/decks/1"),
+    ],
+)
+async def test_every_route_needs_a_signed_in_user(client, method, path):
+    assert (await client.request(method, path)).status_code == 401
 
 
-# ---- create --------------------------------------------------------------
+async def test_a_list_has_only_my_decks_in_order(client, me, make_user, make_deck):
+    first = await make_deck(me, name="First")
+    second = await make_deck(me, name="Second")
+    await make_deck(await make_user(email="other@example.com"))
+
+    resp = await client.get("/api/decks")
+
+    assert [deck["id"] for deck in resp.json()] == [first.id, second.id]
 
 
-def test_create_deck(client, make_user, login_as):
-    _login(make_user, login_as)
+async def test_creating_a_deck_returns_it_in_full(client, me):
+    resp = await client.post("/api/decks", json={"name": "  Biology ", "description": " Cells "})
 
-    res = client.post(
-        "/api/decks", json={"name": "  Biology  ", "description": "Cells"}
-    )
-
-    assert res.status_code == 201
-    body = res.get_json()
-    assert body["name"] == "Biology"
-    assert body["description"] == "Cells"
+    assert resp.status_code == 201
+    body = resp.json()
+    assert (body["name"], body["description"]) == ("Biology", " Cells ")
     assert body["card_count"] == 0
-    assert isinstance(body["id"], int)
+    assert body["due_counts"] == ZERO
+    assert body["created_at"].endswith("Z")
 
 
-def test_create_deck_without_description(client, make_user, login_as):
-    _login(make_user, login_as)
-    res = client.post("/api/decks", json={"name": "Biology"})
-    assert res.status_code == 201
-    assert res.get_json()["description"] is None
+@pytest.mark.parametrize(
+    ("body", "field", "message"),
+    [
+        ({}, "name", "name is required."),
+        ({"name": "  "}, "name", "name is required."),
+        ({"name": 7}, "name", "name is required."),
+        ({"name": "x" * 121}, "name", "name must be at most 120 characters."),
+        ({"name": "A", "description": 7}, "description", "description must be text."),
+        (
+            {"name": "A", "description": "x" * 1001},
+            "description",
+            "description must be at most 1000 characters.",
+        ),
+    ],
+)
+async def test_a_bad_deck_is_422_naming_the_field(client, me, body, field, message):
+    resp = await client.post("/api/decks", json=body)
+
+    assert resp.status_code == 422
+    assert _error(resp) == {"code": "validation_error", "message": message, "field": field}
 
 
-def test_create_deck_belongs_to_logged_in_user(client, make_user, login_as):
-    me = _login(make_user, login_as)
-    res = client.post("/api/decks", json={"name": "Biology"})
-    assert Deck.query.get(res.get_json()["id"]).user_id == me.id
+async def test_a_body_that_isnt_an_object_is_400(client, me):
+    resp = await client.post("/api/decks", json=[1, 2])
+
+    assert resp.status_code == 400
 
 
-def test_create_deck_requires_name(client, make_user, login_as):
-    _login(make_user, login_as)
+async def test_getting_a_deck_counts_its_cards(client, me, make_deck, make_card):
+    deck = await make_deck(me)
+    await make_card(deck)
+    await make_card(deck)
 
-    for body in ({}, {"name": ""}, {"name": "   "}, {"name": 5}):
-        res = client.post("/api/decks", json=body)
-        assert res.status_code == 422, body
-        error = res.get_json()["error"]
-        assert error["code"] == "validation_error"
-        assert error["field"] == "name"
+    resp = await client.get(f"/api/decks/{deck.id}")
 
-
-def test_create_deck_name_too_long(client, make_user, login_as):
-    _login(make_user, login_as)
-    res = client.post("/api/decks", json={"name": "x" * 121})
-    assert res.status_code == 422
-    assert res.get_json()["error"]["field"] == "name"
+    assert resp.json()["card_count"] == 2
 
 
-def test_create_deck_description_must_be_string(client, make_user, login_as):
-    _login(make_user, login_as)
-    res = client.post("/api/decks", json={"name": "ok", "description": 7})
-    assert res.status_code == 422
-    assert res.get_json()["error"]["field"] == "description"
+async def test_a_missing_deck_is_404(client, me):
+    resp = await client.get("/api/decks/999")
+
+    assert resp.status_code == 404
+    assert _error(resp)["message"] == "Deck not found"
 
 
-def test_create_deck_without_json_content_type_is_400(client, make_user, login_as):
-    _login(make_user, login_as)
-    res = client.post("/api/decks", data="name=x")
-    assert res.status_code == 400
-    assert res.get_json()["error"]["code"] == "bad_request"
+@pytest.mark.parametrize("method", ["get", "patch", "delete"])
+async def test_someone_elses_deck_is_404_not_403(client, me, make_user, make_deck, method):
+    deck = await make_deck(await make_user(email="other@example.com"))
+    kwargs = {"json": {"name": "Mine now"}} if method == "patch" else {}
+
+    resp = await client.request(method, f"/api/decks/{deck.id}", **kwargs)
+
+    assert resp.status_code == 404
 
 
-def test_create_deck_body_must_be_object(client, make_user, login_as):
-    _login(make_user, login_as)
-    res = client.post("/api/decks", json=["not", "an", "object"])
-    assert res.status_code == 400
+async def test_updating_only_changes_what_was_sent(client, me, make_deck):
+    deck = await make_deck(me, name="Old", description="Kept")
+
+    resp = await client.patch(f"/api/decks/{deck.id}", json={"name": "New"})
+
+    assert (resp.json()["name"], resp.json()["description"]) == ("New", "Kept")
 
 
-# ---- get -----------------------------------------------------------------
+async def test_a_description_can_be_cleared_with_null(client, me, make_deck):
+    deck = await make_deck(me, description="Old")
+
+    resp = await client.patch(f"/api/decks/{deck.id}", json={"description": None})
+
+    assert resp.json()["description"] is None
 
 
-def test_get_deck(client, make_user, login_as, make_deck):
-    me = _login(make_user, login_as)
-    deck = make_deck(me, name="Mine", cards=[("q", "a")])
+@pytest.mark.parametrize("name", ["  ", None])
+async def test_a_blank_name_changes_nothing(client, me, make_deck, name):
+    deck = await make_deck(me, name="Old")
 
-    res = client.get(f"/api/decks/{deck.id}")
+    resp = await client.patch(f"/api/decks/{deck.id}", json={"name": name})
 
-    assert res.status_code == 200
-    assert res.get_json()["name"] == "Mine"
-    assert res.get_json()["card_count"] == 1
-
-
-def test_get_missing_deck_is_404(client, make_user, login_as):
-    _login(make_user, login_as)
-    res = client.get("/api/decks/9999")
-    assert res.status_code == 404
-    assert res.get_json()["error"]["code"] == "not_found"
+    assert resp.status_code == 422
+    assert (await client.get(f"/api/decks/{deck.id}")).json()["name"] == "Old"
 
 
-def test_get_someone_elses_deck_is_404_not_403(
-    client, make_user, login_as, make_deck
+async def test_deleting_a_deck_deletes_its_cards(client, session, me, make_deck, make_card):
+    deck = await make_deck(me)
+    card = await make_card(deck)
+
+    assert (await client.delete(f"/api/decks/{deck.id}")).status_code == 204
+
+    assert (await client.get(f"/api/decks/{deck.id}")).status_code == 404
+    session.expunge_all()
+    assert await session.get(Card, card.id) is None
+
+
+# --- due counts --------------------------------------------------------------------------
+
+
+async def test_one_card_in_each_state_counts_relearning_as_learning(
+    client, me, make_deck, make_card
 ):
-    _login(make_user, login_as)
-    other = make_user(email="b@example.com")
-    theirs = make_deck(other)
+    deck = await make_deck(me)
+    due = utcnow() - timedelta(minutes=1)
+    await make_card(deck)
+    await make_card(deck, state="learning", due_at=due)
+    await make_card(deck, state="review", due_at=due)
+    await make_card(deck, state="relearning", due_at=due)
 
-    res = client.get(f"/api/decks/{theirs.id}")
+    resp = await client.get(f"/api/decks/{deck.id}")
 
-    assert res.status_code == 404
-
-
-# ---- update --------------------------------------------------------------
-
-
-def test_patch_updates_only_given_fields(client, make_user, login_as, make_deck):
-    me = _login(make_user, login_as)
-    deck = make_deck(me, name="Old", description="keep me")
-
-    res = client.patch(f"/api/decks/{deck.id}", json={"name": "New"})
-
-    assert res.status_code == 200
-    body = res.get_json()
-    assert body["name"] == "New"
-    assert body["description"] == "keep me"
+    assert resp.json()["due_counts"] == {"learning": 2, "review": 1, "new": 1}
 
 
-def test_patch_can_clear_description(client, make_user, login_as, make_deck):
-    me = _login(make_user, login_as)
-    deck = make_deck(me, description="something")
+async def test_cards_not_due_yet_arent_counted(client, me, make_deck, make_card):
+    deck = await make_deck(me)
+    await make_card(deck, state="review", due_at=utcnow() + timedelta(days=1))
+    await make_card(deck, state="learning", due_at=utcnow() + timedelta(minutes=30))
 
-    res = client.patch(f"/api/decks/{deck.id}", json={"description": None})
-
-    assert res.status_code == 200
-    assert res.get_json()["description"] is None
+    assert (await client.get(f"/api/decks/{deck.id}")).json()["due_counts"] == ZERO
 
 
-def test_patch_rejects_blank_name_and_changes_nothing(
-    client, make_user, login_as, make_deck
-):
-    me = _login(make_user, login_as)
-    deck = make_deck(me, name="Old", description="old desc")
+async def test_a_learning_card_due_soon_is_counted(client, me, make_deck, make_card):
+    deck = await make_deck(me)
+    await make_card(deck, state="learning", due_at=utcnow() + timedelta(minutes=15))
 
-    res = client.patch(
-        f"/api/decks/{deck.id}", json={"name": " ", "description": "new desc"}
+    resp = await client.get(f"/api/decks/{deck.id}")
+
+    assert resp.json()["due_counts"]["learning"] == 1
+
+
+async def test_new_and_review_stop_at_the_session_limits(client, session, me, make_deck):
+    deck = await make_deck(me)
+    due = utcnow() - timedelta(minutes=1)
+    session.add_all(
+        Card(deck_id=deck.id, front="Q", back="A") for _ in range(NEW_CARDS_PER_SESSION + 1)
     )
+    session.add_all(
+        Card(deck_id=deck.id, front="Q", back="A", state="review", due_at=due)
+        for _ in range(REVIEWS_PER_SESSION + 1)
+    )
+    await session.commit()
 
-    assert res.status_code == 422
-    assert res.get_json()["error"]["field"] == "name"
-    assert client.get(f"/api/decks/{deck.id}").get_json()["description"] == "old desc"
+    counts = (await client.get(f"/api/decks/{deck.id}")).json()["due_counts"]
 
-
-def test_patch_someone_elses_deck_is_404(client, make_user, login_as, make_deck):
-    _login(make_user, login_as)
-    other = make_user(email="b@example.com")
-    theirs = make_deck(other, name="Theirs")
-
-    res = client.patch(f"/api/decks/{theirs.id}", json={"name": "Hacked"})
-
-    assert res.status_code == 404
-    assert Deck.query.get(theirs.id).name == "Theirs"
+    assert (counts["new"], counts["review"]) == (NEW_CARDS_PER_SESSION, REVIEWS_PER_SESSION)
 
 
-# ---- delete --------------------------------------------------------------
+async def test_listing_five_decks_takes_as_many_queries_as_one(
+    client, engine, me, make_deck, make_card
+):
+    async def queries_to_list() -> int:
+        count = 0
 
+        def on_query(*_):
+            nonlocal count
+            count += 1
 
-def test_delete_deck_also_deletes_its_cards(client, make_user, login_as, make_deck):
-    me = _login(make_user, login_as)
-    deck = make_deck(me, cards=[("q1", "a1"), ("q2", "a2")])
-    deck_id = deck.id
+        event.listen(engine.sync_engine, "before_cursor_execute", on_query)
+        await client.get("/api/decks")
+        event.remove(engine.sync_engine, "before_cursor_execute", on_query)
+        return count
 
-    res = client.delete(f"/api/decks/{deck_id}")
+    await make_card(await make_deck(me))
+    one = await queries_to_list()
+    for _ in range(4):
+        await make_card(await make_deck(me))
 
-    assert res.status_code == 204
-    assert res.data == b""
-    assert client.get(f"/api/decks/{deck_id}").status_code == 404
-    assert Card.query.filter_by(deck_id=deck_id).count() == 0
-
-
-def test_delete_someone_elses_deck_is_404(client, make_user, login_as, make_deck):
-    _login(make_user, login_as)
-    other = make_user(email="b@example.com")
-    theirs = make_deck(other)
-    theirs_id = theirs.id
-
-    res = client.delete(f"/api/decks/{theirs_id}")
-
-    assert res.status_code == 404
-    assert Deck.query.get(theirs_id) is not None
+    assert await queries_to_list() == one

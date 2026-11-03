@@ -1,28 +1,29 @@
 """The deck tutor's table. Messages live in the LangGraph checkpointer, under `thread_id`."""
 
-from app.extensions import db
-from app.models.base import utcnow
+from datetime import datetime
+
+from sqlalchemy import DateTime, ForeignKey, String
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.models.base import Base, utcnow
 
 IDLE = "idle"
 REPLYING = "replying"                    # a request holds the conversation
 AWAITING_DECISION = "awaiting_decision"  # paused at the graph's interrupt
 
 
-class TutorConversation(db.Model):
+class TutorConversation(Base):
     """One per deck."""
 
     __tablename__ = "tutor_conversations"
 
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(
-        db.Integer, db.ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    deck_id = db.Column(
-        db.Integer, db.ForeignKey("decks.id", ondelete="CASCADE"), nullable=False, unique=True
-    )
-    thread_id = db.Column(db.String(36), nullable=False, unique=True)
-    status = db.Column(db.String(24), nullable=False, default=IDLE)
-    status_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    deck_id: Mapped[int] = mapped_column(ForeignKey("decks.id", ondelete="CASCADE"), unique=True)
+    thread_id: Mapped[str] = mapped_column(String(36), unique=True)
+    status: Mapped[str] = mapped_column(String(24), default=IDLE)
+    status_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     # {"id", "cards", "verification"}. The server adds these cards, never ones from the browser.
-    pending_proposal = db.Column(db.JSON, nullable=True)
-    message_count = db.Column(db.Integer, nullable=False, default=0)
+    pending_proposal: Mapped[dict | None] = mapped_column(JSONB)
+    message_count: Mapped[int] = mapped_column(default=0)

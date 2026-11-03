@@ -1,241 +1,348 @@
-"""B4's tests for accepting and rejecting AI suggestions: one per acceptance example under
-B4 in code/plans/ITERATION_3_PLAN.md, plus the edges of contract C4.
-
-    POST /api/generations/<id>/accept  {"indexes": [...]}  -> 201 {cards, generation}
-    POST /api/generations/<id>/reject  {"indexes": [...]}  -> 200 Generation
-"""
-
-# AI Utilization: 90%
-# AI Tools Used: Claude
-# AI-Assisted Activities:
-#   - Unit test creation (from the plan's acceptance examples)
-# Human role: ran the suite locally and in Docker, and checked each test against the plan,
-# by Osasenaga Von Okunbor.
+"""Starting card generation, and the job that saves its batch."""
 
 import pytest
+from sqlalchemy import func, select
 
-from app.models import AiGeneration, Card
+from app.ai.models import AIRateLimited
+from app.ai.schemas import CardDraft
+from app.ai.usage import RunUsage
+from app.core.errors import NotFound
+from app.core.settings import Settings, get_settings
+from app.jobs.execution import JobContext
+from app.jobs.generation import DECK_GONE, CardResult, generate_cards
+from app.jobs.tasks import HANDLERS
+from app.models import AiGeneration, AiUsage, Card, Deck, Document, Job
+from app.models.document import READY
+from app.models.job import GENERATE_CARDS, QUEUED
+from app.repositories.generations import GenerationRepository
+from app.schemas.generations import MAX_CARDS
+from app.services.budget import GENERATE, BudgetService
 
-
-def _login(make_user, login_as, email="a@example.com"):
-    user = make_user(email=email)
-    login_as(user)
-    return user
+PROMPT_BODY = {"mode": "prompt", "count": 3, "prompt": "The cell cycle"}
 
 
 @pytest.fixture
-def make_generation(db):
-    def _make_generation(user, deck, count=3):
-        generation = AiGeneration(
-            user_id=user.id,
-            deck_id=deck.id,
-            mode="prompt",
-            prompt="Spanish travel words",
-            requested_count=count,
-            model="fake",
-            candidates=[
-                {"front": f"q{i}", "back": f"a{i}", "status": "pending"} for i in range(count)
-            ],
+async def deck(make_deck, me) -> Deck:
+    return await make_deck(me)
+
+
+@pytest.fixture
+def make_document(session, me):
+    async def _make_document(status=READY) -> Document:
+        document = Document(
+            user_id=me.id,
+            filename="cells.pdf",
+            content_hash="h",
+            mime_type="application/pdf",
+            size_bytes=1,
+            status=status,
         )
-        db.session.add(generation)
-        db.session.commit()
-        return generation
+        session.add(document)
+        await session.commit()
+        return document
 
-    return _make_generation
-
-
-@pytest.fixture
-def mine(client, make_user, login_as, make_deck, make_generation):
-    """My deck, with a generation of three pending suggestions in it."""
-    me = _login(make_user, login_as)
-    deck = make_deck(me)
-    return deck, make_generation(me, deck)
+    return _make_document
 
 
-def _accept(client, generation_id, indexes):
-    return client.post(f"/api/generations/{generation_id}/accept", json={"indexes": indexes})
+def _url(deck) -> str:
+    return f"/api/decks/{deck.id}/generate"
 
 
-def _reject(client, generation_id, indexes):
-    return client.post(f"/api/generations/{generation_id}/reject", json={"indexes": indexes})
+async def _count(session, model) -> int:
+    return await session.scalar(select(func.count()).select_from(model))
 
 
-def _statuses(body):
-    return [card["status"] for card in body["cards"]]
+# --- starting -----------------------------------------------------------------------------
 
 
-# ---- who can decide ---------------------------------------------------------
+async def test_signing_in_is_required(client):
+    assert (await client.post("/api/decks/1/generate", json=PROMPT_BODY)).status_code == 401
+    assert (await client.get("/api/generations/1")).status_code == 401
 
 
-def test_both_routes_require_login(client):
-    assert _accept(client, 1, [0]).status_code == 401
-    assert _reject(client, 1, [0]).status_code == 401
+async def test_generating_from_a_prompt_queues_a_job(client, session, me, deck):
+    response = await client.post(_url(deck), json=PROMPT_BODY)
+
+    assert response.status_code == 202
+    job = await session.get(Job, response.json()["job_id"])
+    assert (job.user_id, job.kind, job.status) == (me.id, GENERATE_CARDS, QUEUED)
+    assert job.payload == {
+        **PROMPT_BODY,
+        "document_id": None,
+        "topic": None,
+        "deck_id": deck.id,
+        "file_name": None,
+    }
 
 
-def test_someone_elses_generation_is_404(client, make_user, login_as, make_deck, make_generation):
-    _login(make_user, login_as)
-    other = make_user(email="b@example.com")
-    theirs = make_generation(other, make_deck(other))
+async def test_generating_from_a_file_queues_a_job(client, session, deck, make_document):
+    document = await make_document()
+    body = {"mode": "file", "count": 2, "document_id": document.id, "topic": "Mitosis"}
 
-    for res in (_accept(client, theirs.id, [0]), _reject(client, theirs.id, [0])):
-        assert res.status_code == 404
-        assert res.get_json()["error"]["message"] == "Generation not found."
-    assert Card.query.count() == 0
+    response = await client.post(_url(deck), json=body)
 
-
-def test_unknown_generation_is_404(client, make_user, login_as):
-    _login(make_user, login_as)
-    for res in (_accept(client, 9999, [0]), _reject(client, 9999, [0])):
-        assert res.status_code == 404
-        assert res.get_json()["error"]["message"] == "Generation not found."
+    assert response.status_code == 202
+    job = await session.get(Job, response.json()["job_id"])
+    assert job.payload["file_name"] == "cells.pdf"
+    assert job.payload["prompt"] is None
 
 
-def test_ownership_is_checked_before_the_body(
-    client, make_user, login_as, make_deck, make_generation
-):
-    # A stranger with a bad body still gets 404, so they learn nothing from a 422.
-    _login(make_user, login_as)
-    other = make_user(email="b@example.com")
-    theirs = make_generation(other, make_deck(other))
-    assert _accept(client, theirs.id, "0").status_code == 404
+async def test_a_file_must_be_ready(client, deck, make_document):
+    document = await make_document(status="processing")
+    body = {"mode": "file", "count": 2, "document_id": document.id, "topic": "Mitosis"}
+
+    response = await client.post(_url(deck), json=body)
+
+    assert response.status_code == 422
+    assert response.json()["error"]["field"] == "document_id"
 
 
-# ---- accept -----------------------------------------------------------------
+async def test_someone_elses_deck_doesnt_exist(client, me, make_deck, make_user):
+    other = await make_user(email="other@example.com")
+    deck = await make_deck(other)
+
+    assert (await client.post(_url(deck), json=PROMPT_BODY)).status_code == 404
 
 
-def test_accept_creates_cards_in_index_order(client, mine):
-    # Given my generation with 3 pending cards / When I accept [2, 0]
-    deck, generation = mine
-    res = _accept(client, generation.id, [2, 0])
+async def test_someone_elses_file_doesnt_exist(client, session, deck, make_user):
+    other = await make_user(email="other@example.com")
+    document = Document(
+        user_id=other.id, filename="n", content_hash="h", mime_type="text/plain", size_bytes=1
+    )
+    session.add(document)
+    await session.commit()
+    body = {"mode": "file", "count": 2, "document_id": document.id, "topic": "Mitosis"}
 
-    # Then two cards, in index order, both AI, in the generation's deck
-    assert res.status_code == 201
-    body = res.get_json()
-    assert [c["front"] for c in body["cards"]] == ["q0", "q2"]
-    assert all(c["origin"] == "ai" for c in body["cards"])
-    assert all(c["deck_id"] == deck.id for c in body["cards"])
-    assert _statuses(body["generation"]) == ["accepted", "pending", "accepted"]
-    saved = Card.query.filter_by(deck_id=deck.id).all()
-    assert all(card.generation_id == generation.id for card in saved)
-
-
-def test_accepting_again_creates_nothing(client, mine):
-    deck, generation = mine
-    _accept(client, generation.id, [0, 2])
-
-    res = _accept(client, generation.id, [0])
-
-    assert res.status_code == 201
-    assert res.get_json()["cards"] == []
-    assert Card.query.filter_by(deck_id=deck.id).count() == 2
-
-
-def test_repeated_indexes_make_one_card(client, mine):
-    deck, generation = mine
-    res = _accept(client, generation.id, [0, 0])
-
-    assert len(res.get_json()["cards"]) == 1
-    assert Card.query.filter_by(deck_id=deck.id).count() == 1
-
-
-def test_accepted_cards_are_ai_in_the_deck_list(client, mine):
-    deck, generation = mine
-    _accept(client, generation.id, [0, 1])
-
-    cards = client.get(f"/api/decks/{deck.id}/cards").get_json()
-
-    assert [c["origin"] for c in cards] == ["ai", "ai"]
-
-
-def test_accept_is_saved_not_just_cached(client, mine, db):
-    # Rule 20: a JSON column changed in place is silently never saved.
-    deck, generation = mine
-    _accept(client, generation.id, [0])
-
-    db.session.expire_all()
-
-    assert db.session.get(AiGeneration, generation.id).candidates[0]["status"] == "accepted"
-
-
-# ---- reject -----------------------------------------------------------------
-
-
-def test_reject_sets_the_status(client, mine, db):
-    deck, generation = mine
-    res = _reject(client, generation.id, [1])
-
-    assert res.status_code == 200
-    assert _statuses(res.get_json()) == ["pending", "rejected", "pending"]
-    db.session.expire_all()
-    assert db.session.get(AiGeneration, generation.id).candidates[1]["status"] == "rejected"
-    assert Card.query.filter_by(deck_id=deck.id).count() == 0
-
-
-def test_a_rejected_card_cannot_be_accepted(client, mine):
-    deck, generation = mine
-    _reject(client, generation.id, [1])
-
-    res = _accept(client, generation.id, [1])
-
-    assert res.status_code == 201
-    assert res.get_json()["cards"] == []
-    assert _statuses(res.get_json()["generation"]) == ["pending", "rejected", "pending"]
-
-
-def test_an_accepted_card_cannot_be_rejected(client, mine):
-    deck, generation = mine
-    _accept(client, generation.id, [0])
-
-    res = _reject(client, generation.id, [0])
-
-    assert _statuses(res.get_json()) == ["accepted", "pending", "pending"]
-    assert Card.query.filter_by(deck_id=deck.id).count() == 1
-
-
-# ---- bad indexes --------------------------------------------------------------
+    assert (await client.post(_url(deck), json=body)).status_code == 404
 
 
 @pytest.mark.parametrize(
-    "indexes",
-    [[], "0", [3], [True], [-1], None, [0.5], ["0"], {"0": 1}],
-    ids=["empty", "string", "too-big", "bool", "negative", "null", "float", "string-item", "dict"],
+    ("change", "field"),
+    [
+        ({"mode": "guess"}, "mode"),
+        ({"count": 0}, "count"),
+        ({"count": MAX_CARDS + 1}, "count"),
+        ({"count": True}, "count"),
+        ({"count": "3"}, "count"),
+        ({"prompt": "   "}, "prompt"),
+        ({"prompt": "x" * 2001}, "prompt"),
+    ],
 )
-def test_bad_indexes_are_422(client, mine, indexes):
-    deck, generation = mine
-    for res in (_accept(client, generation.id, indexes), _reject(client, generation.id, indexes)):
-        assert res.status_code == 422
-        error = res.get_json()["error"]
-        assert error["field"] == "indexes"
-        assert error["message"] == "indexes must be a non-empty list of card positions."
-    assert Card.query.count() == 0
+async def test_a_bad_prompt_request_is_refused(client, session, deck, change, field):
+    response = await client.post(_url(deck), json={**PROMPT_BODY, **change})
+
+    assert response.status_code == 422
+    assert response.json()["error"]["field"] == field
+    assert await _count(session, Job) == 0
 
 
-def test_missing_indexes_is_422(client, mine):
-    deck, generation = mine
-    res = client.post(f"/api/generations/{generation.id}/accept", json={})
-    assert res.status_code == 422
-    assert res.get_json()["error"]["field"] == "indexes"
+@pytest.mark.parametrize(
+    ("body", "field"),
+    [
+        ({"mode": "file", "count": 2, "topic": "Mitosis"}, "document_id"),
+        ({"mode": "file", "count": 2, "document_id": True, "topic": "Mitosis"}, "document_id"),
+        ({"mode": "file", "count": 2, "document_id": 1}, "topic"),
+    ],
+)
+async def test_a_bad_file_request_is_refused(client, deck, body, field):
+    response = await client.post(_url(deck), json=body)
+
+    assert response.status_code == 422
+    assert response.json()["error"]["field"] == field
 
 
-def test_a_body_that_isnt_json_is_400(client, mine):
-    deck, generation = mine
-    res = client.post(
-        f"/api/generations/{generation.id}/accept", data="not json", content_type="text/plain"
+async def test_jobs_still_waiting_count_toward_the_daily_limit(client, deck, monkeypatch):
+    monkeypatch.setattr(get_settings(), "ai_daily_limit", 2)
+
+    assert (await client.post(_url(deck), json=PROMPT_BODY)).status_code == 202
+    assert (await client.post(_url(deck), json=PROMPT_BODY)).status_code == 202
+    assert (await client.post(_url(deck), json=PROMPT_BODY)).status_code == 429
+
+
+async def test_a_batch_with_no_cards_doesnt_use_the_allowance(
+    client, session, me, deck, monkeypatch
+):
+    monkeypatch.setattr(get_settings(), "ai_daily_limit", 1)
+    session.add(_generation(me, deck, empty=True))
+    await session.commit()
+
+    assert (await client.post(_url(deck), json=PROMPT_BODY)).status_code == 202
+
+
+async def test_a_full_model_limit_refuses_a_run(client, deck, monkeypatch):
+    async def full(*_, **__):
+        return False
+
+    monkeypatch.setattr(BudgetService, "within_model_limits", full)
+
+    assert (await client.post(_url(deck), json=PROMPT_BODY)).status_code == 429
+
+
+# --- reading ------------------------------------------------------------------------------
+
+
+def _generation(user, deck, empty=False, job_id=None) -> AiGeneration:
+    return AiGeneration(
+        job_id=job_id,
+        user_id=user.id,
+        deck_id=deck.id,
+        mode="prompt",
+        requested_count=1,
+        model="m",
+        empty=empty,
+        candidates=[] if empty else [{"front": "Q", "back": "A", "status": "pending"}],
     )
-    assert res.status_code == 400
 
 
-# ---- deleting the deck --------------------------------------------------------------
+async def test_a_batch_can_be_read(client, session, me, deck):
+    generation = _generation(me, deck)
+    session.add(generation)
+    await session.commit()
+
+    response = await client.get(f"/api/generations/{generation.id}")
+
+    assert response.status_code == 200
+    assert response.json()["candidates"] == [{"front": "Q", "back": "A", "status": "pending"}]
 
 
-def test_deleting_the_deck_removes_the_generation_and_its_cards(client, mine, db):
-    deck, generation = mine
-    _accept(client, generation.id, [0])
+async def test_someone_elses_batch_doesnt_exist(client, session, deck, me, make_user, login_as):
+    generation = _generation(me, deck)
+    session.add(generation)
+    await session.commit()
+    await login_as(await make_user(email="other@example.com"))
 
-    res = client.delete(f"/api/decks/{deck.id}")
+    assert (await client.get(f"/api/generations/{generation.id}")).status_code == 404
 
-    assert res.status_code == 204
 
-    db.session.expire_all()
-    assert AiGeneration.query.count() == 0
-    assert Card.query.count() == 0
+# --- the job ------------------------------------------------------------------------------
+
+
+@pytest.fixture
+def settings(engine):
+    return Settings(
+        database_url=engine.url.render_as_string(hide_password=False),
+        ai_writer_provider="fake",
+    )
+
+
+@pytest.fixture
+def make_context(session, session_factory, me, deck):
+    async def _make_context(**payload) -> JobContext:
+        full = {
+            **PROMPT_BODY,
+            "document_id": None,
+            "topic": None,
+            "deck_id": deck.id,
+            "file_name": None,
+            **payload,
+        }
+        job = Job(user_id=me.id, kind=GENERATE_CARDS, payload=full)
+        session.add(job)
+        await session.commit()
+
+        async def report(_):
+            pass
+
+        return JobContext(job.id, me.id, full, session_factory, report)
+
+    return _make_context
+
+
+def _writes(*drafts, seen=None):
+    async def write(request, usage):
+        if seen is not None:
+            seen.append(request)
+        usage.for_role("writer", "m").count_call()
+        return CardResult(list(drafts), "passed", "v1")
+
+    return write
+
+
+async def test_the_job_saves_a_batch_waiting_for_review(session, make_context, settings):
+    context = await make_context()
+
+    result = await generate_cards(context, settings, _writes(CardDraft(front="Q", back="A")))
+
+    generation = await session.get(AiGeneration, result["generation_id"])
+    assert generation.job_id == context.job_id
+    assert generation.prompt == "The cell cycle"
+    assert (generation.verification, generation.empty) == ("passed", False)
+    assert generation.candidates == [{"front": "Q", "back": "A", "status": "pending"}]
+
+
+async def test_a_run_gets_the_deck_and_its_cards(session, me, deck, make_context, settings):
+    session.add(Card(deck_id=deck.id, front="Old Q", back="Old A"))
+    await session.commit()
+    seen = []
+
+    await generate_cards(await make_context(), settings, _writes(seen=seen))
+
+    assert seen[0].deck_name == deck.name
+    assert seen[0].owner_id == me.id
+    assert seen[0].existing == [CardDraft(front="Old Q", back="Old A")]
+    assert seen[0].existing_fronts == ["Old Q"]
+
+
+async def test_a_run_with_no_cards_is_saved_as_empty(session, make_context, settings):
+    result = await generate_cards(await make_context(), settings, _writes())
+
+    assert (await session.get(AiGeneration, result["generation_id"])).empty is True
+
+
+async def test_a_retry_reuses_the_batch_already_saved(session, make_context, settings):
+    context = await make_context()
+    first = await generate_cards(context, settings, _writes(CardDraft(front="Q", back="A")))
+
+    async def must_not_run(*_):
+        pytest.fail("the batch is already saved")
+
+    assert await generate_cards(context, settings, must_not_run) == first
+    assert await _count(session, AiGeneration) == 1
+
+
+async def test_two_workers_saving_at_once_keep_one_batch(
+    session, make_context, settings, monkeypatch
+):
+    context = await make_context()
+    await generate_cards(context, settings, _writes(CardDraft(front="Q", back="A")))
+    real = GenerationRepository.get_for_job
+    misses = iter([None])
+
+    async def miss_once(self, job_id):
+        try:
+            return next(misses)
+        except StopIteration:
+            return await real(self, job_id)
+
+    monkeypatch.setattr(GenerationRepository, "get_for_job", miss_once)
+
+    await generate_cards(context, settings, _writes(CardDraft(front="Q2", back="A2")))
+
+    assert await _count(session, AiGeneration) == 1
+
+
+async def test_a_deleted_deck_fails_the_job(me, make_context, settings):
+    context = await make_context(deck_id=0)
+
+    with pytest.raises(NotFound) as gone:
+        await generate_cards(context, settings, _writes())
+
+    assert gone.value.message == DECK_GONE
+
+
+async def test_a_failed_run_saves_no_batch_but_counts_its_spending(
+    session, make_context, settings
+):
+    async def fail(_, usage: RunUsage):
+        usage.for_role("writer", "m").count_call()
+        raise AIRateLimited()
+
+    with pytest.raises(AIRateLimited):
+        await generate_cards(await make_context(), settings, fail)
+
+    assert await _count(session, AiGeneration) == 0
+    assert (await session.scalar(select(AiUsage.feature))) == GENERATE
+
+
+def test_the_job_is_registered():
+    assert GENERATE_CARDS in HANDLERS
