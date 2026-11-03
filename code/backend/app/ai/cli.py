@@ -6,8 +6,8 @@ and how long it took:
     gemini-3.5-flash answered in 2.4 s: What is the capital of France? → Paris
 
 Exits 1, with the message a learner would see, when the provider fails. On the stand-in
-(AI_PROVIDER=fake) it prints a sample card and spends nothing. With AI_PROVIDER=gemini it
-spends one of the free tier's requests for the day.
+(AI_WRITER_PROVIDER=fake) it prints a sample card and spends nothing. With
+AI_WRITER_PROVIDER=gemini it spends one of the free tier's requests for the day.
 
     docker compose exec backend flask ai-smoke
 """

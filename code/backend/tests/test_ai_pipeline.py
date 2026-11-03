@@ -4,6 +4,7 @@ A scripted provider answers each call from a list, so no test touches the networ
 """
 
 import ast
+import base64
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,18 +14,27 @@ import pytest
 from google.genai import errors
 
 from app.ai import pipeline
+from app.ai.gemini import GeminiProvider
 from app.ai.pipeline import PASSED, SKIPPED, PipelineRequest, run_pipeline
-from app.ai.prompts import PROMPT_VERSION
+from app.ai.prompts import (
+    PROMPT_VERSION,
+    NoEvidence,
+    PdfEvidence,
+    PromptContext,
+    TextEvidence,
+    TopicEvidence,
+)
 from app.ai.provider import (
     AIRateLimited,
     AITransient,
     AIUnavailable,
+    Attachment,
     CardDraft,
-    GeminiProvider,
     Prompt,
     TokenUsage,
     verdicts_schema,
 )
+from app.api.generate import _evidence
 from app.models import AiGeneration
 
 ORIGINAL = Prompt(system="rules", text="write cards", max_cards=2)
@@ -62,8 +72,30 @@ class Scripted:
     judge_cards = _next
 
 
-def run(writer, judge, count=2, **kwargs):
-    request = PipelineRequest(prompt=ORIGINAL, count=count, existing_fronts=[], **kwargs)
+class ExtractingWriter(Scripted):
+    """Scripted, with extract replies keyed by chunk, because extract calls run in parallel."""
+
+    def __init__(self, facts, *replies):
+        super().__init__(*replies)
+        self.facts = facts
+        self.chunks_seen = []
+
+    def extract_facts(self, prompt):
+        chunk = next(chunk for chunk in self.facts if chunk in prompt.text)
+        self.chunks_seen.append(chunk)
+        reply = self.facts[chunk]
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+
+def run(writer, judge, count=2, deck_name="Deck", chunks=(), file_text="", evidence=None, **kwargs):
+    context = PromptContext("file", count, deck_name, None)
+    if evidence is None:
+        evidence = TextEvidence(file_text, chunks) if chunks or file_text else NoEvidence()
+    request = PipelineRequest(
+        prompt=ORIGINAL, context=context, existing_fronts=[], evidence=evidence, **kwargs
+    )
     return run_pipeline(writer, judge, request)
 
 
@@ -216,6 +248,98 @@ def test_gemini_marks_only_retriable_failures_as_transient(raised, expected):
         provider.generate_cards(ORIGINAL)
 
     assert type(caught.value) is expected
+
+
+def test_each_chunk_is_extracted_and_the_writer_gets_the_merged_facts():
+    writer = ExtractingWriter(
+        {"part one": ["Fact one."], "part two": ["Fact two."]}, [card(1), card(2)]
+    )
+    judge = Scripted(ok(0, 1))
+
+    result = run(
+        writer, judge, chunks=["part one", "part two"], file_text="part one part two",
+        deck_name="Biology",
+    )
+
+    assert sorted(writer.chunks_seen) == ["part one", "part two"]
+    assert "<source>\nFact one.\nFact two.\n</source>" in writer.prompts[0].text
+    assert "Deck name: Biology" in writer.prompts[0].text
+    assert "part one part two" in judge.prompts[0].text
+    assert fronts(result) == ["Question 1?", "Question 2?"]
+    assert result.model_calls == 4
+
+
+def test_merged_facts_keep_document_order_and_drop_duplicates():
+    writer = ExtractingWriter(
+        {"one": ["B fact.", "Shared fact."], "two": ["shared fact", "A fact."]}, [card(1)]
+    )
+    run(writer, Scripted(ok(0)), count=1, chunks=["one", "two"])
+    assert "<source>\nB fact.\nShared fact.\nA fact.\n</source>" in writer.prompts[0].text
+
+
+def test_a_failed_chunk_doesnt_stop_the_others():
+    writer = ExtractingWriter({"one": AIUnavailable(), "two": ["Fact two."]}, [card(1)])
+    result = run(writer, Scripted(ok(0)), count=1, chunks=["one", "two"])
+    assert "<source>\nFact two.\n</source>" in writer.prompts[0].text
+    assert fronts(result) == ["Question 1?"]
+    assert result.model_calls == 4
+
+
+def test_a_rate_limited_chunk_ends_the_run_before_generate():
+    writer = ExtractingWriter({"one": AIRateLimited(), "two": ["Fact two."]}, [card(1)])
+    with pytest.raises(AIRateLimited):
+        run(writer, Scripted(ok(0)), count=1, chunks=["one", "two"])
+    assert writer.prompts == []
+
+
+def test_the_whole_document_is_used_when_no_chunk_yields_facts():
+    writer = ExtractingWriter({"one": AIUnavailable(), "two": []}, [card(1)])
+    run(writer, Scripted(ok(0)), count=1, chunks=["one", "two"])
+    assert writer.prompts[0] is ORIGINAL
+
+
+def test_a_repair_uses_the_merged_facts():
+    writer = ExtractingWriter({"one": ["Fact one."]}, [card(1)], [card(2)])
+    run(writer, Scripted([bad(0)], ok(0)), count=1, chunks=["one"])
+    assert "<source>\nFact one.\n</source>" in writer.prompts[1].text
+
+
+def test_a_short_document_skips_the_extract_step():
+    writer = ExtractingWriter({"one": ["Fact one."]}, [card(1)])
+    run(writer, Scripted(ok(0)), count=1)
+    assert writer.chunks_seen == []
+    assert writer.prompts[0] is ORIGINAL
+
+
+def test_the_judge_gets_a_topic_as_a_topic_not_a_source():
+    judge = Scripted(ok(0))
+    run(Scripted([card(1)]), judge, count=1, evidence=TopicEvidence("Cells"))
+    assert "<topic>\nCells\n</topic>" in judge.prompts[0].text
+    assert "<source>" not in judge.prompts[0].text
+
+
+def test_the_judge_gets_a_pdf_as_an_attachment():
+    pdf = Attachment(mime_type="application/pdf", data=b"%PDF-")
+    judge = Scripted(ok(0))
+    run(Scripted([card(1)]), judge, count=1, evidence=PdfEvidence(pdf))
+    assert judge.prompts[0].attachment is pdf
+    assert "<source>" not in judge.prompts[0].text
+
+
+def test_the_judge_gets_no_material_without_evidence():
+    judge = Scripted(ok(0))
+    run(Scripted([card(1)]), judge, count=1)
+    assert judge.prompts[0].attachment is None
+    assert "<source>" not in judge.prompts[0].text
+    assert "<topic>" not in judge.prompts[0].text
+
+
+def test_each_mode_maps_to_its_evidence():
+    pdf = Attachment(mime_type="application/pdf", data=b"%PDF-")
+    assert _evidence("Cells", None, None, []) == TopicEvidence("Cells")
+    assert _evidence(None, "notes", None, ["a"]) == TextEvidence("notes", ["a"])
+    assert _evidence(None, None, pdf, []) == PdfEvidence(pdf)
+    assert _evidence(None, None, None, []) == NoEvidence()
 
 
 def test_the_judge_sees_the_source_and_the_existing_cards():
@@ -379,6 +503,33 @@ def test_the_route_stays_on_one_call_without_the_flag(client, deck):
     assert resp.status_code == 201
     assert resp.get_json()["verification"] is None
     assert AiGeneration.query.one().model_calls == 1
+
+
+def _post_long_file(client, deck_id):
+    data = base64.b64encode(("word " * 6000).encode()).decode()
+    return client.post(
+        f"/api/decks/{deck_id}/generate",
+        json={
+            "mode": "file",
+            "count": 2,
+            "file": {"name": "notes.txt", "mime_type": "text/plain", "data": data},
+        },
+    )
+
+
+def test_the_route_extracts_a_long_file_and_saves_the_calls(client, deck, graph_mode):
+    resp = _post_long_file(client, deck.id)
+    assert resp.status_code == 201
+    assert len(resp.get_json()["cards"]) == 2
+    assert AiGeneration.query.one().model_calls == 4
+
+
+def test_the_site_cap_reserves_a_call_per_chunk(client, db, me, deck, graph_mode):
+    _spent(db, me, deck, 12)
+    assert _post(client, deck.id).status_code == 201
+    AiGeneration.query.filter(AiGeneration.model_calls != 12).delete()
+    db.session.commit()
+    assert _post_long_file(client, deck.id).status_code == 429
 
 
 def test_the_site_cap_keeps_room_for_the_graphs_worst_case(client, db, me, deck, graph_mode):

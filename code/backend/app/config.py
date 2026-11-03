@@ -42,6 +42,17 @@ def _env(name: str, default: str) -> str:
     return (os.environ.get(name) or "").strip() or default
 
 
+RENAMED_SETTINGS = {
+    "AI_PROVIDER": "AI_WRITER_PROVIDER and AI_JUDGE_PROVIDER",
+    "GEMINI_MODEL": "AI_WRITER_MODEL",
+}
+
+
+def renamed_settings_in_use() -> dict[str, str]:
+    """Old setting names still in the environment, which the app ignores, and their new names."""
+    return {old: new for old, new in RENAMED_SETTINGS.items() if _env(old, "")}
+
+
 class Config:
     # Signs the session cookie. The fallback only exists so `docker compose up` works
     # out of the box; anything deployed anywhere must set this in the environment.
@@ -63,9 +74,12 @@ class Config:
 
     # AI card generation (Iteration 3). Nothing reads these at startup, so the app boots
     # without a key; generating answers 503 until one is set. See app/ai/provider.py.
-    AI_PROVIDER = _env("AI_PROVIDER", "gemini")  # or "fake": sample cards, no Google
+    # Vendor and model per role. Vendors are registered in app/ai/provider.py.
+    AI_WRITER_PROVIDER = _env("AI_WRITER_PROVIDER", "gemini")  # or "fake": sample cards, no Google
+    AI_WRITER_MODEL = _env("AI_WRITER_MODEL", "gemini-3.5-flash-lite")
+    AI_JUDGE_PROVIDER = _env("AI_JUDGE_PROVIDER", "gemini")
+    AI_JUDGE_MODEL = _env("AI_JUDGE_MODEL", "gemini-3.8-flash")
     GEMINI_API_KEY = _env("GEMINI_API_KEY", "")  # secret: the environment only
-    GEMINI_MODEL = _env("GEMINI_MODEL", "gemini-3.5-flash-lite")
     AI_DAILY_LIMIT = int(_env("AI_DAILY_LIMIT", "10"))  # generations per user, rolling 24 h
     # The whole site's model calls, rolling 24 h. Google's free quota is per project and per
     # model, and its docs no longer publish the numbers: read them in AI Studio before raising
@@ -74,9 +88,8 @@ class Config:
     AI_SITE_DAILY_LIMIT = int(_env("AI_SITE_DAILY_LIMIT", "18"))
     AI_MAX_CARDS = 25  # cards per generate request
     # "single": one model call. "graph": the self-correcting pipeline in app/ai/pipeline.py,
-    # up to 5 calls a request, with the checks on AI_JUDGE_MODEL.
+    # up to 5 calls a request plus 4 for a long file, with the checks on AI_JUDGE_MODEL.
     AI_PIPELINE = _env("AI_PIPELINE", "single")
-    AI_JUDGE_MODEL = _env("AI_JUDGE_MODEL", "gemini-3.8-flash")
 
 
 class TestConfig(Config):
@@ -90,7 +103,8 @@ class TestConfig(Config):
     # Rule 16: no test touches the network. The key is blanked too, so a real one in
     # someone's code/.env can't reach a test that switches AI_PROVIDER to "gemini". The
     # limits are pinned so a value left in .env can't change what the cap tests count to.
-    AI_PROVIDER = "fake"
+    AI_WRITER_PROVIDER = "fake"
+    AI_JUDGE_PROVIDER = "fake"
     AI_PIPELINE = "single"
     GEMINI_API_KEY = ""
     AI_DAILY_LIMIT = 10

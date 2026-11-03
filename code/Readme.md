@@ -40,12 +40,13 @@ docker compose exec backend flask seed
 
 ## AI Card Generation
 
-`AI_PROVIDER` in `.env` chooses what writes the cards:
+`AI_WRITER_PROVIDER` in `.env` chooses what writes the cards, and `AI_JUDGE_PROVIDER` chooses
+what checks them when `AI_PIPELINE=graph`:
 
 - `fake`, the value in `.env.example`: a stand-in that returns sample cards without
   contacting Google. No key needed.
-- `gemini`: Google's model named in `GEMINI_MODEL` (`gemini-3.5-flash` by default). It
-  needs `GEMINI_API_KEY`.
+- `gemini`: Google's model named in `AI_WRITER_MODEL` (`gemini-3.5-flash-lite` by default) or
+  `AI_JUDGE_MODEL` (`gemini-3.8-flash` by default). It needs `GEMINI_API_KEY`.
 
 To try the real model, make your own free key at [Google AI Studio](https://aistudio.google.com)
 in a project of its own, so your testing doesn't spend the team's quota, and never set up

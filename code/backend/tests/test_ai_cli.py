@@ -16,13 +16,13 @@ from unittest.mock import patch
 import pytest
 
 from app.ai.cli import ai_smoke_command
+from app.ai.fake import FakeProvider
 from app.ai.provider import (
     NOT_CONFIGURED,
     QUOTA_USED_UP,
     UNAVAILABLE,
     AIRateLimited,
     AIUnavailable,
-    FakeProvider,
 )
 
 
@@ -45,7 +45,7 @@ class OneReply:
 
 
 def test_on_the_stand_in_it_prints_a_sample_card_and_exits_0(app):
-    app.config["AI_PROVIDER"] = "fake"
+    app.config["AI_WRITER_PROVIDER"] = "fake"
 
     result = _run(app)
 
@@ -86,7 +86,7 @@ def test_a_provider_that_fails_prints_its_message_and_exits_1(app, error, messag
 
 
 def test_gemini_with_no_key_says_it_isnt_set_up_and_exits_1(app):
-    app.config["AI_PROVIDER"] = "gemini"
+    app.config["AI_WRITER_PROVIDER"] = "gemini"
     app.config["GEMINI_API_KEY"] = ""
 
     result = _run(app)

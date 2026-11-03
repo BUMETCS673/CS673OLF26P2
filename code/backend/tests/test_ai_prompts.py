@@ -20,11 +20,12 @@ from app.ai.prompts import EXISTING_JSON_MAX, build_prompt, escape_tags
 from app.ai.provider import Attachment, CardDraft
 
 
-def _build(mode="prompt", **kwargs):
-    kwargs.setdefault("count", 7)
-    kwargs.setdefault("deck_name", "Anatomy")
-    kwargs.setdefault("deck_description", "Bones and muscles")
-    return build_prompt(mode, **kwargs)
+def _build(
+    mode="prompt", count=7, deck_name="Anatomy", deck_description="Bones and muscles", focus=None,
+    **kwargs,
+):
+    context = prompts.PromptContext(mode, count, deck_name, deck_description, focus)
+    return build_prompt(context, **kwargs)
 
 
 def _existing_json(text):

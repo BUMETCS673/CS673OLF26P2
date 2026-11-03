@@ -47,17 +47,20 @@ from flask import Blueprint, current_app, jsonify, request
 from flask_login import current_user, login_required
 from sqlalchemy import func, select
 
+from app.ai.chunking import split_text
 from app.ai.cleanup import clean_drafts
 from app.ai.pipeline import MAX_MODEL_CALLS, PipelineRequest, run_pipeline
-from app.ai.prompts import PROMPT_VERSION, build_prompt
-from app.ai.provider import (
-    AIRateLimited,
-    AIUnavailable,
-    Attachment,
-    CardDraft,
-    get_judge_provider,
-    get_provider,
+from app.ai.prompts import (
+    PROMPT_VERSION,
+    Evidence,
+    NoEvidence,
+    PdfEvidence,
+    PromptContext,
+    TextEvidence,
+    TopicEvidence,
+    build_prompt,
 )
+from app.ai.provider import AIRateLimited, AIUnavailable, Attachment, CardDraft, get_provider
 from app.api.decks import own_deck_or_404
 from app.api.validation import optional_text, required_text
 from app.errors import ApiError, json_object, validation_error
@@ -140,6 +143,19 @@ def _valid_file(body: dict) -> tuple[str, str | None, Attachment | None]:
     return file["name"], text, None
 
 
+def _evidence(
+    prompt: str | None, file_text: str | None, attachment: Attachment | None, chunks: list[str],
+) -> Evidence:
+    """What the judge checks cards against, from the fields the request's mode set."""
+    if prompt:
+        return TopicEvidence(prompt)
+    if file_text is not None:
+        return TextEvidence(file_text, chunks)
+    if attachment is not None:
+        return PdfEvidence(attachment)
+    return NoEvidence()
+
+
 def _check_daily_caps(cost: int) -> None:
     """The learner's generations, then the site's model calls, with `cost` for this request.
 
@@ -200,7 +216,8 @@ def generate(deck_id):
         )
 
     use_graph = current_app.config["AI_PIPELINE"] == "graph"
-    _check_daily_caps(MAX_MODEL_CALLS if use_graph else 1)
+    chunks = split_text(file_text) if use_graph and file_text else []
+    _check_daily_caps(MAX_MODEL_CALLS + len(chunks) if use_graph else 1)
 
     existing_fronts = db.session.scalars(select(Card.front).where(Card.deck_id == deck.id)).all()
     existing = ()
@@ -221,32 +238,23 @@ def generate(deck_id):
     try:
         provider = get_provider()
         model = provider.name
+        context = PromptContext(mode, count, deck.name, deck.description, focus)
         built = build_prompt(
-            mode,
-            count=count,
-            deck_name=deck.name,
-            deck_description=deck.description,
-            prompt=prompt,
-            file_text=file_text,
-            attachment=attachment,
-            focus=focus,
-            existing=existing,
+            context, prompt=prompt, file_text=file_text, attachment=attachment, existing=existing
         )
         if use_graph:
             # Inside the try, so a missing key answers 503. Only a failed write leaves
             # run_pipeline() as an exception. A failed check or repair still returns cards.
-            judge = get_judge_provider()
+            judge = get_provider("judge")
             result = run_pipeline(
                 provider,
                 judge,
                 PipelineRequest(
                     prompt=built,
-                    count=count,
+                    context=context,
                     existing_fronts=existing_fronts,
                     existing=existing,
-                    topic=prompt,
-                    file_text=file_text,
-                    attachment=attachment,
+                    evidence=_evidence(prompt, file_text, attachment, chunks),
                 ),
             )
             drafts, model_calls, verification = (

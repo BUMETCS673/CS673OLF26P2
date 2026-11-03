@@ -31,10 +31,15 @@ services:
       SECRET_KEY: ${SECRET_KEY:-dev-secret-change-me}
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-0}
       # AI card generation: the stand-in unless .env says "gemini" and has a key. A blank
-      # GEMINI_MODEL falls back to the default in app/config.py.
-      AI_PROVIDER: ${AI_PROVIDER:-fake}
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      # model falls back to the default in app/config.py.
+      # Old names, passed only so the app can warn that they're ignored.
+      AI_PROVIDER: ${AI_PROVIDER:-}
       GEMINI_MODEL: ${GEMINI_MODEL:-}
+      AI_WRITER_PROVIDER: ${AI_WRITER_PROVIDER:-fake}
+      AI_WRITER_MODEL: ${AI_WRITER_MODEL:-}
+      # Follows the writer, so setting only the writer can't leave a fake judge approving cards.
+      AI_JUDGE_PROVIDER: ${AI_JUDGE_PROVIDER:-${AI_WRITER_PROVIDER:-fake}}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       AI_DAILY_LIMIT: ${AI_DAILY_LIMIT:-10}
       AI_SITE_DAILY_LIMIT: ${AI_SITE_DAILY_LIMIT:-18}
       AI_PIPELINE: ${AI_PIPELINE:-single}

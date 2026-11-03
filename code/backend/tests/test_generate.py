@@ -17,13 +17,13 @@ from datetime import timedelta
 
 import pytest
 
+from app.ai.fake import FakeProvider
 from app.ai.provider import (
     NOT_CONFIGURED,
     QUOTA_USED_UP,
     UNAVAILABLE,
     AIRateLimited,
     AIUnavailable,
-    FakeProvider,
     TokenUsage,
 )
 from app.models import AiGeneration, utcnow
@@ -478,7 +478,7 @@ def test_a_reply_that_isnt_a_list_is_503(client, deck, provider):
 
 
 def test_gemini_with_no_key_is_503_not_set_up(app, client, deck):
-    app.config["AI_PROVIDER"] = "gemini"
+    app.config["AI_WRITER_PROVIDER"] = "gemini"
     app.config["GEMINI_API_KEY"] = ""
 
     resp = _post(client, deck.id, {"mode": "prompt", "count": 3, "prompt": "Cells"})

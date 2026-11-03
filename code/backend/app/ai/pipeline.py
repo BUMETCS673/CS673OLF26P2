@@ -2,15 +2,21 @@
 
 Graph topology::
 
-    START -> generate -> validate -> judge -> END
-                            ^          |
-                            |          v
-                            +------ repair (at most MAX_REPAIRS times)
+    START -> extract (one per chunk) -> merge -> generate    (long files)
+    START -> generate                                        (everything else)
+
+    generate -> validate -> judge -> END
+                   ^          |
+                   |          v
+                   +------ repair (at most MAX_REPAIRS times)
 
 ``validate`` also routes directly to ``repair`` or END when no cards are pending.
 
 Failure handling by node:
 
+* ``extract`` logs a chunk the AI couldn't answer and continues. If no chunk yields facts,
+  ``generate`` uses the whole document. AIRateLimited propagates and ends the run, since the next
+  calls would hit the same limit and partial facts would quietly give worse cards.
 * ``generate`` retries AITransient once. Any other failure propagates as AIRateLimited or
   AIUnavailable, and the route maps it to an HTTP error.
 * ``judge`` keeps the pending cards and sets ``verification`` to SKIPPED if it gets no usable
@@ -29,15 +35,23 @@ from operator import add
 from typing import Annotated, TypedDict
 
 from langgraph.graph import END, START, StateGraph
-from langgraph.types import RetryPolicy
+from langgraph.types import RetryPolicy, Send
 
-from app.ai.cleanup import clean_drafts
-from app.ai.prompts import build_judge_prompt, build_repair_prompt
+from app.ai.cleanup import clean_drafts, normalize_front
+from app.ai.prompts import (
+    Evidence,
+    NoEvidence,
+    PromptContext,
+    TextEvidence,
+    build_extract_prompt,
+    build_judge_prompt,
+    build_prompt,
+    build_repair_prompt,
+)
 from app.ai.provider import (
     AIRateLimited,
     AITransient,
     AIUnavailable,
-    Attachment,
     CardDraft,
     Prompt,
     Provider,
@@ -48,8 +62,9 @@ logger = logging.getLogger(__name__)
 # Upper bound on repair rounds. This is what guarantees the graph's cycle terminates.
 MAX_REPAIRS = 1
 GENERATE_MAX_ATTEMPTS = 2
-# Worst case per request: generate attempts, the first judge call, then one write and one judge
-# call per repair. The route reserves this many calls against the site cap before starting.
+MAX_FACTS_PER_CHUNK = 40
+# Worst case excluding extract calls: generate attempts, the first judge call, then one write and
+# one judge call per repair. The route adds one call per chunk when reserving the site cap.
 MAX_MODEL_CALLS = GENERATE_MAX_ATTEMPTS + 1 + 2 * MAX_REPAIRS
 BACK_MAX_WORDS = 5  # must match rule 3 in prompts.RULES
 # Values of PipelineState["verification"].
@@ -62,12 +77,10 @@ class PipelineRequest:
     """Immutable inputs for one run. Kept out of the graph state because nodes never change them."""
 
     prompt: Prompt                         # sent by the generate node
-    count: int                             # maximum cards to keep from the first write
+    context: PromptContext                 # rebuilds the writer's prompt from merged facts
     existing_fronts: Sequence[str]         # all fronts in the deck, used for deduplication
     existing: Sequence[CardDraft] = ()     # newest cards in the deck, sent to the judge
-    topic: str | None = None               # prompt mode: what was requested, not evidence
-    file_text: str | None = None           # file mode, TXT or MD: evidence for the judge
-    attachment: Attachment | None = None   # file mode, PDF: evidence for the judge
+    evidence: Evidence = NoEvidence()      # what the judge checks cards against
 
 
 @dataclass(frozen=True)
@@ -97,6 +110,15 @@ class PipelineState(TypedDict):
     repairs: Annotated[int, add]               # reducer: return 1 to increment
     model_calls: Annotated[int, add]           # reducer: return the number of calls just made
     verification: str                          # overwritten: PASSED or SKIPPED
+    facts: Annotated[list[tuple[int, str]], add]  # reducer: (chunk index, fact) from extract
+    source_facts: str | None                      # overwritten: merged facts for the writer
+
+
+class ExtractTask(TypedDict):
+    """Input for one extract node, sent with Send() instead of the shared state."""
+
+    index: int
+    chunk: str
 
 
 def _verdicts_by_index(verdicts: list) -> dict[int, dict]:
@@ -121,6 +143,49 @@ def build_graph(writer: Provider, judge: Provider, request: PipelineRequest):
     # Nodes receive the current state and return only the fields to update. They must not mutate
     # ``state`` in place, because LangGraph applies changes through the returned update.
 
+    def route_start(state: PipelineState) -> list[Send] | str:
+        # Only TXT and MD files have chunks.
+        evidence = request.evidence
+        if not isinstance(evidence, TextEvidence) or not evidence.chunks:
+            return "generate"
+        # Each Send starts one extract node with its own input. They run in parallel.
+        return [
+            Send("extract", ExtractTask(index=index, chunk=chunk))
+            for index, chunk in enumerate(evidence.chunks)
+        ]
+
+    def extract_node(task: ExtractTask) -> dict:
+        prompt = build_extract_prompt(
+            task["chunk"], focus=request.context.focus, max_facts=MAX_FACTS_PER_CHUNK
+        )
+        # An exception in one parallel task aborts the whole run. AIRateLimited should, so only
+        # AIUnavailable is caught here.
+        try:
+            raw = writer.extract_facts(prompt)
+        except AIUnavailable:
+            logger.warning("ai_pipeline outcome=extract_failed chunk=%d", task["index"])
+            return {"model_calls": 1}
+        facts = [(task["index"], fact.strip()) for fact in raw
+                 if isinstance(fact, str) and fact.strip()]
+        # Parallel nodes may only write fields with a reducer. LangGraph rejects other writes.
+        return {"facts": facts, "model_calls": 1}
+
+    def merge_node(state: PipelineState) -> dict:
+        # Runs once, after every extract node finishes. Sorting restores document order.
+        seen, merged = set(), []
+        for _, fact in sorted(state["facts"], key=lambda item: item[0]):
+            key = normalize_front(fact)
+            if key not in seen:
+                seen.add(key)
+                merged.append(fact)
+        return {"source_facts": "\n".join(merged) or None}
+
+    def writer_prompt(state: PipelineState) -> Prompt:
+        # Shared with repair_node, so replacements use the same material as the first write.
+        if state["source_facts"]:
+            return build_prompt(request.context, file_text=state["source_facts"])
+        return request.prompt
+
     # A failed attempt returns no state update, so attempts are counted here instead of in the
     # state. The counter lives for one request because the graph is built per request.
     generate_attempts = 0
@@ -132,11 +197,11 @@ def build_graph(writer: Provider, judge: Provider, request: PipelineRequest):
         # Provider errors are not caught here. The node's RetryPolicy re-runs this function on
         # AITransient. Any other error, or the last failed attempt, aborts the run and propagates
         # out of invoke(). A reply with no usable cards is not an error and ends the run normally.
-        raw = writer.generate_cards(request.prompt)
+        raw = writer.generate_cards(writer_prompt(state))
 
         # clean_drafts() drops malformed cards and exact duplicates of cards in the deck.
         return {
-            "pending": clean_drafts(raw, request.count, request.existing_fronts),
+            "pending": clean_drafts(raw, request.context.count, request.existing_fronts),
             "model_calls": generate_attempts,
         }
 
@@ -153,15 +218,9 @@ def build_graph(writer: Provider, judge: Provider, request: PipelineRequest):
         return {"pending": pending, "failed": failed}
 
     def judge_node(state: PipelineState) -> dict:
-        # One call checks the whole batch. The source is sent again as evidence for the check.
+        # One call checks the whole batch against the full document, not the extracted facts.
         pending = state["pending"]
-        prompt = build_judge_prompt(
-            pending,
-            topic=request.topic,
-            file_text=request.file_text,
-            attachment=request.attachment,
-            existing=request.existing,
-        )
+        prompt = build_judge_prompt(pending, request.evidence, existing=request.existing)
 
         # A failed call and an unusable reply are handled the same way below. AITransient is a
         # subclass of AIUnavailable, so it lands here too and is not retried.
@@ -199,7 +258,7 @@ def build_graph(writer: Provider, judge: Provider, request: PipelineRequest):
     def repair_node(state: PipelineState) -> dict:
         # The writer sees why each card failed and which cards are already kept.
         kept = state["approved"]
-        prompt = build_repair_prompt(request.prompt, state["failed"], kept)
+        prompt = build_repair_prompt(writer_prompt(state), state["failed"], kept)
 
         try:
             raw = writer.generate_cards(prompt)
@@ -245,12 +304,18 @@ def build_graph(writer: Provider, judge: Provider, request: PipelineRequest):
         generate_node,
         retry_policy=RetryPolicy(max_attempts=GENERATE_MAX_ATTEMPTS, retry_on=AITransient),
     )
+    graph.add_node("extract", extract_node)
+    graph.add_node("merge", merge_node)
     graph.add_node("validate", validate_node)
     graph.add_node("judge", judge_node)
     graph.add_node("repair", repair_node)
 
-    # add_edge() defines a fixed transition. START marks the entry point.
-    graph.add_edge(START, "generate")
+    # START marks the entry point. A router returning Send objects fans out to parallel nodes.
+    graph.add_conditional_edges(START, route_start, ["extract", "generate"])
+
+    # add_edge() defines a fixed transition. After a fan-out, merge runs once, not once per task.
+    graph.add_edge("extract", "merge")
+    graph.add_edge("merge", "generate")
     graph.add_edge("generate", "validate")
 
     # add_conditional_edges() calls the routing function after the source node finishes. The list
@@ -278,6 +343,8 @@ def run_pipeline(writer: Provider, judge: Provider, request: PipelineRequest) ->
             "repairs": 0,
             "model_calls": 0,
             "verification": PASSED,
+            "facts": [],
+            "source_facts": None,
         }
     )
 
