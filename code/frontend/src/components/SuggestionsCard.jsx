@@ -1,5 +1,5 @@
 import { useSuggestions } from '../suggestions/SuggestionsContext.jsx';
-import '../leech.css';
+import '../problemCards.css';
 
 /**
  * The home page's list of ready suggestions, across all decks.
@@ -11,7 +11,7 @@ export default function SuggestionsCard({ onReview }) {
   const { ready } = useSuggestions();
   if (ready.length === 0) return null;
 
-  return <section className="panel leech-home" aria-labelledby="suggestions-heading">
+  return <section className="panel problem-cards-home" aria-labelledby="suggestions-heading">
     <h2 id="suggestions-heading">Suggestions for you</h2>
     <ul>
       {ready.map((item) => <li key={item.review_id}>

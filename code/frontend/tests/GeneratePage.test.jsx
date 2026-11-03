@@ -123,7 +123,7 @@ test('the deck name heads the page, and the form gets the deck and its card coun
 
   expect(api.getDeck).toHaveBeenCalledWith('2');
   expect(screen.getByRole('heading', { name: 'Travel Spanish' })).toBeTruthy();
-  expect(shown.form).toMatchObject({ deck: DECK, cardCount: 11, busy: false, error: null });
+  expect(shown.form).toMatchObject({ deck: DECK, busy: false, error: null });
   expect(shown.list).toBeNull();
 });
 
@@ -275,7 +275,7 @@ test('Generate more goes back to the form, with the deck loaded again', async ()
   expect(await screen.findByText('Generate form')).toBeTruthy();
   expect(screen.queryByText('Candidate list')).toBeNull();
   expect(api.getDeck).toHaveBeenCalledTimes(2);
-  expect(shown.form.cardCount).toBe(13);
+  expect(shown.form.deck.card_count).toBe(13);
 });
 
 test("Generate more clears the list's error, so the next batch starts clean", async () => {
@@ -304,13 +304,26 @@ test('Back to deck from the list calls onExit', async () => {
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status });
 
-/** Answers GET /api/decks/2 and POST /api/decks/2/generate, and records every call. */
+// What the server sends: positions are implied by order, and the client adds `index`.
+const { cards: savedCards, ...SAVED } = GENERATION;
+const SERVER_GENERATION = {
+  ...SAVED,
+  candidates: savedCards.map(({ front, back, status }) => ({ front, back, status })),
+};
+
+/**
+ * Answers the deck, generate, job and generation requests, and records every call. Generating
+ * starts job 9, which jsdom can't follow as a stream, so the client polls it.
+ */
 function mockFetch() {
   const calls = [];
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, options) => {
-    if (url.endsWith('/leech-suggestions/refresh')) return json({ processing: false, ready: [] });
+    if (url.endsWith('/problem-cards')) return json({ processing: false, ready: [] });
     calls.push({ url, method: options.method });
-    return url.endsWith('/generate') ? json(GENERATION, 201) : json(DECK);
+    if (url.endsWith('/generate')) return json({ job_id: 9 }, 202);
+    if (url === '/api/jobs/9') return json({ id: 9, status: 'done', result: { generation_id: 7 } });
+    if (url === '/api/generations/7') return json(SERVER_GENERATION);
+    return json(DECK);
   });
   return calls;
 }
@@ -327,8 +340,10 @@ test('signed in, /decks/2/generate shows the deck name and the form, on the real
   expect(calls).toEqual([
     { url: '/api/decks/2', method: 'GET' },
     { url: '/api/decks/2/generate', method: 'POST' },
+    { url: '/api/jobs/9', method: 'GET' },
+    { url: '/api/generations/7', method: 'GET' },
   ]);
-  expect(shown.list.generation).toEqual(GENERATION);
+  expect(shown.list.generation).toEqual({ ...SERVER_GENERATION, cards: GENERATION.cards });
 });
 
 test('signed out, /decks/2/generate sends you to the login page', () => {

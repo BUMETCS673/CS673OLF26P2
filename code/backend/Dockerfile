@@ -3,8 +3,8 @@
 # Two targets from one file, so the image CI builds and the image that gets deployed
 # share every layer up to the last one.
 #
-#   dev  -> Flask's reloader, source bind-mounted by docker-compose
-#   prod -> gunicorn, non-root, no reloader   (the default; what CD pushes)
+#   dev  -> uvicorn's reloader, source bind-mounted by docker-compose
+#   prod -> uvicorn, non-root, no reloader   (the default; what CD pushes)
 
 FROM python:3.12-slim AS base
 
@@ -24,17 +24,18 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# So `docker compose exec backend flask init-db` works without repeating --app.
-ENV FLASK_APP=wsgi.py \
-    PYTHONUNBUFFERED=1
+ENV PYTHONUNBUFFERED=1
 
 EXPOSE 5000
 
 
 FROM base AS dev
 
-# --debug reloads the server when you save a file (the source is bind-mounted).
-CMD ["flask", "run", "--debug", "--host=0.0.0.0", "--port=5000"]
+# The compose worker's --reload needs this. The prod image has no reloader, so it stays out.
+RUN pip install --no-cache-dir "taskiq[reload]==0.13.0"
+
+# --reload restarts the server when you save a file (the source is bind-mounted).
+CMD ["uvicorn", "app.main:app", "--reload", "--host", "0.0.0.0", "--port", "5000"]
 
 
 FROM base AS prod
@@ -45,20 +46,7 @@ RUN useradd --create-home --uid 10001 appuser \
     && chown -R appuser:appuser /app
 USER appuser
 
-# 2 workers x 4 threads is plenty for a class project and fits a 512 MB free tier.
-# --access-logfile - sends request logs to stdout, which is where hosts collect them.
-#
-# Shell form because hosts (Render, Fly, Cloud Run) assign the port at runtime through
-# $PORT and the value has to be expanded then, not at build time. `exec` replaces the
-# shell so gunicorn is PID 1 and still receives SIGTERM on shutdown.
-#
-# Migrations run before gunicorn starts, because Render's pre-deploy command is paid-only.
-# Safe only with a single instance. A failed upgrade means gunicorn never starts, so the
-# previous deploy keeps serving. Each wake from sleep re-runs it, a no-op at head.
-#
-# AI Utilization: ~100% of this change
-# AI Tools Used: Claude Code (Claude Opus 5.5)
-# AI-Assisted Activities: moving the migration into the image's start command
-# Human role: diagnosed from the Render deploy log, reviewed the change
+# Migrations run first, because Render's pre-deploy command is paid-only. A failed upgrade
+# means nothing starts, so the previous deploy keeps serving.
 ENV PORT=5000
-CMD ["sh", "-c", "flask db upgrade && exec gunicorn --bind 0.0.0.0:${PORT} --workers 2 --threads 4 --access-logfile - wsgi:app"]
+CMD ["scripts/start.sh"]

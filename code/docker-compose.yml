@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:18
+    image: pgvector/pgvector:pg18
     container_name: postgres
     restart: unless-stopped
     environment:
@@ -18,32 +18,41 @@ services:
       timeout: 5s
       retries: 10
 
+  valkey:
+    image: valkey/valkey:9
+    container_name: valkey
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   backend:
     build:
       context: ./backend
-      # The Dockerfile's last stage is `prod` (gunicorn, non-root). Local development
+      # The Dockerfile's last stage is `prod` (non-root). Local development
       # wants the reloader, so ask for `dev` explicitly.
       target: dev
-    container_name: flask-backend
+    container_name: backend
     restart: unless-stopped
-    environment:
+    environment: &backend-env
       DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/cadence}
-      SECRET_KEY: ${SECRET_KEY:-dev-secret-change-me}
+      REDIS_URL: ${REDIS_URL:-redis://valkey:6379/0}
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-0}
-      # AI card generation: the stand-in unless .env says "gemini" and has a key. A blank
-      # model falls back to the default in app/config.py.
-      # Old names, passed only so the app can warn that they're ignored.
-      AI_PROVIDER: ${AI_PROVIDER:-}
-      GEMINI_MODEL: ${GEMINI_MODEL:-}
-      AI_SITE_DAILY_LIMIT: ${AI_SITE_DAILY_LIMIT:-}
-      AI_LEECH_SITE_RESERVE: ${AI_LEECH_SITE_RESERVE:-}
+      # The stand-in models unless .env says "gemini" and has a key.
       AI_WRITER_PROVIDER: ${AI_WRITER_PROVIDER:-fake}
       AI_WRITER_MODEL: ${AI_WRITER_MODEL:-}
       # Follows the writer, so setting only the writer can't leave a fake judge approving cards.
       AI_JUDGE_PROVIDER: ${AI_JUDGE_PROVIDER:-${AI_WRITER_PROVIDER:-fake}}
+      AI_EMBEDDER_PROVIDER: ${AI_EMBEDDER_PROVIDER:-${AI_WRITER_PROVIDER:-fake}}
+      AI_EMBEDDER_MODEL: ${AI_EMBEDDER_MODEL:-}
       AI_WRITER_THINKING: ${AI_WRITER_THINKING:-}
       AI_JUDGE_THINKING: ${AI_JUDGE_THINKING:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      LANGSMITH_TRACING: ${LANGSMITH_TRACING:-false}
+      LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
+      LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-cadence}
       AI_DAILY_LIMIT: ${AI_DAILY_LIMIT:-10}
       AI_MODEL_DAILY_LIMIT: ${AI_MODEL_DAILY_LIMIT:-18}
       AI_MODEL_DAILY_LIMITS: ${AI_MODEL_DAILY_LIMITS:-}
@@ -54,7 +63,6 @@ services:
       AI_LEECH_DAILY_LIMIT: ${AI_LEECH_DAILY_LIMIT:-10}
       AI_LEECH_USER_DAILY_LIMIT: ${AI_LEECH_USER_DAILY_LIMIT:-4}
       AI_LEECH_MODEL_RESERVE: ${AI_LEECH_MODEL_RESERVE:-9}
-      AI_PIPELINE: ${AI_PIPELINE:-single}
       AI_JUDGE_MODEL: ${AI_JUDGE_MODEL:-}
     volumes:
       - ./backend:/app
@@ -62,7 +70,26 @@ services:
       - "5001:5000"
     depends_on:
       postgres:
-        # Wait until Postgres actually answers, not just until the container starts.
+        # Wait until each one actually answers, not just until the container starts.
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ./backend
+      target: dev
+    container_name: worker
+    restart: unless-stopped
+    command: taskiq worker app.jobs.broker:broker app.jobs.tasks --workers 1 --max-async-tasks 20 --reload
+    environment: *backend-env
+    volumes:
+      - ./backend:/app
+    depends_on:
+      postgres:
+        # Wait until each one actually answers, not just until the container starts.
+        condition: service_healthy
+      valkey:
         condition: service_healthy
 
   frontend:

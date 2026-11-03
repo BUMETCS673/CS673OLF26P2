@@ -18,6 +18,7 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { createDecksApi } from '../api/decks.js';
 import { createGenerateApi } from '../api/generate.js';
+import { createMaterialsApi } from '../api/materials.js';
 import { useApi } from '../api/useApi.js';
 import DeckLoadError from '../components/DeckLoadError.jsx';
 import { useLoad } from '../hooks/useLoad.js';
@@ -37,8 +38,12 @@ export default function GeneratePage() {
   const navigate = useNavigate();
   const decksApi = useApi(createDecksApi);
   const generateApi = useApi(createGenerateApi);
-  // Both hooks memoize on the session, so this only changes when the session does.
-  const api = useMemo(() => ({ getDeck: decksApi.getDeck, ...generateApi }), [decksApi, generateApi]);
+  const materialsApi = useApi(createMaterialsApi);
+  // These hooks memoize on the session, so this only changes when the session does.
+  const api = useMemo(
+    () => ({ getDeck: decksApi.getDeck, ...generateApi, ...materialsApi }),
+    [decksApi, generateApi, materialsApi],
+  );
   // key={id}: a different deck mounts a fresh view, as on the study page.
   return <div className="generate">
     <GenerateView key={id} api={api} deckId={id} onExit={() => navigate(`/decks/${id}`)} />
@@ -50,7 +55,8 @@ export default function GeneratePage() {
  * after. Never both.
  *
  * props:
- *   api     { getDeck(deckId), generate(deckId, body), acceptCards(id, indexes), rejectCards(id, indexes) }
+ *   api     { getDeck(deckId), generate(deckId, body), acceptCards(id, indexes), rejectCards(id, indexes),
+ *             suggestTopics(deckId), upload(file), getMaterial(documentId) }
  *   deckId  string, from the route
  *   onExit  () => void, back to the deck page
  */
@@ -107,7 +113,7 @@ export function GenerateView({ api, deckId, onExit }) {
     [api, decide, generationId],
   );
 
-  // Back to the form, with the deck loaded again so cardCount includes what was accepted.
+  // Back to the form, with the deck loaded again so it includes what was accepted.
   const generateMore = useCallback(() => {
     setGeneration(null);
     setFormError(null);
@@ -140,8 +146,8 @@ export function GenerateView({ api, deckId, onExit }) {
       ? <CandidateList generation={generation} busy={busy} error={listError}
         onAccept={accept} onReject={reject} onGenerateMore={generateMore} onBackToDeck={onExit} />
       : <section className="form-panel generate-form-panel">
-        <GenerateForm deck={deck} cardCount={deck.card_count} busy={busy} error={formError}
-          onGenerate={generate} />
+        <GenerateForm deck={deck} busy={busy} error={formError} onGenerate={generate}
+          onSuggest={() => api.suggestTopics(deckId)} materialsApi={api} />
       </section>}
   </main>;
 }

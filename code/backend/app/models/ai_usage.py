@@ -1,25 +1,45 @@
-"""The `ai_usage` table: one row per model per run, for every AI feature.
+"""The `ai_usage` table: one row per model per run, which every budget reads from."""
 
-Every budget reads from here. A row outlives its deck, so deleting a deck doesn't refund quota.
-"""
+from datetime import datetime
 
-from app.extensions import db
-from app.models.base import utcnow
+from sqlalchemy import DateTime, ForeignKey, Index, String
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.models.base import Base, utcnow
 
 
-class AiUsage(db.Model):
+class AiUsage(Base):
     __tablename__ = "ai_usage"
-
-    id = db.Column(db.Integer, primary_key=True)
-    feature = db.Column(db.String(16), nullable=False)  # "generate" | "leech" | "tutor"
-    role = db.Column(db.String(16), nullable=False)     # "writer" | "judge"
-    model = db.Column(db.String(64), nullable=False)
-    user_id = db.Column(
-        db.Integer, db.ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    # One per kind of budget check, each covering what it sums, so the checks never read the table.
+    __table_args__ = (
+        Index(
+            "ix_ai_usage_model_created_at", "model", "created_at", postgresql_include=["calls"]
+        ),
+        Index(
+            "ix_ai_usage_feature_created_at",
+            "feature",
+            "created_at",
+            postgresql_include=["calls", "user_id"],
+        ),
+        # Leads with `user_id`, so it also serves the cascade when a user is deleted.
+        Index(
+            "ix_ai_usage_user_id_feature_created_at",
+            "user_id",
+            "feature",
+            "created_at",
+            postgresql_include=["calls"],
+        ),
     )
-    deck_id = db.Column(db.Integer, db.ForeignKey("decks.id", ondelete="SET NULL"), nullable=True)
-    prompt_version = db.Column(db.String(16), nullable=True)
-    calls = db.Column(db.Integer, nullable=False)
-    input_tokens = db.Column(db.Integer, nullable=False)
-    output_tokens = db.Column(db.Integer, nullable=False)
-    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    feature: Mapped[str] = mapped_column(String(16))
+    role: Mapped[str] = mapped_column(String(16))  # "writer" | "judge" | "embedder"
+    model: Mapped[str] = mapped_column(String(64))
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    # Survives its deck, so deleting a deck doesn't refund quota.
+    deck_id: Mapped[int | None] = mapped_column(ForeignKey("decks.id", ondelete="SET NULL"))
+    prompt_version: Mapped[str | None] = mapped_column(String(16))
+    calls: Mapped[int]
+    input_tokens: Mapped[int]
+    output_tokens: Mapped[int]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

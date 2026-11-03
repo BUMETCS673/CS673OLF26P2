@@ -72,7 +72,7 @@ export default function StudyPage() {
  *   onExit  () => void, back to the deck page
  *   now     () => number, in milliseconds. Defaults to Date.now; tests pass a fixed clock.
  *   onSessionDone  (boolean) => void, optional. True while the summary shows, which lets
- *                  Leech Doctor run its job and show its notice.
+ *                  Problem Cards show its notice.
  */
 export function StudyView({ api, deckId, onExit, now = Date.now, onSessionDone }) {
   // Try again and Study more both reload. The session is keyed on the revision, so Study

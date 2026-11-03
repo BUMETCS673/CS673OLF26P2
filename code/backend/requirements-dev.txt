@@ -5,3 +5,6 @@
 
 ruff==0.16.8
 pytest-cov==7.1.0
+pytest-asyncio==1.4.1.post1
+httpx==0.28.1
+pytest==9.1.1
