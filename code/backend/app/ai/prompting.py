@@ -7,7 +7,6 @@ from collections.abc import Sequence
 
 from app.ai.schemas import CardDraft
 
-EXISTING_CARDS = 200  # newest cards sent along, so a run can avoid repeating them
 EXISTING_JSON_MAX = 30_000  # characters of JSON inside <existing_cards>
 
 _CLOSING_TAG = re.compile(

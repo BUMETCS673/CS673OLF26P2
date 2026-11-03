@@ -13,6 +13,7 @@ from taskiq import TaskiqEvents, TaskiqState
 
 from app.ai.checkpoints import close_checkpointers
 from app.ai.knowledge.cache import RedisByteStore
+from app.ai.models import check_model_chains
 from app.core.database import get_engine, get_session_factory
 from app.core.redis import get_redis
 from app.core.settings import get_settings
@@ -34,7 +35,8 @@ async def _index_material(context: JobContext) -> dict[str, Any] | None:
 
 async def _generate_cards(context: JobContext) -> dict[str, Any]:
     settings = get_settings()
-    write = partial(write_cards, engine=get_engine(), settings=settings)
+    cache = RedisByteStore(get_redis())
+    write = partial(write_cards, engine=get_engine(), settings=settings, cache=cache)
     return await generate_cards(context, settings, write)
 
 
@@ -73,6 +75,8 @@ async def _publish(job_id: int) -> None:
 
 @broker.on_event(TaskiqEvents.WORKER_STARTUP)
 async def start_relay(state: TaskiqState) -> None:
+    """Checks the model chains first, so a bad one stops the worker before it takes a job."""
+    check_model_chains(get_settings())
     state.relay = asyncio.create_task(
         run_relay(get_settings().database_url, get_session_factory(), _publish)
     )

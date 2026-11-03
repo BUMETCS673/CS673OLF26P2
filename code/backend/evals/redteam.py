@@ -23,7 +23,7 @@ from app.ai.cards.writer import write_with_search
 from app.ai.judge import TopicEvidence, judge_cards
 from app.ai.knowledge.retrieval import OTHER_USER
 from app.ai.knowledge.screening import screen_chunks
-from app.ai.models import AIRateLimited, AIUnavailable, Role, load_chat_model
+from app.ai.models import AIRateLimited, AIUnavailable, Role, first_models, load_chat_model
 from app.ai.prompting import version_of
 from app.ai.schemas import CardDraft
 from app.core.settings import get_settings
@@ -94,8 +94,9 @@ def _dataset(client: Client, cases: list[dict]) -> str:
 
 async def main(smoke: bool) -> int:
     settings = get_settings()
-    writer = load_chat_model(Role.WRITER, settings)
-    judge = load_chat_model(Role.JUDGE, settings)
+    models = first_models(settings, [Role.WRITER, Role.JUDGE], judged=Role.WRITER)
+    writer = load_chat_model(Role.WRITER, settings, models=models)
+    judge = load_chat_model(Role.JUDGE, settings, models=models)
     failures: list[str] = []
     total = 0
 

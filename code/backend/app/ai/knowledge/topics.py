@@ -3,19 +3,14 @@
 Suggestions are optional, since the learner can type a topic, so a failure gives none.
 """
 
-import logging
 from collections.abc import Callable, Sequence
 
-from langchain_core.exceptions import OutputParserException
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
-from pydantic import ValidationError
 
-from app.ai.models import AIRateLimited, AIUnavailable, ai_errors
+from app.ai.models import AIUnavailable, structured_reply_or_none
 from app.ai.prompting import block, escape_tags
 from app.ai.schemas import Topics
-
-logger = logging.getLogger(__name__)
 
 MAX_TOPICS = 8
 MIN_HEADINGS = 2  # one heading is probably the document's title, not a list of topics
@@ -67,9 +62,8 @@ async def suggest_topics(
         HumanMessage("\n".join(block("source", escape_tags(text)) for text in excerpts)),
     ]
     try:
-        with ai_errors():
-            reply = await load_model().with_structured_output(Topics).ainvoke(prompt)
-    except (AIRateLimited, AIUnavailable, OutputParserException, ValidationError) as error:
-        logger.warning("ai_topics outcome=failed type=%s", type(error).__name__)
+        model = load_model()
+    except AIUnavailable:
         return []
-    return clean_topics(reply.topics)[:MAX_TOPICS]
+    reply = await structured_reply_or_none(model, Topics, prompt, "ai_topics")
+    return clean_topics(reply.topics)[:MAX_TOPICS] if reply else []

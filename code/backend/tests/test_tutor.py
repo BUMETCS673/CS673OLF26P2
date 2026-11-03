@@ -14,7 +14,7 @@ from sqlalchemy import delete, func, select
 from app.ai.checkpoints import discard_threads, open_checkpointer
 from app.ai.judge import PASSED
 from app.ai.models import AIUnavailable, Role
-from app.ai.schemas import Verdict, Verdicts
+from app.ai.schemas import CardDraft, Verdict, Verdicts
 from app.ai.tutor.context import TutorContext
 from app.ai.tutor.graph import (
     CANT_ANSWER,
@@ -24,7 +24,7 @@ from app.ai.tutor.graph import (
     resume_turn,
     run_turn,
 )
-from app.core.settings import get_settings
+from app.core.settings import EMBEDDING_DIMENSIONS, get_settings
 from app.models import Card, Deck, Job, TutorConversation
 from app.models.job import EMBED_CARDS
 from app.models.tutor import AWAITING_DECISION, IDLE, REPLYING
@@ -95,16 +95,21 @@ async def test_tool_results_reach_the_model_but_not_the_learner():
     assert [item["text"] for item in outcome.messages] == ["Quiz me", "Try it."]
 
 
-async def test_the_judge_sees_the_decks_newest_cards_first():
+async def test_the_judge_sees_the_cards_found_near_the_proposal():
     judge = ScriptedModel(_verdicts(True))
-    older = {"front": "Capital of Bolivia?", "back": "Sucre", "lapses": 0}
+    searched = []
+
+    async def find_existing(drafts):
+        searched.append([draft.front for draft in drafts])
+        return [CardDraft(front="Capital of Bolivia?", back="Sucre")]
+
     writer = ScriptedChatModel(replies=[_proposal()])
-    context = replace(_context(writer, judge), cards=[older, CARD])
+    context = replace(_context(writer, judge), find_existing=find_existing)
 
     await run_turn(context, InMemorySaver(), "t", "Add a card")
 
-    prompt = judge.prompts[0][-1].content
-    assert prompt.index(CARD["front"]) < prompt.index(older["front"])
+    assert searched == [[NEW_CARD["front"]]]
+    assert "Capital of Bolivia?" in judge.prompts[0][-1].content
 
 
 async def test_search_finds_cards_by_meaning_and_by_words():
@@ -128,7 +133,8 @@ async def test_the_nearest_cards_are_from_this_deck_and_model(
 ):
     user = await make_user("near@example.com")
     deck, other_deck = await make_deck(user), await make_deck(user, name="Other")
-    near, far = [1.0, *[0.0] * 767], [0.0, 1.0, *[0.0] * 766]
+    near = [1.0, *[0.0] * (EMBEDDING_DIMENSIONS - 1)]
+    far = [0.0, 1.0, *[0.0] * (EMBEDDING_DIMENSIONS - 2)]
 
     await make_card(deck, front="Far?", embedding=far, embedding_model="m")
     await make_card(deck, front="Near?", embedding=near, embedding_model="m")
@@ -239,7 +245,7 @@ def models(monkeypatch):
 
     def _set(*replies, verdicts=None):
         chosen = {
-            Role.WRITER: ScriptedChatModel(replies=list(replies)),
+            Role.HELPER: ScriptedChatModel(replies=list(replies)),
             Role.JUDGE: ScriptedModel(*([verdicts] if verdicts else [])),
         }
         monkeypatch.setattr(service_module, "load_chat_model", lambda role, *_, **__: chosen[role])
@@ -372,5 +378,7 @@ async def test_deleting_the_deck_during_a_reply_is_not_found(
 async def test_reset_deletes_the_chat(client, session, deck, models):
     models(AIMessage("Hello."))
     await client.post(f"/api/decks/{deck.id}/tutor/messages", json={"text": "Hi"})
-    assert (await client.delete(f"/api/decks/{deck.id}/tutor")).status_code == 204
+    reset = await client.delete(f"/api/decks/{deck.id}/tutor")
+
+    assert reset.status_code == 204
     assert await session.scalar(select(func.count()).select_from(TutorConversation)) == 0

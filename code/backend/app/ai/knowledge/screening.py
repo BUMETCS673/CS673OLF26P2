@@ -12,13 +12,11 @@ import re
 from collections.abc import Callable, Sequence
 from itertools import batched
 
-from langchain_core.exceptions import OutputParserException
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
-from pydantic import ValidationError
 
 from app.ai.knowledge.topics import evenly_spaced
-from app.ai.models import AIRateLimited, AIUnavailable, ai_errors
+from app.ai.models import AIUnavailable, structured_reply_or_none
 from app.ai.prompting import json_block
 from app.ai.schemas import CleanChunks
 
@@ -65,17 +63,16 @@ async def screen_chunks(
         position for position, text in enumerate(texts) if not looks_like_instructions(text)
     ]
     chosen = evenly_spaced(candidates, BATCH_SIZE * MAX_SCREEN_CALLS)
+    try:
+        model = load_model()
+    except AIUnavailable:
+        return []  # chunks stay private
 
     async def screen(batch: tuple[int, ...]) -> list[int]:
         """A failed batch stays private, which is safe, and doesn't stop the others."""
         items = [{"index": index, "text": texts[position]} for index, position in enumerate(batch)]
         prompt = [SystemMessage(SCREEN_RULES), HumanMessage(json_block("source", items))]
-        try:
-            with ai_errors():
-                reply = await load_model().with_structured_output(CleanChunks).ainvoke(prompt)
-        except (AIRateLimited, AIUnavailable, OutputParserException, ValidationError) as error:
-            logger.warning("screening outcome=failed type=%s", type(error).__name__)
-            return []
+        reply = await structured_reply_or_none(model, CleanChunks, prompt, "screening")
         if reply is None:
             return []
         return [batch[index] for index in set(reply.clean) if 0 <= index < len(batch)]

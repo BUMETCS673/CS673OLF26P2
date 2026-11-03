@@ -27,6 +27,16 @@ jobs:
         working-directory: code/backend
 
     services:
+      # Rate limiter keeps model calls from bursting and failing.
+      valkey:
+        image: valkey/valkey:9
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
       postgres:
         image: pgvector/pgvector:pg18
         env:
@@ -43,6 +53,7 @@ jobs:
 
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/cadence_eval
+      REDIS_URL: redis://localhost:6379/0
 
     steps:
       - uses: actions/checkout@v7

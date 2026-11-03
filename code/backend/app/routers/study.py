@@ -2,15 +2,15 @@
 
 from fastapi import APIRouter
 
-from app.dependencies import CurrentUser, StudyServiceDep
+from app.dependencies import CurrentUser, OwnedDeck, StudyServiceDep
 from app.schemas.study import DueCards, ReviewRequest, StudyCardRead
 
 router = APIRouter(prefix="/api", tags=["study"])
 
 
 @router.get("/decks/{deck_id}/due")
-async def due_cards(deck_id: int, user: CurrentUser, service: StudyServiceDep) -> DueCards:
-    return await service.due_cards(deck_id, user)
+async def due_cards(deck: OwnedDeck, service: StudyServiceDep) -> DueCards:
+    return await service.due_cards(deck)
 
 
 @router.post("/cards/{card_id}/review")

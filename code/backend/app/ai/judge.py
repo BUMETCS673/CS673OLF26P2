@@ -5,13 +5,11 @@ from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 
-from langchain_core.exceptions import OutputParserException
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
-from pydantic import ValidationError
 
 from app.ai.knowledge.retrieval import is_unverified
-from app.ai.models import AIRateLimited, AIUnavailable, ai_errors
+from app.ai.models import structured_reply_or_none
 from app.ai.prompting import block, existing_json, json_block, text_block
 from app.ai.schemas import CardDraft, Verdict, Verdicts
 
@@ -115,18 +113,21 @@ async def judge_cards(
     candidates: Sequence[CardDraft],
     evidence: Evidence,
     existing: Sequence[CardDraft] = (),
+    *,
+    raise_transient: bool = False,
 ) -> dict[int, Verdict]:
     """Each candidate's verdict by index. Empty means no usable answer, so the check was skipped.
 
-    A failed check shouldn't lose the cards, so failures are logged rather than raised.
+    Failures are logged rather than raised so the cards aren't lost.
+    `raise_transient` lets a graph node's retry policy see transient failures.
     """
-    structured = model.with_structured_output(Verdicts)
-    try:
-        with ai_errors():
-            reply = await structured.ainvoke(_prompt(candidates, evidence, existing))
-    except (AIRateLimited, AIUnavailable, OutputParserException, ValidationError) as error:
-        logger.warning("judge outcome=failed type=%s", type(error).__name__)
-        return {}
+    reply = await structured_reply_or_none(
+        model,
+        Verdicts,
+        _prompt(candidates, evidence, existing),
+        "judge",
+        raise_transient=raise_transient,
+    )
     if reply is None:
         return {}
 

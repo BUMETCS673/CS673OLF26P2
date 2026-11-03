@@ -1,5 +1,6 @@
 """The `cards` table."""
 
+import uuid
 from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
@@ -42,6 +43,13 @@ class Card(TimestampMixin, Base):
         Vector(EMBEDDING_DIMENSIONS), deferred=True
     )
     embedding_model: Mapped[str | None] = mapped_column(String(64))
+    # Copy this card confirmed, hidden when the card is reported.
+    # use_alter breaks the FK cycle with knowledge_chunks.source_card_id.
+    # Indexed so ON DELETE SET NULL doesn't scan cards.
+    confirmed_chunk_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("knowledge_chunks.langchain_id", ondelete="SET NULL", use_alter=True),
+        index=True,
+    )
 
     @property
     def schedule(self) -> CardSchedule:

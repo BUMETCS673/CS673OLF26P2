@@ -5,9 +5,10 @@ from ai_fakes import ScriptedModel
 from langgraph.checkpoint.memory import InMemorySaver
 
 from app.ai.fake import FakeChatModel
+from app.ai.graphs import TRANSIENT_RETRY
 from app.ai.judge import PASSED, SKIPPED
-from app.ai.models import AIRateLimited
-from app.ai.problem_cards.checks import MAX_SIMILAR_CARDS, keep_approved, similar_card_finder
+from app.ai.models import AIRateLimited, AITransient
+from app.ai.problem_cards.checks import keep_approved
 from app.ai.problem_cards.context import ProblemCardContext
 from app.ai.problem_cards.graph import resume_review, start_review
 from app.ai.schemas import CardDraft, CardFixes, Diagnosis, FixOption, Verdict, Verdicts
@@ -49,28 +50,6 @@ async def _start(writer, judge, cards=None, fronts=(), saver=None, thread="t"):
         existing_fronts=list(fronts),
     )
     return await start_review(context, saver or InMemorySaver(), thread)
-
-
-# --- similar cards ------------------------------------------------------------------------
-
-
-def test_similar_cards_share_the_most_words_and_leave_out_the_card_itself():
-    card = {"id": 1, "front": "mitosis cell division", "back": "x"}
-    others = [
-        card,
-        {"id": 2, "front": "cell", "back": "one"},
-        {"id": 3, "front": "cell division", "back": "two"},
-        {"id": 4, "front": "rivers", "back": "three"},
-    ]
-
-    assert [item["back"] for item in similar_card_finder(others)(card)] == ["two", "one"]
-
-
-def test_similar_cards_are_limited():
-    card = {"id": 0, "front": "cell", "back": "x"}
-    others = [{"id": n, "front": "cell", "back": str(n)} for n in range(1, 30)]
-
-    assert len(similar_card_finder(others)(card)) == MAX_SIMILAR_CARDS
 
 
 # --- which options survive ----------------------------------------------------------------
@@ -189,6 +168,18 @@ async def test_no_answer_from_the_judge_keeps_the_options_as_skipped():
 
     assert len(outcome.recommendations) == 1
     assert outcome.verification == SKIPPED
+
+
+async def test_a_judge_that_keeps_failing_still_pauses_for_the_learner():
+    saver = InMemorySaver()
+    judge = ScriptedModel(*[AITransient()] * TRANSIENT_RETRY.max_attempts)
+
+    outcome = await _start(ScriptedModel(_diagnosis(_option())), judge, saver=saver)
+
+    assert outcome.verification == SKIPPED
+    assert len(outcome.recommendations) == 1
+    decisions = [{"card_id": 1, "option": 0}]
+    assert await resume_review(saver, "t", decisions) == decisions
 
 
 async def test_a_failed_diagnosis_is_left_for_the_job_to_retry():

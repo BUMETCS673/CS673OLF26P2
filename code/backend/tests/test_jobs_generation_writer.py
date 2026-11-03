@@ -10,7 +10,7 @@ from app.ai.cards.graph import CardOutcome
 from app.ai.cards.prompts import PROMPT_VERSION
 from app.ai.judge import PASSED, DocumentEvidence, TopicEvidence
 from app.ai.knowledge.indexing import create_record_manager
-from app.ai.models import AIRateLimited, AIUnavailable
+from app.ai.models import AIRateLimited, AIUnavailable, Role, first_models
 from app.ai.schemas import CardDraft
 from app.ai.usage import RunUsage
 from app.core.errors import InvalidRequest
@@ -23,6 +23,7 @@ from app.models import Document as StoredDocument
 from app.models import DocumentFilePart, User
 
 CARD = CardDraft(front="What divides?", back="Cells")
+FAKE = Settings(ai_writer_provider="fake", ai_judge_provider="fake")
 
 
 def _request(mode="prompt", **fields) -> CardRequest:
@@ -35,8 +36,9 @@ def _request(mode="prompt", **fields) -> CardRequest:
         "topic": "Mitosis" if mode == "file" else None,
         "document_id": 7 if mode == "file" else None,
         "owner_id": 1,
-        "existing": [CARD],
+        "deck_id": 1,
         "existing_fronts": ["What divides?"],
+        "models": first_models(FAKE, [Role.WRITER, Role.JUDGE], judged=Role.WRITER),
     }
     return CardRequest(**{**values, **fields})
 
@@ -120,7 +122,7 @@ async def test_file_mode_finds_the_material_itself(engine, settings, graph, retr
     result = await write_cards(_request("file"), RunUsage(), engine, settings)
 
     assert retriever.queries == ["Mitosis"]
-    assert retriever_with.built == [{"document_id": 7, "k": 6}]
+    assert retriever_with.built == [{"document_id": 7, "k": 6, "cache": None}]
     context = graph[0]
     assert context.retriever is None  # the model gets no tool in this mode
     assert "Mitosis has phases.\n\nMore." in context.body
@@ -159,7 +161,7 @@ async def test_prompt_mode_offers_the_writer_a_search(
 
     await write_cards(_request(), RunUsage(), engine, settings)
 
-    assert retriever_with.built == [{"document_id": None, "k": 6, "viewer_id": 1}]
+    assert retriever_with.built == [{"document_id": None, "k": 6, "viewer_id": 1, "cache": None}]
     context = graph[0]
     assert context.retriever is retriever
     assert retriever.queries == []  # the model decides whether to search
@@ -201,7 +203,6 @@ async def test_the_deck_reaches_the_graph(engine, settings, graph, knowledge_bas
     context = graph[0]
     assert "Biology 101" in context.body
     assert context.count == 3
-    assert context.existing == [CARD]
     assert context.existing_fronts == ["What divides?"]
 
 

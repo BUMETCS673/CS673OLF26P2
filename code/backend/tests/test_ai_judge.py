@@ -10,7 +10,7 @@ from langchain_core.exceptions import OutputParserException
 from app.ai.fake import FakeChatModel
 from app.ai.judge import DocumentEvidence, NoEvidence, TopicEvidence, judge_cards
 from app.ai.knowledge.retrieval import ACCEPTED_CARD, OTHER_USER, OWN_FILE, labelled_text
-from app.ai.models import AIRateLimited, AIUnavailable
+from app.ai.models import AIRateLimited, AITransient, AIUnavailable
 from app.ai.prompting import EXISTING_JSON_MAX, escape_tags, existing_json
 from app.ai.schemas import CardDraft, Verdict, Verdicts
 
@@ -61,6 +61,15 @@ async def test_candidates_carry_their_index():
 )
 async def test_a_failed_check_is_empty_not_an_error(failure):
     assert await judge_cards(ScriptedModel(failure), [CARD], NoEvidence()) == {}
+
+
+async def test_a_transient_failure_reaches_a_retrying_node():
+    with pytest.raises(AITransient):
+        await judge_cards(ScriptedModel(AITransient()), [CARD], NoEvidence(), raise_transient=True)
+
+
+async def test_a_transient_failure_is_skipped_without_a_retrying_node():
+    assert await judge_cards(ScriptedModel(AITransient()), [CARD], NoEvidence()) == {}
 
 
 async def test_no_reply_is_empty():

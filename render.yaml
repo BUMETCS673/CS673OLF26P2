@@ -64,16 +64,18 @@ services:
         value: "1"
       - key: PORT
         value: "5000"
-      # AI card generation, with the real model. Set AI_WRITER_PROVIDER to "fake" in the
-      # dashboard to fall back to sample cards if Google's quota runs out mid-demo.
+      # The real models. Each chat role falls back to other Gemini models once a model's daily
+      # limit is reached. Set AI_WRITER_PROVIDER to "fake" in the dashboard for sample cards.
       - key: AI_WRITER_PROVIDER
         value: gemini
       - key: AI_JUDGE_PROVIDER
         value: gemini
+      - key: AI_HELPER_PROVIDER
+        value: gemini
       - key: AI_EMBEDDER_PROVIDER
         value: gemini
       # sync: false means Render never fills these in from this file: enter them by hand
-      # in the backend's Environment tab. The key is a secret; it never goes in the repo.
+      # in the backend's Environment tab. The keys are secrets; they never go in the repo.
       - key: GEMINI_API_KEY
         sync: false
       - key: AI_WRITER_MODEL

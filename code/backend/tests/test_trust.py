@@ -5,6 +5,7 @@ from datetime import timedelta
 
 import pytest
 
+from app.core.settings import EMBEDDING_DIMENSIONS
 from app.models import Card, ChunkReport, Deck, KnowledgeChunk, User, utcnow
 from app.repositories.knowledge import KnowledgeRepository
 from app.repositories.users import (
@@ -80,7 +81,7 @@ def waiting_chunk(session):
         chunk = KnowledgeChunk(
             langchain_id=uuid.uuid4(),
             content="A passage",
-            embedding=[1.0, *[0.0] * 767],
+            embedding=[1.0, *[0.0] * (EMBEDDING_DIMENSIONS - 1)],
             embedding_model="m",
             owner_id=owner.id,
             passed_screening=True,

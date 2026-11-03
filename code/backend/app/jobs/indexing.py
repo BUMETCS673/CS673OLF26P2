@@ -98,12 +98,12 @@ async def _screen(
     await _update(context, document_id, stage=SCREENING)
     async with context.session_factory() as session:
         budget = BudgetService(UsageRepository(session), settings)
-        has_room = await budget.within_model_limits({Role.WRITER: MAX_SCREEN_CALLS})
-    if not has_room:  # the chunks stay private, which is safe
+        models = await budget.pick_models({Role.HELPER: MAX_SCREEN_CALLS})
+    if models is None:  # the chunks stay private, which is safe
         return []
     clean = await screen_chunks(
         [chunk.page_content for chunk in chunks],
-        partial(load_chat_model, Role.WRITER, settings, usage),
+        partial(load_chat_model, Role.HELPER, settings, usage, models=models),
     )
     async with context.session_factory() as session:
         trusted = await UserRepository(session).is_trusted(context.user_id)
@@ -160,11 +160,14 @@ async def _index(
     clean = await _screen(context, document_id, settings, usage, chunks)
 
     await _update(context, document_id, stage=FINDING_TOPICS)
+    async with context.session_factory() as session:
+        budget = BudgetService(UsageRepository(session), settings)
+        models = await budget.pick_models({Role.HELPER: 1})  # None tries the whole chain
     # Only what passed screening, so a file's injected text can't shape the options a learner sees.
     topics = await suggest_topics(
         [heading for heading in headings if not looks_like_instructions(heading)],
         [chunks[position].page_content for position in clean],
-        partial(load_chat_model, Role.WRITER, settings, usage),
+        partial(load_chat_model, Role.HELPER, settings, usage, models=models),
     )
 
     # The chunks now hold the text, so the original only costs storage. A failed file keeps its

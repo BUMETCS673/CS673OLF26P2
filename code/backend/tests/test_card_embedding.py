@@ -5,7 +5,9 @@ from langchain_core.stores import InMemoryByteStore
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from app.ai.knowledge import same_fact
 from app.ai.knowledge.indexing import create_record_manager
+from app.ai.models import Role
 from app.core.settings import Settings
 from app.jobs import card_embedding
 from app.jobs.card_embedding import embed_cards
@@ -15,6 +17,25 @@ from app.repositories.users import UserRepository
 from app.services.budget import MATERIALS, BudgetService
 
 pytestmark = pytest.mark.usefixtures("trust_everyone")
+
+
+class SameFactModel:
+    """Fake same-fact check that gives `answer` for every pair and records each call."""
+
+    def __init__(self):
+        self.answer = True
+        self.calls: list[list[tuple[str, str]]] = []
+
+    async def same_facts(self, pairs, _load_model):
+        self.calls.append(list(pairs))
+        return [self.answer] * len(pairs)
+
+
+@pytest.fixture(autouse=True)
+def same_fact_model(monkeypatch):
+    model = SameFactModel()
+    monkeypatch.setattr(same_fact, "same_facts", model.same_facts)
+    return model
 
 
 @pytest.fixture
@@ -205,6 +226,79 @@ async def test_a_trusted_learner_takes_over_from_a_new_account(
     async with factory() as session:
         accepted_by = await session.scalar(select(KnowledgeChunk.accepted_by))
     assert accepted_by == second_learner.id
+
+
+async def test_only_matches_that_could_confirm_reach_the_model(
+    make_cards, run, second_learner, same_fact_model
+):
+    [first] = await make_cards("What divides?")
+    await run([first.id])
+    [again] = await make_cards("What divides?")
+    await run([again.id])  # own copy skips the model check
+    assert same_fact_model.calls == []
+
+    [theirs] = await make_cards("What divides?")
+    await run([theirs.id], user_id=second_learner.id)
+    assert same_fact_model.calls == [[("What divides? A", "What divides? A")]]
+
+
+async def _confirmed_chunk(factory, card_id):
+    async with factory() as session:
+        return await session.scalar(select(Card.confirmed_chunk_id).where(Card.id == card_id))
+
+
+@pytest.mark.parametrize("answer", [True, False])
+async def test_a_confirming_card_remembers_the_copy_it_confirmed(
+    factory, make_cards, run, second_learner, same_fact_model, answer
+):
+    same_fact_model.answer = answer
+    [first] = await make_cards("What divides?")
+    await run([first.id])
+    async with factory() as session:
+        copy_id = await session.scalar(select(KnowledgeChunk.langchain_id))
+
+    [theirs] = await make_cards("What divides?")
+    await run([theirs.id], user_id=second_learner.id)
+
+    assert await _confirmed_chunk(factory, theirs.id) == (copy_id if answer else None)
+    assert await _confirmed_chunk(factory, first.id) is None
+
+
+async def _accepted_by(factory) -> set[int]:
+    async with factory() as session:
+        return set(await session.scalars(select(KnowledgeChunk.accepted_by)))
+
+
+async def test_a_close_match_the_model_calls_different_confirms_nothing(
+    factory, make_cards, run, second_learner, user_and_deck, same_fact_model
+):
+    same_fact_model.answer = False
+    [first] = await make_cards("What divides?")
+    await run([first.id])
+
+    [theirs] = await make_cards("What divides?")
+    assert await run([theirs.id], user_id=second_learner.id) == {"saved": 1}
+
+    # Each learner keeps an unshared copy.
+    assert await _shared_count(factory) == 0
+    assert await _accepted_by(factory) == {user_and_deck[0].id, second_learner.id}
+
+
+async def test_without_helper_budget_a_close_match_confirms_nothing(
+    factory, make_cards, run, second_learner, same_fact_model, monkeypatch
+):
+    async def no_helper(_budget, cost, reserve=0, **_):
+        return None if Role.HELPER in cost else {}
+
+    [first] = await make_cards("What divides?")
+    await run([first.id])
+    monkeypatch.setattr(BudgetService, "pick_models", no_helper)
+
+    [theirs] = await make_cards("What divides?")
+    await run([theirs.id], user_id=second_learner.id)
+
+    assert same_fact_model.calls == []
+    assert await _shared_count(factory) == 0
 
 
 async def test_a_retry_adds_nothing(factory, make_cards, run):

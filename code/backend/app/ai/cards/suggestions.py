@@ -2,13 +2,11 @@
 
 from collections.abc import Sequence
 
-from langchain_core.exceptions import OutputParserException
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
-from pydantic import ValidationError
 
 from app.ai.knowledge.topics import clean_topics
-from app.ai.models import AIUnavailable, ai_errors
+from app.ai.models import structured_reply
 from app.ai.prompting import block, existing_json, text_block
 from app.ai.schemas import CardDraft, Topics
 
@@ -31,10 +29,6 @@ async def suggest_deck_topics(
     """Raises AIRateLimited or AIUnavailable, since the learner asked for these and should know."""
     deck = f"Name: {name}\nDescription: {description or 'none'}"
     body = "\n".join([text_block("deck", deck), block("existing_cards", existing_json(existing))])
-    structured = model.with_structured_output(Topics)
-    try:
-        with ai_errors():
-            reply = await structured.ainvoke([SystemMessage(SUGGESTION_RULES), HumanMessage(body)])
-    except (OutputParserException, ValidationError):
-        raise AIUnavailable() from None
+    messages = [SystemMessage(SUGGESTION_RULES), HumanMessage(body)]
+    reply = await structured_reply(model, Topics, messages)
     return clean_topics(reply.topics)[:SUGGESTIONS] if reply else []

@@ -9,7 +9,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.ai.models import AIRateLimited, AIUnavailable
+from app.ai.models import AIRateLimited, AITransient, AIUnavailable
 from app.ai.tracing import labelled_trace
 from app.core.errors import AppError
 from app.models import Job, utcnow
@@ -50,6 +50,13 @@ def _safe_message(error: Exception) -> str:
     if isinstance(error, AIRateLimited | AIUnavailable | AppError):
         return error.message
     return SOMETHING_WENT_WRONG
+
+
+def _is_permanent(error: Exception) -> bool:
+    """Returns True for errors a retry can't fix, such as a bad key or a malformed reply."""
+    if isinstance(error, AITransient):
+        return False
+    return isinstance(error, AppError | AIUnavailable)
 
 
 def _failure_details(error: Exception) -> dict[str, Any] | None:
@@ -107,7 +114,7 @@ async def run_job(
         logger.warning("job outcome=failed kind=%s type=%s", kind, type(error).__name__)
         async with session_factory() as session:
             jobs = JobRepository(session)
-            if attempts < MAX_ATTEMPTS and not isinstance(error, AppError):
+            if attempts < MAX_ATTEMPTS and not _is_permanent(error):
                 event = JobEvent(status=QUEUED)
                 changed = await jobs.requeue(job_id, attempts, utcnow() + RETRY_DELAY * attempts)
             else:

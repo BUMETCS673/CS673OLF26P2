@@ -32,6 +32,7 @@ def settings(engine):
         database_url=engine.url.render_as_string(hide_password=False),
         ai_embedder_provider="fake",
         ai_writer_provider="fake",
+        ai_helper_provider="fake",
     )
 
 

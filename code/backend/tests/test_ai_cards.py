@@ -11,8 +11,9 @@ from app.ai.cards.context import CardContext
 from app.ai.cards.graph import run_card_graph
 from app.ai.cards.writer import write_with_search
 from app.ai.fake import FakeChatModel
+from app.ai.graphs import TRANSIENT_RETRY
 from app.ai.judge import PASSED, SKIPPED, NoEvidence, TopicEvidence
-from app.ai.models import AIRateLimited, AIUnavailable
+from app.ai.models import AIRateLimited, AITransient, AIUnavailable
 from app.ai.schemas import CardBatch, CardDraft, Verdict, Verdicts
 
 
@@ -163,6 +164,37 @@ async def test_a_failed_repair_keeps_the_approved_cards():
     assert outcome.cards == [_card(1)]
 
 
+async def test_a_transient_judge_failure_retries_only_the_judge():
+    writer = ScriptedModel(_batch(_card(1)))
+    judge = ScriptedModel(AITransient(), _pass(0))
+
+    outcome = await run_card_graph(_context(writer, judge, count=1))
+
+    assert (outcome.cards, outcome.verification) == ([_card(1)], PASSED)
+    assert len(writer.prompts) == 1
+
+
+async def test_a_judge_that_keeps_failing_falls_back_to_skipped():
+    writer = ScriptedModel(_batch(_card(1)))
+    judge = ScriptedModel(*[AITransient()] * TRANSIENT_RETRY.max_attempts)
+
+    outcome = await run_card_graph(_context(writer, judge, count=1))
+
+    assert (outcome.cards, outcome.verification) == ([_card(1)], SKIPPED)
+    assert len(writer.prompts) == 1
+
+
+async def test_a_repair_that_keeps_failing_keeps_the_approved_cards():
+    writer = ScriptedModel(
+        _batch(_card(1), _card(2)), *[AITransient()] * TRANSIENT_RETRY.max_attempts
+    )
+    judge = ScriptedModel(Verdicts(verdicts=[Verdict(index=0, ok=True), _fail(1)]))
+
+    outcome = await run_card_graph(_context(writer, judge))
+
+    assert outcome.cards == [_card(1)]
+
+
 async def test_a_failed_writer_ends_the_run_for_the_job_to_retry():
     with pytest.raises(AIRateLimited):
         await run_card_graph(_context(ScriptedModel(AIRateLimited()), ScriptedModel()))
@@ -188,16 +220,23 @@ async def test_a_replacement_cant_repeat_a_kept_card():
 
 async def test_the_deck_is_passed_to_the_judge_and_its_fronts_are_avoided():
     judge = ScriptedModel(_pass(0))
+    searched = []
+
+    async def find_existing(drafts):
+        searched.append(list(drafts))
+        return [_card(9)]
+
     context = _context(
         ScriptedModel(_batch(_card(1), _card(2))),
         judge,
-        existing=[_card(9)],
+        find_existing=find_existing,
         existing_fronts=["question 1"],
     )
 
     outcome = await run_card_graph(context)
 
     assert outcome.cards == [_card(2)]
+    assert searched == [[_card(2)]]  # only what's left to judge
     assert "Question 9?" in judge.prompts[0][1].content
 
 

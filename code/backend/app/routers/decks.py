@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, status
 
-from app.dependencies import CurrentUser, DeckServiceDep
+from app.dependencies import CurrentUser, DeckServiceDep, OwnedDeck
 from app.schemas.decks import DeckCreate, DeckRead, DeckUpdate
 
 router = APIRouter(prefix="/api/decks", tags=["decks"])
@@ -19,17 +19,15 @@ async def create_deck(body: DeckCreate, user: CurrentUser, service: DeckServiceD
 
 
 @router.get("/{deck_id}")
-async def get_deck(deck_id: int, user: CurrentUser, service: DeckServiceDep) -> DeckRead:
-    return await service.get(deck_id, user)
+async def get_deck(deck: OwnedDeck, service: DeckServiceDep) -> DeckRead:
+    return await service.get(deck)
 
 
 @router.patch("/{deck_id}")
-async def update_deck(
-    deck_id: int, body: DeckUpdate, user: CurrentUser, service: DeckServiceDep
-) -> DeckRead:
-    return await service.update(deck_id, user, body)
+async def update_deck(deck: OwnedDeck, body: DeckUpdate, service: DeckServiceDep) -> DeckRead:
+    return await service.update(deck, body)
 
 
 @router.delete("/{deck_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_deck(deck_id: int, user: CurrentUser, service: DeckServiceDep) -> None:
-    await service.delete(deck_id, user)
+async def delete_deck(deck: OwnedDeck, service: DeckServiceDep) -> None:
+    await service.delete(deck)

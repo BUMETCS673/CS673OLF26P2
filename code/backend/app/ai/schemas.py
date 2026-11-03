@@ -34,6 +34,12 @@ class CleanChunks(BaseModel):
     clean: list[StrictInt] = Field(description="Their indexes.")
 
 
+class SameFacts(BaseModel):
+    """The pairs whose two cards teach the same fact."""
+
+    same: list[StrictInt] = Field(description="Their indexes.")
+
+
 class FixOption(BaseModel):
     kind: Literal["rewrite", "split", "contrast", "prerequisite"]
     reason: str = Field(description="The likely cause and how this fixes it, in one sentence.")

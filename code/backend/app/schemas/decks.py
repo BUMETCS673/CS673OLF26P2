@@ -3,9 +3,10 @@
 from pydantic import BaseModel, field_validator
 
 from app.models import Deck
-from app.schemas.common import UtcDatetime, required_text
+from app.schemas.common import UtcDatetime, text_up_to
 
 NAME_MAX = 120
+DeckName = text_up_to(NAME_MAX)
 DESCRIPTION_MAX = 1000
 
 
@@ -21,13 +22,8 @@ def _clean_description(value: object) -> str | None:
 
 
 class DeckCreate(BaseModel):
-    name: str
+    name: DeckName
     description: str | None = None
-
-    @field_validator("name", mode="before")
-    @classmethod
-    def _check_name(cls, value: object) -> str:
-        return required_text(value, "name", NAME_MAX)
 
     @field_validator("description", mode="before")
     @classmethod
@@ -38,13 +34,9 @@ class DeckCreate(BaseModel):
 class DeckUpdate(BaseModel):
     """Only the fields sent are changed, which is why the service uses `exclude_unset`."""
 
-    name: str | None = None
+    # Not Optional, so an explicit null is rejected rather than saved.
+    name: DeckName = None
     description: str | None = None
-
-    @field_validator("name", mode="before")
-    @classmethod
-    def _check_name(cls, value: object) -> str:
-        return required_text(value, "name", NAME_MAX)
 
     @field_validator("description", mode="before")
     @classmethod

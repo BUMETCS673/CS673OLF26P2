@@ -8,6 +8,7 @@ from functools import cached_property
 from langchain_core.language_models import BaseChatModel
 
 from app.ai.cards.checks import normalized_fronts
+from app.ai.cards.existing import FindExisting, no_existing_cards
 
 _WORD = re.compile(r"\w+")
 
@@ -28,6 +29,7 @@ class TutorContext:
     cards: list[dict]  # {"front", "back", "lapses"}, for this deck only
     # This deck's cards closest in meaning to a query. Empty if the search can't run.
     find_similar: Callable[[str], Awaitable[list[dict]]] = no_similar_cards
+    find_existing: FindExisting = no_existing_cards  # the deck's cards a proposal might repeat
 
     # Worked out on first use and kept for the turn, since the tools can run several times in one.
     @cached_property

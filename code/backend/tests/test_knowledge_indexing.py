@@ -20,6 +20,7 @@ from app.ai.knowledge.indexing import (
     create_record_manager,
     index_chunks,
     with_embedding_cache,
+    with_query_cache,
 )
 from app.ai.knowledge.store import create_store
 from app.ai.models import AIRateLimited, AIUnavailable
@@ -189,3 +190,23 @@ def test_source_details_are_added_to_every_chunk():
     assert all(chunk.metadata["owner_id"] == 7 for chunk in chunks)
     assert all(chunk.metadata["document_id"] == 9 for chunk in chunks)
     assert all(chunk.metadata["embedding_model"] == "model" for chunk in chunks)
+
+
+async def test_a_repeated_query_is_embedded_once_apart_from_documents():
+    class CountingQueries(FakeEmbeddings):
+        def __init__(self):
+            self.queries = []
+
+        def embed_query(self, text_):
+            self.queries.append(text_)
+            return super().embed_query(text_)
+
+    counting, cache = CountingQueries(), InMemoryByteStore()
+    cached = with_query_cache(counting, cache, "fake")
+
+    await cached.aembed_query("Mitosis")
+    await cached.aembed_query("Mitosis")
+    await with_embedding_cache(counting, cache, "fake").aembed_documents(["Mitosis"])
+
+    assert counting.queries == ["Mitosis"]
+    assert len(list(cache.yield_keys())) == 2  # the query's and the document's

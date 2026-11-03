@@ -1,12 +1,14 @@
 """Queries for cards. A card is yours only if its deck is yours."""
 
+import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from sqlalchemy import ColumnElement, Row, and_, delete, func, select, update
+from sqlalchemy import ColumnElement, Row, and_, delete, func, select, true, union, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.models import Card, CardReport, ChunkReport, Deck, utcnow
 from app.repositories.knowledge import HiddenChunk
@@ -46,16 +48,16 @@ class CardRepository:
                 ],
             )
 
-    async def embedding_of(self, card_id: int) -> tuple[list[float], str] | None:
-        """The card's vector and model, if it has one. Read here since the column is deferred."""
-        row = (
+    async def save_confirmed_chunks(self, chunk_ids: dict[int, str]) -> None:
+        """Saves each card's confirmed copy in one bulk UPDATE."""
+        if chunk_ids:
             await self.session.execute(
-                select(Card.embedding, Card.embedding_model).where(
-                    Card.id == card_id, Card.embedding.is_not(None)
-                )
+                update(Card),
+                [
+                    {"id": card_id, "confirmed_chunk_id": uuid.UUID(chunk_id)}
+                    for card_id, chunk_id in chunk_ids.items()
+                ],
             )
-        ).first()
-        return None if row is None else (list(row[0]), row[1])
 
     async def add_report(self, card_id: int, user_id: int) -> bool:
         """Whether this is a new report. Repeating one changes nothing."""
@@ -110,6 +112,64 @@ class CardRepository:
                 .limit(limit)
             )
         )
+
+    async def likely_repeats(
+        self,
+        deck_id: int,
+        vectors: Sequence[list[float]],
+        model: str,
+        per_vector: int,
+        unembedded: int,
+    ) -> list[Row]:
+        """The cards closest to each vector, plus the newest without one, in one query."""
+        in_deck = Card.deck_id == deck_id
+        picks = [
+            select(Card.id)
+            .where(in_deck, Card.embedding_model == model)
+            .order_by(Card.embedding.cosine_distance(vector))
+            .limit(per_vector)
+            for vector in vectors
+        ]
+        picks.append(
+            select(Card.id)
+            .where(in_deck, Card.embedding_model.is_distinct_from(model))
+            .order_by(Card.id.desc())
+            .limit(unembedded)
+        )
+        # Each pick is a subquery, since a UNION member can't have its own ORDER BY and LIMIT.
+        ids = union(*(select(pick.subquery().c.id) for pick in picks))
+        rows = await self.session.execute(
+            select(Card.front, Card.back).where(Card.id.in_(ids)).order_by(Card.id.desc())
+        )
+        return list(rows)
+
+    async def similar_in_deck(self, card_ids: Sequence[int], limit: int) -> dict[int, list[Row]]:
+        """Each card's closest cards in its own deck by meaning, in one LATERAL query."""
+        if not card_ids:
+            return {}
+        source = aliased(Card)
+        distance = Card.embedding.cosine_distance(source.embedding)
+        nearest = (
+            select(Card.front, Card.back, distance.label("distance"))
+            .where(
+                Card.deck_id == source.deck_id,
+                Card.id != source.id,
+                Card.embedding_model == source.embedding_model,
+            )
+            .order_by(distance)
+            .limit(limit)
+            .lateral()
+        )
+        rows = await self.session.execute(
+            select(source.id, nearest.c.front, nearest.c.back)
+            .join(nearest, true())
+            .where(source.id.in_(card_ids), source.embedding.is_not(None))
+            .order_by(source.id, nearest.c.distance)
+        )
+        similar: dict[int, list[Row]] = {card_id: [] for card_id in card_ids}
+        for row in rows:
+            similar[row.id].append(row)
+        return similar
 
     async def list_for_deck(self, deck_id: int) -> list[Card]:
         statement = select(Card).where(Card.deck_id == deck_id).order_by(Card.id)

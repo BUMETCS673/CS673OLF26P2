@@ -9,11 +9,10 @@ from app.ai.tracing import labelled_trace
 from app.ai.usage import RunUsage
 from app.core.errors import BudgetExceeded, InvalidRequest, NotAvailable, NotFound
 from app.core.settings import Settings
-from app.models import AiGeneration, Card, Job, User, utcnow
+from app.models import AiGeneration, Card, Deck, Job, User, utcnow
 from app.models.document import READY
-from app.models.job import EMBED_CARDS, GENERATE_CARDS
+from app.models.job import GENERATE_CARDS
 from app.repositories.cards import CardRepository
-from app.repositories.decks import DeckRepository
 from app.repositories.documents import DocumentRepository
 from app.repositories.generations import GenerationRepository
 from app.repositories.jobs import JobRepository
@@ -25,8 +24,7 @@ from app.schemas.generations import (
     GenerateRequest,
     GenerationRead,
 )
-from app.services.budget import BUDGET_WINDOW, SUGGESTIONS, BudgetService
-from app.services.decks import DECK_NOT_FOUND
+from app.services.budget import BUDGET_WINDOW, SUGGESTIONS, USER, BudgetService
 from app.services.materials import MATERIAL_NOT_FOUND
 
 GENERATION_NOT_FOUND = "Generation not found"
@@ -45,7 +43,6 @@ class GenerationService:
     def __init__(
         self,
         session: AsyncSession,
-        decks: DeckRepository,
         documents: DocumentRepository,
         generations: GenerationRepository,
         jobs: JobRepository,
@@ -54,7 +51,6 @@ class GenerationService:
         settings: Settings,
     ):
         self.session = session
-        self.decks = decks
         self.documents = documents
         self.generations = generations
         self.jobs = jobs
@@ -72,13 +68,11 @@ class GenerationService:
             raise BudgetExceeded(
                 f"You've reached the limit of {limit} AI generations in 24 hours. Try again later."
             )
-        if not await self.budget.within_model_limits(WORST_CASE_CALLS):
+        if not await self.budget.within_model_limits(WORST_CASE_CALLS, judged=Role.WRITER):
             raise BudgetExceeded(SITE_CAP)
 
-    async def start(self, deck_id: int, user: User, body: GenerateRequest) -> int:
+    async def start(self, deck: Deck, user: User, body: GenerateRequest) -> int:
         """Queue a run and return its job's id. Failures from here on are saved on the job."""
-        if await self.decks.get_owned(deck_id, user.id) is None:
-            raise NotFound(DECK_NOT_FOUND)
         file_name = None
         if body.mode == FILE:
             document = await self.documents.get_owned(body.document_id, user.id)
@@ -93,7 +87,7 @@ class GenerationService:
             Job(
                 user_id=user.id,
                 kind=GENERATE_CARDS,
-                payload={**body.model_dump(), "deck_id": deck_id, "file_name": file_name},
+                payload={**body.model_dump(), "deck_id": deck.id, "file_name": file_name},
             )
         )
         await self.session.commit()
@@ -140,13 +134,7 @@ class GenerationService:
             ]
         )
         if cards:
-            await self.jobs.add(
-                Job(
-                    user_id=user.id,
-                    kind=EMBED_CARDS,
-                    payload={"card_ids": [card.id for card in cards]},
-                )
-            )
+            await self.jobs.queue_card_embedding(user.id, [card.id for card in cards])
         await self.session.commit()
         return Accepted(
             cards=[CardRead.model_validate(card) for card in cards],
@@ -159,16 +147,16 @@ class GenerationService:
         await self.session.commit()
         return GenerationRead.model_validate(generation)
 
-    async def suggest(self, deck_id: int, user: User) -> list[str]:
+    async def suggest(self, deck: Deck, user: User) -> list[str]:
         """Topics to learn next. Failures show, since the learner asked for these."""
-        user_id = user.id
-        deck = await self.decks.get_owned(deck_id, user_id)
-        if deck is None:
-            raise NotFound(DECK_NOT_FOUND)
+        user_id, deck_id = user.id, deck.id
         limit = self.settings.ai_suggestions_user_daily_limit
-        if await self.budget.user_feature_calls(SUGGESTIONS, user_id) >= limit:
+        reached, models = await self.budget.limit_reached(
+            SUGGESTIONS, user_id, {Role.HELPER: 1}, user_limit=limit
+        )
+        if reached == USER:
             raise BudgetExceeded(f"You've reached the limit of {limit} suggestions in 24 hours.")
-        if not await self.budget.within_model_limits({Role.WRITER: 1}):
+        if reached:
             raise BudgetExceeded(SITE_CAP)
         newest = await self.cards.newest_in_deck(deck_id, SUGGESTION_CONTEXT)
         existing = [CardDraft(front=card.front, back=card.back) for card in newest]
@@ -178,7 +166,9 @@ class GenerationService:
 
         usage = RunUsage()
         try:
-            model = load_chat_model(Role.WRITER, self.settings, usage, learner_waiting=True)
+            model = load_chat_model(
+                Role.HELPER, self.settings, usage, learner_waiting=True, models=models
+            )
             async with labelled_trace(SUGGESTIONS, user_id, deck_id=deck_id):
                 return await suggest_deck_topics(model, name, description, existing)
         except AIRateLimited as error:

@@ -255,9 +255,9 @@ async def test_no_budget_runs_the_review_again_later(
     session, make_review, make_card, deck, context_for, settings, graph, monkeypatch
 ):
     async def full(*_, **__):
-        return False
+        return None
 
-    monkeypatch.setattr(BudgetService, "within_model_limits", full)
+    monkeypatch.setattr(BudgetService, "pick_models", full)
     card = await make_card(deck, lapses=4, problem_at_lapses=4)
     review = await make_review()
 

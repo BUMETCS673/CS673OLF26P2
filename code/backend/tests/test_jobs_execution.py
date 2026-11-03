@@ -8,7 +8,7 @@ import pytest
 from langsmith.run_helpers import get_current_run_tree, tracing_context
 from sqlalchemy import select
 
-from app.ai.models import AIRateLimited
+from app.ai.models import AIRateLimited, AITransient, AIUnavailable
 from app.core.errors import InvalidRequest, NotFound
 from app.jobs.execution import MAX_ATTEMPTS, SOMETHING_WENT_WRONG, run_job
 from app.models import Job, utcnow
@@ -136,6 +136,30 @@ async def test_a_temporary_failure_goes_back_in_the_queue(session, session_facto
     assert (saved.status, saved.enqueued_at, saved.lease_until) == (QUEUED, None, None)
     assert saved.attempts == 1
     assert saved.retry_at > utcnow()
+
+
+async def test_a_transient_ai_failure_goes_back_in_the_queue(session, session_factory, make_job):
+    job = await make_job()
+
+    async def fail(_):
+        raise AITransient()
+
+    await run_job(job.id, session_factory, {"test": fail})
+
+    assert (await _reload(session, job.id)).status == QUEUED
+
+
+async def test_a_permanent_ai_failure_fails_at_once(session, session_factory, make_job):
+    job = await make_job()
+
+    async def fail(_):
+        raise AIUnavailable()
+
+    await run_job(job.id, session_factory, {"test": fail})
+
+    saved = await _reload(session, job.id)
+    assert (saved.status, saved.attempts) == (FAILED, 1)
+    assert saved.error == AIUnavailable().message
 
 
 async def test_a_failure_about_one_input_says_which(session, session_factory, make_job):

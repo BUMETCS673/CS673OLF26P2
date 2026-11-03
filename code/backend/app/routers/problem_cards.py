@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from app.dependencies import CurrentUser, ProblemCardServiceDep
+from app.dependencies import CurrentUser, OwnedDeck, ProblemCardServiceDep
 from app.schemas.problem_cards import (
     Decisions,
     DecisionsApplied,
@@ -22,10 +22,8 @@ async def problem_card_summary(
 
 
 @router.get("/decks/{deck_id}/problem-card-review")
-async def deck_review(
-    deck_id: int, user: CurrentUser, service: ProblemCardServiceDep
-) -> DeckReview:
-    return DeckReview(review=await service.pending_for_deck(deck_id, user))
+async def deck_review(deck: OwnedDeck, service: ProblemCardServiceDep) -> DeckReview:
+    return DeckReview(review=await service.pending_for_deck(deck))
 
 
 @router.post("/problem-card-reviews/{review_id}/decisions")

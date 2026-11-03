@@ -33,7 +33,7 @@ class AiUsage(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     feature: Mapped[str] = mapped_column(String(16))
-    role: Mapped[str] = mapped_column(String(16))  # "writer" | "judge" | "embedder"
+    role: Mapped[str] = mapped_column(String(16))  # "writer" | "judge" | "helper" | "embedder"
     model: Mapped[str] = mapped_column(String(64))
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     # Survives its deck, so deleting a deck doesn't refund quota.

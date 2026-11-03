@@ -1,7 +1,6 @@
 """Request and response bodies for signing up and signing in."""
 
-import re
-
+from email_validator import EmailNotValidError, validate_email
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from app.models.user import normalize_email
@@ -11,9 +10,6 @@ MAX_EMAIL_LENGTH = 255
 MIN_PASSWORD_LENGTH = 8
 MAX_PASSWORD_LENGTH = 128
 MAX_DISPLAY_NAME_LENGTH = 120
-
-_EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s.]+(?:\.[^@\s.]+)+$")
-
 
 class RegisterRequest(BaseModel):
     email: str
@@ -29,8 +25,11 @@ class RegisterRequest(BaseModel):
         # Length first, so the pattern never runs against an unbounded string.
         if len(email) > MAX_EMAIL_LENGTH:
             raise ValueError(f"email must be at most {MAX_EMAIL_LENGTH} characters.")
-        if not _EMAIL_PATTERN.match(email):
-            raise ValueError("email must look like name@example.com.")
+        try:
+            # Pydantic's EmailStr uses the same check, but this keeps our message.
+            validate_email(email, check_deliverability=False)
+        except EmailNotValidError:
+            raise ValueError("email must look like name@example.com.") from None
         return email
 
     @field_validator("password")

@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.repositories.knowledge import KnowledgeRepository
 
-MIN_SIMILARITY = 0.5  # a starting point: tune it against real files
+MIN_SIMILARITY = 0.62  # between off-topic max 0.567 and on-topic min 0.677 in the eval
 OVERFETCH = 3  # extra candidates, because repeats and capped passages get dropped
 MAX_PER_OTHER_USER = 3  # how much of one search a single other learner's uploads can fill
 

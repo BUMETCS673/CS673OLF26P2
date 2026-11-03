@@ -27,12 +27,27 @@ class Settings(BaseSettings):
     session_days: int = 30
 
     # "gemini" or "fake" for each role. Fake needs no key, and returns sample content.
+    # Google's quotas are per model, so each role falls back to other Gemini models, in order,
+    # as "vendor:model,vendor:model", once a model's daily limit is reached. A fake role has none.
+    # The Flash models allow 20 calls a day each, so only the judge uses them. The writer and
+    # helper share the Flash-Lite models, at 1,500 a day each, starting on different ones so the
+    # load spreads.
     ai_writer_provider: str = "gemini"
     ai_writer_model: str = "gemini-3.5-flash-lite"
     ai_writer_thinking: str = "low"
+    ai_writer_fallbacks: str = "gemini:gemini-3.1-flash-lite,gemini:gemini-2.5-flash-lite"
     ai_judge_provider: str = "gemini"
     ai_judge_model: str = "gemini-3.8-flash"
     ai_judge_thinking: str = "low"
+    ai_judge_fallbacks: str = (
+        "gemini:gemini-3.7-flash,gemini:gemini-3.6-flash,gemini:gemini-3.5-flash,"
+        "gemini:gemini-3.5-flash-lite,gemini:gemini-3.1-flash-lite,gemini:gemini-2.5-flash-lite"
+    )
+    # The tutor chat, file screening, topic suggestions and the same-fact check.
+    ai_helper_provider: str = "gemini"
+    ai_helper_model: str = "gemini-3.1-flash-lite"
+    ai_helper_thinking: str = "low"
+    ai_helper_fallbacks: str = "gemini:gemini-3.5-flash-lite,gemini:gemini-2.5-flash-lite"
     ai_embedder_provider: str = "gemini"
     ai_embedder_model: str = "gemini-embedding-001"
     gemini_api_key: str = ""
@@ -50,14 +65,17 @@ class Settings(BaseSettings):
     ai_problem_cards_user_daily_limit: int = 4
     ai_problem_cards_model_reserve: int = 9
     # Calls per model in any 24 hours, as "model:limit,model:limit". Others get the default.
-    ai_model_daily_limit: int = 18
+    # About 90% of Google's free tier, since our count is best effort.
+    ai_model_daily_limit: int = 18  # the Flash models, at 20 a day
     ai_model_daily_limits: str = (
-        "gemini-3.5-flash-lite:450,gemini-3.8-flash:18,gemini-embedding-001:900"
+        "gemini-3.5-flash-lite:1350,gemini-3.1-flash-lite:1350,gemini-2.5-flash-lite:1350,"
+        "gemini-embedding-001:900"
     )
     # Calls per model per minute across all workers, in the same form. 0 means no limit.
-    ai_model_rate_limit: int = 0
+    ai_model_rate_limit: int = 4  # the Flash models, at 5 a minute
     ai_model_rate_limits: str = (
-        "gemini-3.5-flash-lite:15,gemini-3.8-flash:10,gemini-embedding-001:100"
+        "gemini-3.5-flash-lite:9,gemini-3.1-flash-lite:9,gemini-2.5-flash-lite:9,"
+        "gemini-embedding-001:100"
     )
 
     @field_validator("database_url")

@@ -1,8 +1,6 @@
 """Choosing what a model sees, and keeping only the fixes that follow the rules."""
 
-import heapq
-import re
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 
 from app.ai.cards.checks import back_fits, clean_cards, normalized_fronts
 from app.ai.problem_cards.prompts import MAX_FIX_OPTIONS
@@ -13,34 +11,6 @@ MAX_SIMILAR_CARDS = 10
 # How many new cards each kind needs: (fewest, most).
 CARD_LIMITS = {"rewrite": (1, 1), "split": (2, 4), "contrast": (1, 2), "prerequisite": (1, 2)}
 REPLACING_KINDS = frozenset({"rewrite", "split"})  # these replace the original card
-
-_WORD = re.compile(r"\w+")
-
-
-def _words(card: dict) -> set[str]:
-    return set(_WORD.findall(f"{card['front']} {card['back']}".lower()))
-
-
-def similar_card_finder(others: Sequence[dict]) -> Callable[[dict], list[dict]]:
-    """Finds the cards sharing the most words with a card, which it may be confused with.
-
-    Splits each of `others` into words once, however many cards it's then asked about.
-    """
-    indexed = [(_words(other), other) for other in others]
-
-    def find(card: dict) -> list[dict]:
-        target = _words(card)
-        scored = (
-            (len(target & words), other) for words, other in indexed if other["id"] != card["id"]
-        )
-        # Keeps only the top few, in order, rather than sorting the whole deck.
-        best = heapq.nlargest(
-            MAX_SIMILAR_CARDS, (item for item in scored if item[0] > 0), key=lambda item: item[0]
-        )
-        return [{"front": other["front"], "back": other["back"]} for _, other in best]
-
-    return find
-
 
 def _valid_options(
     options: Sequence[FixOption], deck_fronts: set[str], added_fronts: set[str]
