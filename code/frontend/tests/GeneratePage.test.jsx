@@ -308,7 +308,7 @@ const json = (body, status = 200) => new Response(JSON.stringify(body), { status
 function mockFetch() {
   const calls = [];
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, options) => {
-    if (url.endsWith('/leech-suggestions')) return json({ processing: false, ready: [] });
+    if (url.endsWith('/leech-suggestions/refresh')) return json({ processing: false, ready: [] });
     calls.push({ url, method: options.method });
     return url.endsWith('/generate') ? json(GENERATION, 201) : json(DECK);
   });

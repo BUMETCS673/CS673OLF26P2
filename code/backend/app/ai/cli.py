@@ -24,6 +24,7 @@ import time
 import click
 from flask.cli import with_appcontext
 
+from app.ai.card_checks import write_cards
 from app.ai.provider import AIRateLimited, AIUnavailable, Prompt, get_provider
 
 # Written by hand rather than with build_prompt() (B1): this checks the provider, not the
@@ -34,7 +35,6 @@ SMOKE_PROMPT = Prompt(
         "bare answer, in 5 words or fewer."
     ),
     text="Write 1 flashcard about the capital of France.",
-    max_cards=1,
 )
 
 
@@ -47,7 +47,7 @@ def ai_smoke_command():
         # A real model can take a while, and the wait is silent without this.
         click.echo(f"Asking {provider.name} for one card. This can take up to 45 seconds…")
         started = time.perf_counter()
-        cards = provider.generate_cards(SMOKE_PROMPT)
+        cards = write_cards(provider, SMOKE_PROMPT, 1)
     except (AIRateLimited, AIUnavailable) as error:
         click.echo(error.message, err=True)
         raise SystemExit(1) from None

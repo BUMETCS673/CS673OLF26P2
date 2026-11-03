@@ -19,7 +19,7 @@ import {
 const auth = vi.hoisted(() => ({ user: { id: 1 }, expireSession: () => {} }));
 vi.mock('../src/auth/AuthContext', () => ({ useAuth: () => auth }));
 
-const api = vi.hoisted(() => ({ listSuggestions: null }));
+const api = vi.hoisted(() => ({ refreshSuggestions: null }));
 vi.mock('../src/api/useApi.js', () => ({ useApi: () => api }));
 
 const BIOLOGY = { review_id: 3, deck_id: 2, deck_name: 'Biology', card_count: 3 };
@@ -62,7 +62,7 @@ async function mount(path = '/decks') {
 const noticeButton = () => screen.queryByRole('button', { name: 'See suggestions' });
 
 test('a job finishing shows the notice without a reload, then checks stop', async () => {
-  api.listSuggestions = vi.fn().mockResolvedValueOnce(PROCESSING).mockResolvedValue(READY);
+  api.refreshSuggestions = vi.fn().mockResolvedValueOnce(PROCESSING).mockResolvedValue(READY);
   await mount();
   expect(noticeButton()).toBeNull();
 
@@ -70,13 +70,13 @@ test('a job finishing shows the notice without a reload, then checks stop', asyn
 
   expect(screen.getByRole('status').textContent).toContain('Biology:');
   expect(screen.getByRole('status').textContent).toContain('3 cards');
-  const calls = api.listSuggestions.mock.calls.length;
+  const calls = api.refreshSuggestions.mock.calls.length;
   await tick(POLL_MS * 3);
-  expect(api.listSuggestions.mock.calls.length).toBe(calls);
+  expect(api.refreshSuggestions.mock.calls.length).toBe(calls);
 });
 
 test('suggestions already ready at the first check get no notice', async () => {
-  api.listSuggestions = vi.fn().mockResolvedValue(READY);
+  api.refreshSuggestions = vi.fn().mockResolvedValue(READY);
   await mount();
 
   expect(noticeButton()).toBeNull();
@@ -84,53 +84,53 @@ test('suggestions already ready at the first check get no notice', async () => {
 });
 
 test('with no job running, nothing polls', async () => {
-  api.listSuggestions = vi.fn().mockResolvedValue(NONE);
+  api.refreshSuggestions = vi.fn().mockResolvedValue(NONE);
   await mount();
 
   await tick(POLL_MS * 5);
 
-  expect(api.listSuggestions).toHaveBeenCalledTimes(1);
+  expect(api.refreshSuggestions).toHaveBeenCalledTimes(1);
 });
 
 test('polling gives up after the maximum', async () => {
-  api.listSuggestions = vi.fn().mockResolvedValue(PROCESSING);
+  api.refreshSuggestions = vi.fn().mockResolvedValue(PROCESSING);
   await mount();
 
   await tick(POLL_MS * (MAX_POLLS + 5));
 
-  expect(api.listSuggestions).toHaveBeenCalledTimes(1 + MAX_POLLS);
+  expect(api.refreshSuggestions).toHaveBeenCalledTimes(1 + MAX_POLLS);
 });
 
 test('changing page checks once', async () => {
-  api.listSuggestions = vi.fn().mockResolvedValue(NONE);
+  api.refreshSuggestions = vi.fn().mockResolvedValue(NONE);
   await mount();
 
   act(() => controls.navigate('/decks/2'));
   await settle();
 
-  expect(api.listSuggestions).toHaveBeenCalledTimes(2);
+  expect(api.refreshSuggestions).toHaveBeenCalledTimes(2);
 });
 
 test('returning to the tab checks once', async () => {
-  api.listSuggestions = vi.fn().mockResolvedValue(NONE);
+  api.refreshSuggestions = vi.fn().mockResolvedValue(NONE);
   await mount();
 
   act(() => globalThis.document.dispatchEvent(new globalThis.Event('visibilitychange')));
   await settle();
 
-  expect(api.listSuggestions).toHaveBeenCalledTimes(2);
+  expect(api.refreshSuggestions).toHaveBeenCalledTimes(2);
 });
 
 test('signed out, nothing is checked', async () => {
   auth.user = null;
-  api.listSuggestions = vi.fn().mockResolvedValue(NONE);
+  api.refreshSuggestions = vi.fn().mockResolvedValue(NONE);
   await mount();
 
-  expect(api.listSuggestions).not.toHaveBeenCalled();
+  expect(api.refreshSuggestions).not.toHaveBeenCalled();
 });
 
 test("another user never sees the last user's suggestions", async () => {
-  api.listSuggestions = vi.fn().mockResolvedValueOnce(READY).mockResolvedValue(new Promise(() => {}));
+  api.refreshSuggestions = vi.fn().mockResolvedValueOnce(READY).mockResolvedValue(new Promise(() => {}));
   const app = <MemoryRouter><SuggestionsProvider><Controls /></SuggestionsProvider></MemoryRouter>;
   const { rerender } = render(app);
   await settle();
@@ -144,7 +144,7 @@ test("another user never sees the last user's suggestions", async () => {
 });
 
 test('a failed check leaves the store as it is', async () => {
-  api.listSuggestions = vi.fn().mockRejectedValue(new Error('down'));
+  api.refreshSuggestions = vi.fn().mockRejectedValue(new Error('down'));
   await mount();
 
   expect(controls.store.ready).toEqual([]);
@@ -152,25 +152,25 @@ test('a failed check leaves the store as it is', async () => {
 });
 
 test('during a study session nothing is checked, and the end of it starts the job', async () => {
-  api.listSuggestions = vi.fn().mockResolvedValueOnce(PROCESSING).mockResolvedValue(READY);
+  api.refreshSuggestions = vi.fn().mockResolvedValueOnce(PROCESSING).mockResolvedValue(READY);
   await mount('/decks/2/study');
-  expect(api.listSuggestions).not.toHaveBeenCalled();
+  expect(api.refreshSuggestions).not.toHaveBeenCalled();
 
   act(() => controls.store.setSessionDone(true));
   await settle();
-  expect(api.listSuggestions).toHaveBeenCalledTimes(1);
+  expect(api.refreshSuggestions).toHaveBeenCalledTimes(1);
 
   await tick();
   expect(noticeButton()).toBeTruthy();
 });
 
 test('polling stops during a study session and the notice appears after it', async () => {
-  api.listSuggestions = vi.fn().mockResolvedValueOnce(PROCESSING).mockResolvedValue(READY);
+  api.refreshSuggestions = vi.fn().mockResolvedValueOnce(PROCESSING).mockResolvedValue(READY);
   await mount();
   act(() => controls.navigate('/decks/2/study'));
   await tick(POLL_MS * 3);
 
-  expect(api.listSuggestions).toHaveBeenCalledTimes(1);
+  expect(api.refreshSuggestions).toHaveBeenCalledTimes(1);
   expect(noticeButton()).toBeNull();
 
   act(() => controls.navigate('/decks'));
@@ -179,7 +179,7 @@ test('polling stops during a study session and the notice appears after it', asy
 });
 
 test('See suggestions opens the review page and closes the notice', async () => {
-  api.listSuggestions = vi.fn().mockResolvedValueOnce(PROCESSING).mockResolvedValue(READY);
+  api.refreshSuggestions = vi.fn().mockResolvedValueOnce(PROCESSING).mockResolvedValue(READY);
   await mount();
   await tick();
 
@@ -191,7 +191,7 @@ test('See suggestions opens the review page and closes the notice', async () => 
 });
 
 test('Close hides the notice, and the suggestion stays in the store', async () => {
-  api.listSuggestions = vi.fn().mockResolvedValueOnce(PROCESSING).mockResolvedValue(READY);
+  api.refreshSuggestions = vi.fn().mockResolvedValueOnce(PROCESSING).mockResolvedValue(READY);
   await mount();
   await tick();
 
@@ -202,7 +202,7 @@ test('Close hides the notice, and the suggestion stays in the store', async () =
 });
 
 test('finishing the review removes the suggestion everywhere', async () => {
-  api.listSuggestions = vi.fn().mockResolvedValueOnce(READY).mockResolvedValue(NONE);
+  api.refreshSuggestions = vi.fn().mockResolvedValueOnce(READY).mockResolvedValue(NONE);
   await mount();
 
   await act(() => controls.store.refresh());

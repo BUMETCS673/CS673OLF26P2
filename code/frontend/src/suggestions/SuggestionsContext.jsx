@@ -46,7 +46,7 @@ export function SuggestionsProvider({ children }) {
 
   const refresh = useCallback(async () => {
     try {
-      const next = await api.listSuggestions();
+      const next = await api.refreshSuggestions();
       const ready = next.ready ?? [];
       if (known.current !== null) {
         const arrived = ready.find((item) => !known.current.has(item.review_id));

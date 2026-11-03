@@ -25,6 +25,7 @@ from app.api.decks import decks_bp
 from app.api.generate import generate_bp
 from app.api.generations import generations_bp
 from app.api.leeches import leeches_bp
+from app.api.tutor import tutor_bp
 
 api_bp = Blueprint("api", __name__)
 
@@ -41,3 +42,4 @@ api_bp.register_blueprint(cards_bp)        # WS2 — /api/decks/<id>/cards, /api
 api_bp.register_blueprint(generate_bp)     # B3 — /api/decks/<id>/generate
 api_bp.register_blueprint(generations_bp)  # B4 — /api/generations/<id>/accept, /reject
 api_bp.register_blueprint(leeches_bp)      # /api/leech-suggestions, /api/leech-reviews/<id>/...
+api_bp.register_blueprint(tutor_bp)        # /api/decks/<id>/tutor...

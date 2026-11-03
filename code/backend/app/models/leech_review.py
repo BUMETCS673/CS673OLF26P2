@@ -27,13 +27,6 @@ class LeechReview(db.Model):
     attempts = db.Column(db.Integer, nullable=False, default=0)
     started_at = db.Column(db.DateTime(timezone=True), nullable=True)  # finds lost jobs
     card_ids = db.Column(db.JSON, nullable=True)  # the cards the latest attempt covered
-    model = db.Column(db.String(64), nullable=True)
-    model_calls = db.Column(db.Integer, nullable=False, default=0)  # counted by the caps
-    input_tokens = db.Column(db.Integer, nullable=False, default=0)
-    output_tokens = db.Column(db.Integer, nullable=False, default=0)
-    judge_model = db.Column(db.String(64), nullable=True)
-    judge_input_tokens = db.Column(db.Integer, nullable=False, default=0)
-    judge_output_tokens = db.Column(db.Integer, nullable=False, default=0)
     verification = db.Column(db.String(16), nullable=True)  # "passed" | "skipped"
     shared_cause = db.Column(db.Text, nullable=True)
     # [{"card_id", "front", "back", "lapses", "options": [{"kind", "reason", "cards"}]}]

@@ -39,9 +39,9 @@ class OneReply:
         self.cards = cards
         self.prompts = []
 
-    def generate_cards(self, prompt):
+    def complete_json(self, prompt, schema):
         self.prompts.append(prompt)
-        return self.cards
+        return {"cards": self.cards}
 
 
 def test_on_the_stand_in_it_prints_a_sample_card_and_exits_0(app):
@@ -68,7 +68,6 @@ def test_it_asks_for_one_card_about_the_capital_of_france(app):
     assert answer.endswith(": What is the capital of France? → Paris")
     [prompt] = provider.prompts
     assert prompt.text == "Write 1 flashcard about the capital of France."
-    assert prompt.max_cards == 1
     assert prompt.attachment is None
 
 

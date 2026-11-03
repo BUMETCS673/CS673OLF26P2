@@ -11,13 +11,15 @@
 # Human role: plan approval, code review, and hands-on testing by Miles Cameron.
 
 from app.models.ai_generation import AiGeneration
+from app.models.ai_usage import AiUsage
 from app.models.base import TimestampMixin, as_utc, iso, utcnow
 from app.models.card import Card
 from app.models.deck import Deck
 from app.models.leech_review import LeechReview
+from app.models.tutor import TutorConversation
 from app.models.user import User
 
 __all__ = [
-    "AiGeneration", "Card", "Deck", "LeechReview", "TimestampMixin", "User", "as_utc", "iso",
-    "utcnow",
+    "AiGeneration", "AiUsage", "Card", "Deck", "LeechReview", "TimestampMixin",
+    "TutorConversation", "User", "as_utc", "iso", "utcnow",
 ]

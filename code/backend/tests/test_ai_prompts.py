@@ -41,7 +41,6 @@ def test_prompt_mode_fills_in_the_count_the_deck_and_the_topic():
     assert result.text.startswith("Deck name: Anatomy\nDeck description: Bones and muscles\n\n")
     assert "Write 7 flashcards about the topic" in result.text
     assert "<source>\nThe bones of the hand\n</source>" in result.text
-    assert result.max_cards == 7
     assert result.attachment is None
 
 

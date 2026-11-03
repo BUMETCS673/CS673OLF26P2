@@ -59,11 +59,12 @@ function RoutedDeckDetail({ id, location, navigate }) {
   return <DeckDetailView api={decksApi} deckId={id} startAdding={startAdding}
     onBack={() => navigate('/decks')} onStudy={() => navigate(`/decks/${id}/study`)}
     onGenerate={() => navigate(`/decks/${id}/generate`)}
-    onReviewLeeches={() => navigate(`/decks/${id}/leeches`)} />;
+    onReviewLeeches={() => navigate(`/decks/${id}/leeches`)}
+    onAskTutor={() => navigate(`/decks/${id}/tutor`)} />;
 }
 
 export function DeckDetailView({
-  api, deckId, onBack, onStudy, onGenerate, onReviewLeeches, startAdding = false,
+  api, deckId, onBack, onStudy, onGenerate, onReviewLeeches, onAskTutor, startAdding = false,
 }) {
   // The page is mounted with key={id}, so a different deck remounts this component rather
   // than loading again in place. `now` is taken once per load, for every CardRow.
@@ -108,6 +109,7 @@ export function DeckDetailView({
           <div className="page-actions">
             {!adding && <button className="button secondary" onClick={() => { setNotice(''); setAdding(true); }}>+ Add card</button>}
             <button className="button secondary" onClick={onGenerate}>Generate with AI</button>
+            {onAskTutor && <button className="button secondary" onClick={onAskTutor}>Ask tutor</button>}
             {cards.length > 0 && <button className="button primary" onClick={onStudy}>{studyLabel(deck.due_counts)}</button>}</div></div>
         <LeechBanner deckId={deckId} onReview={onReviewLeeches} />
         {adding && <section className="card-composer" aria-labelledby="add-card-heading">

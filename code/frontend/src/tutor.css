@@ -1,0 +1,82 @@
+/* The deck tutor page. */
+
+.tutor-chat {
+  margin-bottom: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+}
+
+.tutor-messages {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tutor-message {
+  max-width: 85%;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-control);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.tutor-user {
+  justify-self: end;
+  background: var(--color-primary-soft);
+}
+
+.tutor-tutor {
+  justify-self: start;
+  background: var(--color-bg);
+}
+
+.tutor-error {
+  background: var(--color-danger-soft);
+}
+
+.tutor-proposal {
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border);
+}
+
+.tutor-proposal h2 {
+  margin: 0 0 var(--space-2);
+  font-size: 16px;
+}
+
+.tutor-proposal ul {
+  margin: 0 0 var(--space-3);
+  padding-left: var(--space-5);
+}
+
+.tutor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.tutor-form {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.tutor-form textarea {
+  width: 100%;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  font: inherit;
+  resize: vertical;
+}
+
+.tutor-confirm {
+  margin-bottom: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  background: var(--color-danger-soft);
+}
+
+.tutor-confirm p {
+  margin: 0 0 var(--space-3);
+}

@@ -97,19 +97,19 @@ test('decided cards show their outcome and lose their buttons', () => {
 test('fewer cards than asked for says so', () => {
   renderList(generationWith(Array(8).fill('pending'), 10));
 
-  expect(screen.getByText('Gemini returned 8 of the 10 you asked for.')).toBeTruthy();
+  expect(screen.getByText('The AI returned 8 of the 10 you asked for.')).toBeTruthy();
 });
 
 test('a full batch has no shortfall note', () => {
   renderList(generationWith(['pending', 'pending']));
 
-  expect(screen.queryByText(/Gemini returned/)).toBeNull();
+  expect(screen.queryByText(/The AI returned/)).toBeNull();
 });
 
 test('no cards offers another try', () => {
   const { onGenerateMore } = renderList(generationWith([], 10));
 
-  expect(screen.getByText("Gemini couldn't write cards from that. Try a different prompt or file."))
+  expect(screen.getByText("The AI couldn't write cards from that. Try a different prompt or file."))
     .toBeTruthy();
   fireEvent.click(button('Generate more'));
   expect(onGenerateMore).toHaveBeenCalledOnce();

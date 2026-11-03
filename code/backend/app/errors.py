@@ -26,6 +26,14 @@ than calling `request.get_json()` itself.
 from flask import jsonify, request
 from werkzeug.exceptions import HTTPException
 
+from app.services.errors import (
+    BudgetExceeded,
+    Conflict,
+    InvalidRequest,
+    NotAvailable,
+    ServiceError,
+)
+
 # Status code -> the `code` string in the contract.
 STATUS_CODES = {
     400: "bad_request",
@@ -50,6 +58,9 @@ REMAPPED_STATUS = {
     # Body over MAX_CONTENT_LENGTH.
     413: (400, "Request body is too large."),
 }
+
+
+SERVICE_STATUS = {BudgetExceeded: 429, NotAvailable: 503, Conflict: 409, InvalidRequest: 422}
 
 
 class ApiError(Exception):
@@ -111,6 +122,10 @@ def register_error_handlers(app) -> None:
     @app.errorhandler(ApiError)
     def _handle_api_error(exc: ApiError):
         return exc.to_response()
+
+    @app.errorhandler(ServiceError)
+    def _handle_service_error(exc: ServiceError):
+        return ApiError(SERVICE_STATUS[type(exc)], exc.message, field=exc.field).to_response()
 
     @app.errorhandler(HTTPException)
     def _handle_http_exception(exc: HTTPException):

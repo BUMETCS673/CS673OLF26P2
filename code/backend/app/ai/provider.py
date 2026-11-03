@@ -1,11 +1,12 @@
 """The AI provider interface, and the factory that selects a vendor for each role.
 
-Routes call `get_provider().generate_cards(prompt)` and never see a vendor's SDK. Each vendor
-subclasses `Provider` in its own module. Every failure leaves as one of the exceptions below, and
-the route turns each into the matching error from C5.
+Features call `get_provider().complete_json(prompt, schema)` with their own prompt and schema, and
+never see a vendor's SDK. Each vendor subclasses `Provider` in its own module. Every failure leaves
+as one of the exceptions below, and the route turns each into the matching error from C5.
 
-Adding a vendor: subclass `Provider`, then add a factory to `_FACTORIES`. Selecting it is then a
-settings change: AI_WRITER_PROVIDER, AI_WRITER_MODEL, AI_JUDGE_PROVIDER and AI_JUDGE_MODEL.
+Adding a vendor: subclass `Provider`, then add a factory to `_FACTORIES`. Adding a feature needs no
+change here. Selecting a vendor is a settings change, per role: AI_<ROLE>_PROVIDER, AI_<ROLE>_MODEL
+and AI_<ROLE>_THINKING.
 """
 
 # AI Utilization: ~100% of this file's code
@@ -19,6 +20,7 @@ import logging
 import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from enum import StrEnum
 
 from flask import current_app
 
@@ -34,9 +36,7 @@ NOT_CONFIGURED = "AI generation isn't set up on this server."
 TOO_MUCH = (
     "That was too much to turn into cards at once. Ask for fewer cards or use a shorter file."
 )
-DECLINED = "Gemini declined to write cards from that material."
-
-MAX_FIX_OPTIONS = 3  # Leech Doctor options per card
+DECLINED = "The AI declined to write cards from that material."
 
 
 @dataclass(frozen=True)
@@ -53,9 +53,8 @@ class Attachment:
 
 @dataclass(frozen=True)
 class Prompt:
-    system: str             # the rules, with the count filled in
-    text: str               # the deck context plus the mode's body
-    max_cards: int          # the requested count; the schema's maxItems
+    system: str             # the rules
+    text: str               # the request's data
     attachment: Attachment | None = None
 
 
@@ -65,6 +64,7 @@ class TokenUsage:
 
     input_tokens: int = 0
     output_tokens: int = 0  # includes thinking tokens, which are billed as output
+    calls: int = 0          # every attempt, including ones that failed
 
 
 class AIRateLimited(Exception):
@@ -87,111 +87,17 @@ class AITransient(AIUnavailable):
     """A failure that may succeed if retried. Maps to the same 503."""
 
 
-def cards_schema(max_cards: int) -> dict:
-    """The JSON Schema the model must answer with."""
-    return {
-        "type": "object",
-        "properties": {
-            "cards": {
-                "type": "array",
-                "maxItems": max_cards,
-                "items": {
-                    "type": "object",
-                    "properties": {"front": {"type": "string"}, "back": {"type": "string"}},
-                    "required": ["front", "back"],
-                },
-            }
-        },
-        "required": ["cards"],
-    }
+def _unusable_reply() -> AIUnavailable:
+    logger.warning("ai_provider outcome=unusable_reply")
+    return AIUnavailable()
 
 
-def verdicts_schema(max_cards: int) -> dict:
-    """The JSON Schema for judge replies: one verdict per candidate. `reason` is optional."""
-    return {
-        "type": "object",
-        "properties": {
-            "verdicts": {
-                "type": "array",
-                "maxItems": max_cards,
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "index": {"type": "integer"},
-                        "ok": {"type": "boolean"},
-                        "reason": {"type": "string"},
-                    },
-                    "required": ["index", "ok"],
-                },
-            }
-        },
-        "required": ["verdicts"],
-    }
-
-
-def facts_schema(max_facts: int) -> dict:
-    """The JSON Schema for extracted facts."""
-    return {
-        "type": "object",
-        "properties": {
-            "facts": {"type": "array", "maxItems": max_facts, "items": {"type": "string"}}
-        },
-        "required": ["facts"],
-    }
-
-
-def fixes_schema(max_cards: int) -> dict:
-    """The JSON Schema for Leech Doctor: one recommendation per card, and an optional cause."""
-    option = {
-        "type": "object",
-        "properties": {
-            "kind": {
-                "type": "string",
-                "enum": ["rewrite", "split", "contrast", "prerequisite"],
-            },
-            "reason": {"type": "string"},
-            "cards": cards_schema(4)["properties"]["cards"],
-        },
-        "required": ["kind", "reason", "cards"],
-    }
-    return {
-        "type": "object",
-        "properties": {
-            "shared_cause": {"type": "string"},
-            "recommendations": {
-                "type": "array",
-                "maxItems": max_cards,
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "index": {"type": "integer"},
-                        "options": {
-                            "type": "array", "maxItems": MAX_FIX_OPTIONS, "items": option,
-                        },
-                    },
-                    "required": ["index", "options"],
-                },
-            },
-        },
-        "required": ["recommendations"],
-    }
-
-
-def _reply_with(text: str | None, key: str) -> dict:
-    """The model's JSON reply if `key` holds a list, or AIUnavailable when it doesn't."""
-    try:
-        reply = json.loads(text)
-    except (TypeError, ValueError):  # TypeError: no text at all
-        reply = None
-    if not isinstance(reply, dict) or not isinstance(reply.get(key), list):
-        logger.warning("ai_provider outcome=unusable_reply")
-        raise AIUnavailable()
-    return reply
-
-
-def _list_from(text: str | None, key: str) -> list:
-    """The `key` list from the model's JSON reply, or AIUnavailable when there isn't one."""
-    return _reply_with(text, key)[key]
+def list_from(reply: dict, key: str) -> list:
+    """The `key` list from a reply, or AIUnavailable when there isn't one."""
+    items = reply.get(key)
+    if not isinstance(items, list):
+        raise _unusable_reply()
+    return items
 
 
 class Provider(ABC):
@@ -212,22 +118,21 @@ class Provider(ABC):
         Raises AIRateLimited, AITransient or AIUnavailable.
         """
 
-    def generate_cards(self, prompt: Prompt) -> list:
-        """The model's "cards" array, parsed but not validated."""
-        return _list_from(self._complete(prompt, cards_schema(prompt.max_cards)), "cards")
+    def complete_json(self, prompt: Prompt, schema: dict) -> dict:
+        """Make one model call and return the reply, parsed but not validated against `schema`.
 
-    def judge_cards(self, prompt: Prompt) -> list:
-        """The model's "verdicts" array, parsed but not validated."""
-        return _list_from(self._complete(prompt, verdicts_schema(prompt.max_cards)), "verdicts")
-
-    def extract_facts(self, prompt: Prompt) -> list:
-        """The model's "facts" array, parsed but not validated."""
-        return _list_from(self._complete(prompt, facts_schema(prompt.max_cards)), "facts")
-
-    def recommend_fixes(self, prompt: Prompt) -> dict:
-        """The model's whole reply, whose "recommendations" is a list. Otherwise not validated."""
-        text = self._complete(prompt, fixes_schema(prompt.max_cards))
-        return _reply_with(text, "recommendations")
+        Raises AIRateLimited, AITransient or AIUnavailable, including when the reply isn't a JSON
+        object.
+        """
+        with self._usage_lock:
+            self.usage.calls += 1
+        try:
+            reply = json.loads(self._complete(prompt, schema))
+        except (TypeError, ValueError):  # TypeError: no text at all
+            raise _unusable_reply() from None
+        if not isinstance(reply, dict):
+            raise _unusable_reply()
+        return reply
 
     def _add_usage(self, input_tokens: int, output_tokens: int) -> None:
         with self._usage_lock:
@@ -235,35 +140,73 @@ class Provider(ABC):
             self.usage.output_tokens += output_tokens
 
 
+class Role(StrEnum):
+    """What a provider is used for. Each role has its own settings."""
+
+    WRITER = "writer"
+    JUDGE = "judge"
+
+
+@dataclass(frozen=True)
+class RoleSettings:
+    vendor: str
+    model: str
+    thinking: str  # a vendor's effort level, such as "low"
+
+
+def _settings(role: Role) -> RoleSettings:
+    config = current_app.config
+    prefix = f"AI_{Role(role).name}"
+    return RoleSettings(
+        config[f"{prefix}_PROVIDER"], config[f"{prefix}_MODEL"], config[f"{prefix}_THINKING"]
+    )
+
+
 # Vendor modules are imported inside the factories, so a vendor's SDK loads only when selected.
 
 
-def _make_fake(model: str) -> Provider:
+def _make_fake(settings: RoleSettings) -> Provider:
     from app.ai.fake import FakeProvider
 
     return FakeProvider()
 
 
-def _make_gemini(model: str) -> Provider:
+def _make_gemini(settings: RoleSettings) -> Provider:
     from app.ai.gemini import GeminiProvider
 
     key = current_app.config["GEMINI_API_KEY"]
     if not key:
         raise AIUnavailable(NOT_CONFIGURED)
-    return GeminiProvider(key, model)
+    try:
+        return GeminiProvider(key, settings.model, thinking=settings.thinking)
+    except ValueError:  # an unknown thinking level
+        raise AIUnavailable(NOT_CONFIGURED) from None
 
 
 _FACTORIES = {"fake": _make_fake, "gemini": _make_gemini}
+_REQUIRED_KEYS = {"gemini": "GEMINI_API_KEY"}
 
 
-def get_provider(role: str = "writer") -> Provider:
-    """The provider configured for `role`: "writer" or "judge".
+def is_configured(role: Role = Role.WRITER) -> bool:
+    """Whether get_provider(role) should succeed, without building a vendor client."""
+    vendor = _settings(role).vendor
+    key = _REQUIRED_KEYS.get(vendor)
+    return vendor in _FACTORIES and (key is None or bool(current_app.config[key]))
+
+
+def model_name(role: Role = Role.WRITER) -> str:
+    """The name `role`'s provider reports as `.name`, without building a vendor client."""
+    settings = _settings(role)
+    return "fake" if settings.vendor == "fake" else settings.model
+
+
+def get_provider(role: Role = Role.WRITER) -> Provider:
+    """The provider configured for `role`.
 
     Raises AIUnavailable(NOT_CONFIGURED) for an unknown vendor, or a vendor with no key.
     """
-    config = current_app.config
-    prefix = f"AI_{role.upper()}"
-    factory = _FACTORIES.get(config[f"{prefix}_PROVIDER"])
+    settings = _settings(role)
+    factory = _FACTORIES.get(settings.vendor)
     if factory is None:
         raise AIUnavailable(NOT_CONFIGURED)
-    return factory(config[f"{prefix}_MODEL"])
+    return factory(settings)
