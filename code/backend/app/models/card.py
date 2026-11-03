@@ -56,6 +56,9 @@ class Card(TimestampMixin, db.Model):
         nullable=True,
     )
 
+    # Leech Doctor flags the card when `lapses` reaches this. Handling it raises the level.
+    leech_next_at = db.Column(db.Integer, nullable=False, default=4, server_default="4")
+
     deck = db.relationship("Deck", back_populates="cards")
 
     @property

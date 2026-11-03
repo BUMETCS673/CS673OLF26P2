@@ -41,14 +41,15 @@ logged-in user, so someone else's deck answers 404, never 403.
 #   Refactoring
 # Human role: plan approval and code review by Duc Anh Nguyen.
 
-from flask import Blueprint, jsonify
+from flask import Blueprint, current_app, jsonify
 from flask_login import current_user, login_required
 from sqlalchemy import and_, case, func, select
 
+from app.ai.checkpoints import discard_threads
 from app.api.validation import optional_text, required_text
 from app.errors import json_object, not_found
 from app.extensions import db
-from app.models import Card, Deck, utcnow
+from app.models import Card, Deck, LeechReview, utcnow
 from app.scheduler import LEARN_AHEAD, NEW_CARDS_PER_SESSION, REVIEWS_PER_SESSION, CardState
 
 decks_bp = Blueprint("decks", __name__, url_prefix="/decks")
@@ -204,7 +205,14 @@ def update_deck(deck_id):
 @login_required
 def delete_deck(deck_id):
     deck = own_deck_or_404(deck_id)
-    # The database cascade removes the deck's cards.
+    # The database cascade removes the deck's cards and reviews, but not their saved runs.
+    thread_ids = db.session.scalars(
+        select(LeechReview.thread_id).where(
+            LeechReview.deck_id == deck.id, LeechReview.thread_id.is_not(None)
+        )
+    ).all()
     db.session.delete(deck)
     db.session.commit()
+    if thread_ids:
+        discard_threads(current_app.config["SQLALCHEMY_DATABASE_URI"], thread_ids)
     return "", 204

@@ -36,6 +36,8 @@ TOO_MUCH = (
 )
 DECLINED = "Gemini declined to write cards from that material."
 
+MAX_FIX_OPTIONS = 3  # Leech Doctor options per card
+
 
 @dataclass(frozen=True)
 class CardDraft:
@@ -138,17 +140,58 @@ def facts_schema(max_facts: int) -> dict:
     }
 
 
-def _list_from(text: str | None, key: str) -> list:
-    """The `key` list from the model's JSON reply, or AIUnavailable when there isn't one."""
+def fixes_schema(max_cards: int) -> dict:
+    """The JSON Schema for Leech Doctor: one recommendation per card, and an optional cause."""
+    option = {
+        "type": "object",
+        "properties": {
+            "kind": {
+                "type": "string",
+                "enum": ["rewrite", "split", "contrast", "prerequisite"],
+            },
+            "reason": {"type": "string"},
+            "cards": cards_schema(4)["properties"]["cards"],
+        },
+        "required": ["kind", "reason", "cards"],
+    }
+    return {
+        "type": "object",
+        "properties": {
+            "shared_cause": {"type": "string"},
+            "recommendations": {
+                "type": "array",
+                "maxItems": max_cards,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "index": {"type": "integer"},
+                        "options": {
+                            "type": "array", "maxItems": MAX_FIX_OPTIONS, "items": option,
+                        },
+                    },
+                    "required": ["index", "options"],
+                },
+            },
+        },
+        "required": ["recommendations"],
+    }
+
+
+def _reply_with(text: str | None, key: str) -> dict:
+    """The model's JSON reply if `key` holds a list, or AIUnavailable when it doesn't."""
     try:
         reply = json.loads(text)
     except (TypeError, ValueError):  # TypeError: no text at all
         reply = None
-    items = reply.get(key) if isinstance(reply, dict) else None
-    if not isinstance(items, list):
+    if not isinstance(reply, dict) or not isinstance(reply.get(key), list):
         logger.warning("ai_provider outcome=unusable_reply")
         raise AIUnavailable()
-    return items
+    return reply
+
+
+def _list_from(text: str | None, key: str) -> list:
+    """The `key` list from the model's JSON reply, or AIUnavailable when there isn't one."""
+    return _reply_with(text, key)[key]
 
 
 class Provider(ABC):
@@ -180,6 +223,11 @@ class Provider(ABC):
     def extract_facts(self, prompt: Prompt) -> list:
         """The model's "facts" array, parsed but not validated."""
         return _list_from(self._complete(prompt, facts_schema(prompt.max_cards)), "facts")
+
+    def recommend_fixes(self, prompt: Prompt) -> dict:
+        """The model's whole reply, whose "recommendations" is a list. Otherwise not validated."""
+        text = self._complete(prompt, fixes_schema(prompt.max_cards))
+        return _reply_with(text, "recommendations")
 
     def _add_usage(self, input_tokens: int, output_tokens: int) -> None:
         with self._usage_lock:

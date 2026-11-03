@@ -87,6 +87,14 @@ class Config:
     # spends quota without saving a row (A19).
     AI_SITE_DAILY_LIMIT = int(_env("AI_SITE_DAILY_LIMIT", "18"))
     AI_MAX_CARDS = 25  # cards per generate request
+    # Set to "false" to stop the background jobs. Pending suggestions can still be reviewed.
+    AI_LEECH_ENABLED = _env("AI_LEECH_ENABLED", "true").lower() != "false"
+    # Leech Doctor calls, rolling 24 h: site-wide and per learner. Also counted by the site limit.
+    AI_LEECH_DAILY_LIMIT = int(_env("AI_LEECH_DAILY_LIMIT", "10"))
+    AI_LEECH_USER_DAILY_LIMIT = int(_env("AI_LEECH_USER_DAILY_LIMIT", "4"))
+    # Site calls background jobs leave for generating cards: the worst case of one long file.
+    AI_LEECH_SITE_RESERVE = int(_env("AI_LEECH_SITE_RESERVE", "9"))
+    AI_LEECH_RUN_INLINE = False  # tests run jobs in the request instead of a thread
     # "single": one model call. "graph": the self-correcting pipeline in app/ai/pipeline.py,
     # up to 5 calls a request plus 4 for a long file, with the checks on AI_JUDGE_MODEL.
     AI_PIPELINE = _env("AI_PIPELINE", "single")
@@ -105,6 +113,11 @@ class TestConfig(Config):
     # limits are pinned so a value left in .env can't change what the cap tests count to.
     AI_WRITER_PROVIDER = "fake"
     AI_JUDGE_PROVIDER = "fake"
+    AI_LEECH_ENABLED = True
+    AI_LEECH_DAILY_LIMIT = 10
+    AI_LEECH_USER_DAILY_LIMIT = 4
+    AI_LEECH_SITE_RESERVE = 9
+    AI_LEECH_RUN_INLINE = True
     AI_PIPELINE = "single"
     GEMINI_API_KEY = ""
     AI_DAILY_LIMIT = 10

@@ -14,3 +14,6 @@ google-genai==2.29.0
 # The self-correcting card pipeline. Only app/ai/pipeline.py imports it. No LangChain model
 # packages: the graph's nodes call app/ai/provider.py.
 langgraph==1.2.19
+# Saves paused Leech Doctor runs. Needs psycopg 3, separately from SQLAlchemy's psycopg2.
+langgraph-checkpoint-postgres==3.2.0
+psycopg[binary]==3.3.6

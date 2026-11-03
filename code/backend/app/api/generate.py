@@ -41,7 +41,6 @@ A request that fails at the provider saves nothing, so it doesn't count toward e
 import base64
 import binascii
 import time
-from datetime import timedelta
 
 from flask import Blueprint, current_app, jsonify, request
 from flask_login import current_user, login_required
@@ -61,6 +60,7 @@ from app.ai.prompts import (
     build_prompt,
 )
 from app.ai.provider import AIRateLimited, AIUnavailable, Attachment, CardDraft, get_provider
+from app.ai_usage import CAP_WINDOW, site_model_calls
 from app.api.decks import own_deck_or_404
 from app.api.validation import optional_text, required_text
 from app.errors import ApiError, json_object, validation_error
@@ -77,7 +77,6 @@ FOCUS_MAX = 500
 FILE_NAME_MAX = 255
 SUGGEST_MIN_CARDS = 10
 SUGGEST_CONTEXT = 200             # newest cards sent to the model in suggest mode
-CAP_WINDOW = timedelta(hours=24)  # both caps are rolling (rule 5)
 
 MODES = ("prompt", "file", "suggest")
 PDF = "application/pdf"
@@ -174,14 +173,8 @@ def _check_daily_caps(cost: int) -> None:
         raise ApiError(
             429, f"You've reached the limit of {limit} AI generations in 24 hours. Try again later."
         )
-    # Empty batches still spent quota at Google, so they count here. Summing model_calls covers
-    # batches that made several calls, and adding `cost` keeps room for this request's worst case.
-    site_calls = db.session.scalar(
-        select(func.coalesce(func.sum(AiGeneration.model_calls), 0)).where(
-            AiGeneration.created_at > since
-        )
-    )
-    if site_calls + cost > current_app.config["AI_SITE_DAILY_LIMIT"]:
+    # `cost` reserves this request's worst case.
+    if site_model_calls() + cost > current_app.config["AI_SITE_DAILY_LIMIT"]:
         raise ApiError(429, SITE_CAP)
 
 

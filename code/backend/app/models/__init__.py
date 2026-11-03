@@ -14,8 +14,10 @@ from app.models.ai_generation import AiGeneration
 from app.models.base import TimestampMixin, as_utc, iso, utcnow
 from app.models.card import Card
 from app.models.deck import Deck
+from app.models.leech_review import LeechReview
 from app.models.user import User
 
 __all__ = [
-    "AiGeneration", "Card", "Deck", "TimestampMixin", "User", "as_utc", "iso", "utcnow",
+    "AiGeneration", "Card", "Deck", "LeechReview", "TimestampMixin", "User", "as_utc", "iso",
+    "utcnow",
 ]
