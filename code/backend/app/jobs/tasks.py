@@ -15,8 +15,10 @@ from app.ai.checkpoints import close_checkpointers
 from app.ai.knowledge.cache import RedisByteStore
 from app.ai.models import check_model_chains
 from app.core.database import get_engine, get_session_factory
+from app.core.logs import configure_logging
 from app.core.redis import get_redis
 from app.core.settings import get_settings
+from app.core.telemetry import start_telemetry
 from app.jobs.broker import broker
 from app.jobs.card_embedding import embed_cards
 from app.jobs.events import JobEvents
@@ -75,10 +77,14 @@ async def _publish(job_id: int) -> None:
 
 @broker.on_event(TaskiqEvents.WORKER_STARTUP)
 async def start_relay(state: TaskiqState) -> None:
-    """Checks the model chains first, so a bad one stops the worker before it takes a job."""
-    check_model_chains(get_settings())
+    """Sets up logging and telemetry, then checks the model chains, so a bad one stops the
+    worker before it takes a job."""
+    settings = get_settings()
+    configure_logging(settings)
+    state.stop_telemetry = start_telemetry("worker")
+    check_model_chains(settings)
     state.relay = asyncio.create_task(
-        run_relay(get_settings().database_url, get_session_factory(), _publish)
+        run_relay(settings.database_url, get_session_factory(), _publish)
     )
 
 
@@ -89,6 +95,7 @@ async def stop_relay(state: TaskiqState) -> None:
     with suppress(asyncio.CancelledError):
         await state.relay
     await asyncio.to_thread(wait_for_all_tracers)
+    await asyncio.to_thread(state.stop_telemetry)
     await close_checkpointers()
     await get_redis().aclose()
     await get_engine().dispose()

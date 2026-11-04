@@ -4,22 +4,61 @@ Each test runs inside a transaction that's rolled back afterward, so tests can't
 other, even though services commit: their commits only release a savepoint.
 """
 
+import logging
 import os
 from datetime import timedelta
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from opentelemetry import metrics
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from app.ai.checkpoints import close_checkpointers
 from app.core.database import CONNECT_ARGS, get_session
+from app.core.logs import FieldsFilter
 from app.core.security import hash_session_token, new_session_token
 from app.core.settings import Settings
 from app.dependencies import SESSION_COOKIE
 from app.main import app
 from app.models import Base, Card, Deck, User, UserSession, utcnow
 from app.repositories.users import UserRepository
+
+_METRICS = InMemoryMetricReader()
+# OpenTelemetry lets a process set its provider only once, so the whole run shares one.
+metrics.set_meter_provider(MeterProvider(metric_readers=[_METRICS]))
+
+
+@pytest.fixture
+def logged(caplog):
+    """caplog at DEBUG, its records carrying the fields our log handler adds."""
+    caplog.handler.addFilter(FieldsFilter())
+    caplog.set_level(logging.DEBUG)
+    return caplog
+
+
+@pytest.fixture
+def metric_value():
+    """A metric's current total for exactly these labels. Totals only grow, so compare two."""
+
+    def _value(name: str, **labels: str) -> float:
+        data = _METRICS.get_metrics_data()
+        total = 0
+        for resource in data.resource_metrics if data else []:
+            for scope in resource.scope_metrics:
+                for metric in scope.metrics:
+                    if metric.name != name:
+                        continue
+                    for point in metric.data.data_points:
+                        if dict(point.attributes) == labels:
+                            # A counter's point has a value. A histogram's counts its records.
+                            total += point.value if hasattr(point, "value") else point.count
+        return total
+
+    return _value
+
 
 TEST_DATABASE_URL = Settings(
     database_url=os.environ.get(

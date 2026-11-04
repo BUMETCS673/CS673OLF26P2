@@ -1,6 +1,7 @@
 """Claiming and running background jobs."""
 
 import asyncio
+import logging
 from datetime import timedelta
 from unittest.mock import MagicMock
 
@@ -217,6 +218,45 @@ async def test_an_unexpected_errors_text_is_kept_private(
     assert saved.error == SOMETHING_WENT_WRONG
     assert "private" not in caplog.text
     assert "type=RuntimeError" in caplog.text
+
+
+async def test_lines_logged_during_a_job_name_it(session_factory, make_job, logged):
+    job = await make_job(kind="echo")
+
+    async def echo(_):
+        logging.getLogger("app.test").info("working")
+        return {}
+
+    await run_job(job.id, session_factory, {"echo": echo})
+
+    [line] = [record for record in logged.records if record.getMessage() == "working"]
+    assert (line.job_id, line.kind, line.attempt) == (job.id, "echo", 1)
+
+
+@pytest.mark.parametrize(
+    ("error", "outcome"), [(None, "done"), (AITransient(), "retried"), (AIUnavailable(), "failed")]
+)
+async def test_each_attempt_is_counted_by_its_outcome(
+    session_factory, make_job, metric_value, error, outcome
+):
+    job = await make_job(kind="echo")
+    labels = {"kind": "echo", "outcome": outcome}
+
+    def counts():
+        attempts = metric_value("cadence.jobs", **labels)
+        return attempts, metric_value("cadence.job.duration", **labels)
+
+    before = counts()
+
+    async def echo(_):
+        if error:
+            raise error
+        return {}
+
+    await run_job(job.id, session_factory, {"echo": echo})
+
+    after = counts()
+    assert (after[0] - before[0], after[1] - before[1]) == (1, 1)
 
 
 async def test_a_running_job_keeps_extending_its_lease(session_factory, make_job, monkeypatch):

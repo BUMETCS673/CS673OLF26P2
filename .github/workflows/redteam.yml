@@ -6,6 +6,8 @@ on:
   pull_request:
     paths:
       - code/backend/app/ai/**
+      # The model chains and their limits.
+      - code/backend/app/core/settings.py
       - code/backend/evals/**
       - .github/workflows/redteam.yml
   workflow_dispatch:
@@ -50,6 +52,14 @@ jobs:
           cache-dependency-path: code/backend/requirements.txt
 
       - run: pip install -r requirements.txt
+
+      - name: Check each model in the chains
+        # One call per model, and one more with a tool for the agents' models, so a wrong model ID
+        # or a missing feature shows here rather than in production.
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
+        env:
+          GEMINI_API_KEY: ${{ secrets.REDTEAM_GEMINI_API_KEY }}
+        run: python -m evals.models
 
       - name: Run the evaluations
         # Report only on pull requests until a baseline shows how much results vary between runs.

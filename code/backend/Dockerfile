@@ -35,7 +35,7 @@ FROM base AS dev
 RUN pip install --no-cache-dir "taskiq[reload]==0.13.0"
 
 # --reload restarts the server when you save a file (the source is bind-mounted).
-CMD ["uvicorn", "app.main:app", "--reload", "--host", "0.0.0.0", "--port", "5000"]
+CMD ["uvicorn", "app.main:app", "--reload", "--no-access-log", "--host", "0.0.0.0", "--port", "5000"]
 
 
 FROM base AS prod

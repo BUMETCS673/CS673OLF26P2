@@ -17,10 +17,10 @@ from langchain_core.runnables import Runnable, RunnableWithFallbacks
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from pydantic import BaseModel, SecretStr, ValidationError
 
-from app.ai.failures import FALL_BACK_ON, Failure, classify
+from app.ai.failures import FALL_BACK_ON, Failure, classify, status_of
 from app.ai.fake import FakeChatModel, FakeEmbeddings
 from app.ai.rate_limits import RedisRateLimiter
-from app.ai.usage import RoleUsage, RunUsage, was_refused
+from app.ai.usage import RoleUsage, RunUsage
 from app.core.redis import get_redis
 from app.core.settings import EMBEDDING_DIMENSIONS, Settings
 
@@ -71,14 +71,22 @@ class AITransient(AIUnavailable):
 ChatModel = BaseChatModel | RunnableWithFallbacks
 
 
+def _structured(model: BaseChatModel, schema: type[BaseModel]) -> Runnable:
+    # Google documents tool calls for Gemma on the Gemini API, but not its JSON schema output, so
+    # Gemma returns the reply as a tool call. Gemini models use their schema output.
+    if isinstance(model, ChatGoogleGenerativeAI) and "gemma-" in model.model:
+        return model.with_structured_output(schema, method="function_calling")
+    return model.with_structured_output(schema)
+
+
 def _with_schema(model: ChatModel, schema: type[BaseModel]) -> Runnable:
     """Structured output on the model and on each of its fallbacks."""
     if isinstance(model, RunnableWithFallbacks):
-        return model.runnable.with_structured_output(schema).with_fallbacks(
-            [fallback.with_structured_output(schema) for fallback in model.fallbacks],
+        return _structured(model.runnable, schema).with_fallbacks(
+            [_structured(fallback, schema) for fallback in model.fallbacks],
             exceptions_to_handle=model.exceptions_to_handle,
         )
-    return model.with_structured_output(schema)
+    return _structured(model, schema)
 
 
 class ChainFallbackMiddleware(AgentMiddleware):
@@ -224,11 +232,14 @@ class RunModels:
         return self.chains[role][0]
 
 
-# Where a role starts in its chain, or None if no model has room.
-StartPicker = Callable[[Role, Sequence[ModelSpec]], ModelSpec | None]
+# Where a role starts in `chain`, given the other roles' picks so far, or None if no model has
+# room. It must not change anything, since the planner can try a role more than once.
+StartPicker = Callable[[Role, Sequence[ModelSpec], Mapping[Role, ModelSpec]], ModelSpec | None]
 
 
-def _first_model(_: Role, chain: Sequence[ModelSpec]) -> ModelSpec | None:
+def _first_model(
+    _role: Role, chain: Sequence[ModelSpec], _picked: Mapping[Role, ModelSpec]
+) -> ModelSpec | None:
     return chain[0] if chain else None
 
 
@@ -241,23 +252,36 @@ def plan_models(
 ) -> RunModels | None:
     """Each role's models for one run: from the model `start` picks, down its chain.
 
-    The judge plans last, from only the models above every one `judged` may use. None means
-    some role had no model to start on.
+    The judge plans last, from only the models above every one `judged` may use. If none of
+    those has room, `judged` starts one model weaker and the judge tries again, since a weaker
+    model's cards leave more judges ranked above them. None means some role had no model left.
     """
     roles = list(roles)
-    if Role.JUDGE in roles and judged not in roles:
+    has_judge = Role.JUDGE in roles
+    if has_judge and judged not in roles:
         raise ValueError("A run with a judge must say which role's cards it checks.")
+    picked: dict[Role, ModelSpec] = {}
     chains: dict[Role, tuple[ModelSpec, ...]] = {}
-    for role in sorted(roles, key=lambda each: each == Role.JUDGE):
-        if role == Role.JUDGE:
-            chain = judge_chain(settings, chains[judged])
-        else:
-            chain = model_chain(role, settings)
-        spec = start(role, chain)
+
+    def take(role: Role, chain: Sequence[ModelSpec]) -> bool:
+        spec = start(role, chain, picked)
         if spec is None:
-            return None
+            return False
+        picked[role] = spec
         chains[role] = tuple(chain[chain.index(spec) :])
-    return RunModels(chains)
+        return True
+
+    for role in roles:
+        if role not in (Role.JUDGE, judged) and not take(role, model_chain(role, settings)):
+            return None
+    if judged is None or judged not in roles:
+        return RunModels(chains)
+    checked = model_chain(judged, settings)
+    while take(judged, checked):
+        if not has_judge or take(Role.JUDGE, judge_chain(settings, chains[judged])):
+            return RunModels(chains)
+        checked = checked[checked.index(picked[judged]) + 1 :]
+    return None
 
 
 def first_models(
@@ -387,9 +411,11 @@ class GuardedEmbeddings(Embeddings):
         try:
             yield
         except Exception as error:
-            if self.usage and was_refused(error):
-                self.usage.refund_call()
+            if self.usage:
+                self.usage.record_error(error)
             raise
+        if self.usage:
+            self.usage.record_success()
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         with self._counted():
@@ -436,4 +462,12 @@ def ai_errors() -> Iterator[None]:
         failure = classify(error)
         if failure is None:
             raise
+        # The error's class and status only, never its text.
+        fields: dict[str, str | int] = {
+            "failure": failure.value,
+            "vendor_error": type(error).__name__,
+        }
+        if (status := status_of(error)) is not None:
+            fields["status"] = status
+        logger.warning("ai call failed", extra=fields)
         raise _our_error(failure) from None

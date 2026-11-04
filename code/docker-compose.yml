@@ -40,6 +40,12 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/cadence}
       REDIS_URL: ${REDIS_URL:-redis://valkey:6379/0}
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-0}
+      LOG_FORMAT: ${LOG_FORMAT:-text}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # Metrics and logs over OTLP, off unless .env sets an endpoint.
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_EXPORTER_OTLP_HEADERS: ${OTEL_EXPORTER_OTLP_HEADERS:-}
+      OTEL_RESOURCE_ATTRIBUTES: ${OTEL_RESOURCE_ATTRIBUTES:-deployment.environment.name=local}
       # The stand-in models unless .env names a vendor and has its key.
       AI_WRITER_PROVIDER: ${AI_WRITER_PROVIDER:-fake}
       AI_WRITER_MODEL: ${AI_WRITER_MODEL:-}
