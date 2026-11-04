@@ -3,17 +3,14 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import BudgetExceeded, NotFound
-from app.models import Card, Job, User, utcnow
-from app.models.job import EMBED_CARDS
+from app.models import Card, Deck, User, utcnow
 from app.repositories.cards import CardRepository
-from app.repositories.decks import DeckRepository
 from app.repositories.generations import GenerationRepository
 from app.repositories.jobs import JobRepository
-from app.repositories.knowledge import NEAR_DUPLICATE_SIMILARITY, KnowledgeRepository
+from app.repositories.knowledge import KnowledgeRepository
 from app.repositories.users import UserRepository
 from app.schemas.cards import CardCreate, CardUpdate
 from app.services.budget import BUDGET_WINDOW
-from app.services.decks import DECK_NOT_FOUND
 from app.services.trust import revoke_if_reported
 
 CARD_NOT_FOUND = "Card not found"
@@ -25,7 +22,6 @@ class CardService:
     def __init__(
         self,
         session: AsyncSession,
-        decks: DeckRepository,
         cards: CardRepository,
         jobs: JobRepository,
         knowledge: KnowledgeRepository,
@@ -33,7 +29,6 @@ class CardService:
         users: UserRepository,
     ):
         self.session = session
-        self.decks = decks
         self.cards = cards
         self.jobs = jobs
         self.knowledge = knowledge
@@ -42,17 +37,7 @@ class CardService:
 
     async def _queue_embedding(self, card: Card, user: User) -> None:
         """Only for searching its own deck: a learner's own text never joins the knowledge base."""
-        await self.jobs.add(
-            Job(
-                user_id=user.id,
-                kind=EMBED_CARDS,
-                payload={"card_ids": [card.id], "share": False},
-            )
-        )
-
-    async def _require_deck(self, deck_id: int, user: User) -> None:
-        if await self.decks.get_owned(deck_id, user.id) is None:
-            raise NotFound(DECK_NOT_FOUND)
+        await self.jobs.queue_card_embedding(user.id, [card.id], share=False)
 
     async def _owned(self, card_id: int, user: User) -> Card:
         card = await self.cards.get_owned(card_id, user.id)
@@ -60,13 +45,11 @@ class CardService:
             raise NotFound(CARD_NOT_FOUND)
         return card
 
-    async def list_cards(self, deck_id: int, user: User) -> list[Card]:
-        await self._require_deck(deck_id, user)
-        return await self.cards.list_for_deck(deck_id)
+    async def list_cards(self, deck: Deck) -> list[Card]:
+        return await self.cards.list_for_deck(deck.id)
 
-    async def create(self, deck_id: int, user: User, body: CardCreate) -> Card:
-        await self._require_deck(deck_id, user)
-        card = await self.cards.add(Card(deck_id=deck_id, front=body.front, back=body.back))
+    async def create(self, deck: Deck, user: User, body: CardCreate) -> Card:
+        card = await self.cards.add(Card(deck_id=deck.id, front=body.front, back=body.back))
         await self._queue_embedding(card, user)
         await self.session.commit()
         return card
@@ -99,10 +82,8 @@ class CardService:
 
         hidden = await self.knowledge.hide_card_copy(card.id)
         # A second learner's card has no copy of its own, since it confirmed the first learner's.
-        if embedded := await self.cards.embedding_of(card.id):
-            match = await self.knowledge.closest_card(*embedded)
-            if match is not None and match.similarity >= NEAR_DUPLICATE_SIMILARITY:
-                hidden += await self.knowledge.hide_chunks([match.chunk_id])
+        if card.confirmed_chunk_id is not None:
+            hidden += await self.knowledge.hide_chunks([str(card.confirmed_chunk_id)])
         if card.generation_id is not None:
             generation = await self.generations.get_owned(card.generation_id, user.id)
             if generation is not None:

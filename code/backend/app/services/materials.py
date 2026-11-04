@@ -104,7 +104,7 @@ class MaterialService:
         since = utcnow() - BUDGET_WINDOW
         if await self.documents.count_new_since(user_id, since) >= limit:
             raise BudgetExceeded(f"You've reached the limit of {limit} new files in 24 hours.")
-        if not await self.budget.within_model_limits({Role.EMBEDDER: 1, Role.WRITER: 1}):
+        if not await self.budget.within_model_limits({Role.EMBEDDER: 1, Role.HELPER: 1}):
             raise BudgetExceeded("File processing has hit today's limit. Try again later.")
 
     async def _start_indexing(self, document: Document) -> None:

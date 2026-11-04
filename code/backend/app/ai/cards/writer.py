@@ -9,20 +9,21 @@ from langchain.agents.middleware import (
     ToolCallLimitMiddleware,
     wrap_model_call,
 )
-from langchain.agents.structured_output import StructuredOutputError, ToolStrategy
-from langchain_core.exceptions import OutputParserException
-from langchain_core.language_models import BaseChatModel
+from langchain.agents.structured_output import ToolStrategy
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
-from pydantic import ValidationError
 
 from app.ai.cards.prompts import SEARCH_BODY
 from app.ai.knowledge.retrieval import KnowledgeRetriever, labelled_text
 from app.ai.knowledge.tools import KnowledgeContext, search_materials
-from app.ai.models import AIUnavailable, ai_errors
+from app.ai.models import (
+    BAD_REPLY,
+    AIUnavailable,
+    ChatModel,
+    agent_model,
+    ai_errors,
+    structured_reply,
+)
 from app.ai.schemas import CardBatch, CardDraft
-
-# Failures of the reply's shape, which become AIUnavailable so that the job tries again.
-BAD_REPLY = (OutputParserException, ValidationError, StructuredOutputError)
 
 
 @wrap_model_call
@@ -36,11 +37,12 @@ async def _search_only_once(
 
 
 async def write_with_search(
-    model: BaseChatModel, system: str, body: str, retriever: KnowledgeRetriever
+    model: ChatModel, system: str, body: str, retriever: KnowledgeRetriever
 ) -> tuple[list[CardDraft], list[str], list[str]]:
     """The cards, what the search found, and those chunks' IDs. It costs at most two model calls."""
+    first, fallbacks = agent_model(model)
     agent = create_agent(
-        model,
+        first,
         [search_materials],
         system_prompt=system,
         # Cards come back through a tool, since a model can't always use tools and a provider's
@@ -50,6 +52,7 @@ async def write_with_search(
         middleware=[
             ToolCallLimitMiddleware(tool_name=search_materials.name, run_limit=1),
             _search_only_once,
+            *fallbacks,
         ],
         context_schema=KnowledgeContext,
     )
@@ -74,12 +77,7 @@ async def write_with_search(
     return (batch.cards if batch else []), found, chunk_ids
 
 
-async def write_directly(model: BaseChatModel, system: str, body: str) -> list[CardDraft]:
+async def write_directly(model: ChatModel, system: str, body: str) -> list[CardDraft]:
     """One call with no tools, for a file's material or a repair."""
-    structured = model.with_structured_output(CardBatch)
-    try:
-        with ai_errors():
-            batch = await structured.ainvoke([SystemMessage(system), HumanMessage(body)])
-    except BAD_REPLY:
-        raise AIUnavailable() from None
+    batch = await structured_reply(model, CardBatch, [SystemMessage(system), HumanMessage(body)])
     return batch.cards if batch else []

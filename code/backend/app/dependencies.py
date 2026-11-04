@@ -4,11 +4,13 @@ from typing import Annotated
 
 from fastapi import Cookie, Depends
 
+from app.ai.knowledge.cache import RedisByteStore
 from app.core.database import SessionDep
+from app.core.errors import NotFound
 from app.core.redis import get_redis
 from app.core.settings import get_settings
 from app.jobs.events import JobEvents
-from app.models import User
+from app.models import Deck, User
 from app.repositories.cards import CardRepository
 from app.repositories.decks import DeckRepository
 from app.repositories.documents import DocumentRepository
@@ -23,7 +25,7 @@ from app.schemas.jobs import JobRead
 from app.services.auth import AuthService
 from app.services.budget import BudgetService
 from app.services.cards import CardService
-from app.services.decks import DeckService
+from app.services.decks import DECK_NOT_FOUND, DeckService
 from app.services.generations import GenerationService
 from app.services.jobs import JobService
 from app.services.materials import MaterialService
@@ -56,7 +58,6 @@ def get_deck_service(session: SessionDep) -> DeckService:
 def get_card_service(session: SessionDep) -> CardService:
     return CardService(
         session,
-        DeckRepository(session),
         CardRepository(session),
         JobRepository(session),
         KnowledgeRepository(session),
@@ -83,6 +84,17 @@ async def get_owned_job(job_id: int, user: CurrentUser, service: JobServiceDep) 
 OwnedJob = Annotated[JobRead, Depends(get_owned_job)]
 
 
+async def get_owned_deck(deck_id: int, user: CurrentUser, session: SessionDep) -> Deck:
+    """Someone else's deck answers 404, never 403."""
+    deck = await DeckRepository(session).get_owned(deck_id, user.id)
+    if deck is None:
+        raise NotFound(DECK_NOT_FOUND)
+    return deck
+
+
+OwnedDeck = Annotated[Deck, Depends(get_owned_deck)]
+
+
 def get_material_service(session: SessionDep) -> MaterialService:
     settings = get_settings()
     return MaterialService(
@@ -101,7 +113,6 @@ def get_generation_service(session: SessionDep) -> GenerationService:
     settings = get_settings()
     return GenerationService(
         session,
-        DeckRepository(session),
         DocumentRepository(session),
         GenerationRepository(session),
         JobRepository(session),
@@ -118,7 +129,6 @@ def get_problem_card_service(session: SessionDep) -> ProblemCardService:
     return ProblemCardService(
         session,
         ProblemCardRepository(session),
-        DeckRepository(session),
         CardRepository(session),
         JobRepository(session),
         get_settings(),
@@ -133,11 +143,11 @@ def get_tutor_service(session: SessionDep) -> TutorService:
     return TutorService(
         session,
         TutorRepository(session),
-        DeckRepository(session),
         CardRepository(session),
         JobRepository(session),
         BudgetService(UsageRepository(session), settings),
         settings,
+        RedisByteStore(get_redis()),
     )
 
 
@@ -147,7 +157,6 @@ TutorServiceDep = Annotated[TutorService, Depends(get_tutor_service)]
 def get_study_service(session: SessionDep, problem_cards: ProblemCardServiceDep) -> StudyService:
     return StudyService(
         session,
-        DeckRepository(session),
         CardRepository(session),
         problem_cards,
         KnowledgeRepository(session),

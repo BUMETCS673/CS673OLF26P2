@@ -19,11 +19,10 @@ from app.ai.problem_cards.graph import resume_review
 from app.ai.tracing import labelled_trace
 from app.core.errors import Conflict, InvalidRequest, NotFound
 from app.core.settings import Settings
-from app.models import Card, Job, ProblemCardReview, User, utcnow
-from app.models.job import EMBED_CARDS, REVIEW_PROBLEM_CARDS
+from app.models import Card, Deck, Job, ProblemCardReview, User, utcnow
+from app.models.job import REVIEW_PROBLEM_CARDS
 from app.models.problem_card_review import COMPLETED, FAILED, PENDING, QUEUED
 from app.repositories.cards import CardRepository
-from app.repositories.decks import DeckRepository
 from app.repositories.jobs import JobRepository
 from app.repositories.problem_cards import ProblemCardRepository
 from app.schemas.cards import CardRead
@@ -35,7 +34,6 @@ from app.schemas.problem_cards import (
     ProblemCardSummary,
     ReadyReview,
 )
-from app.services.decks import DECK_NOT_FOUND
 
 logger = logging.getLogger(__name__)
 
@@ -51,14 +49,12 @@ class ProblemCardService:
         self,
         session: AsyncSession,
         reviews: ProblemCardRepository,
-        decks: DeckRepository,
         cards: CardRepository,
         jobs: JobRepository,
         settings: Settings,
     ):
         self.session = session
         self.reviews = reviews
-        self.decks = decks
         self.cards = cards
         self.jobs = jobs
         self.settings = settings
@@ -134,10 +130,8 @@ class ProblemCardService:
             ],
         )
 
-    async def pending_for_deck(self, deck_id: int, user: User) -> ProblemCardReviewRead | None:
-        if await self.decks.get_owned(deck_id, user.id) is None:
-            raise NotFound(DECK_NOT_FOUND)
-        review = await self.reviews.pending_for_deck(deck_id)
+    async def pending_for_deck(self, deck: Deck) -> ProblemCardReviewRead | None:
+        review = await self.reviews.pending_for_deck(deck.id)
         return ProblemCardReviewRead.model_validate(review) if review else None
 
     def _check_decisions(self, review: ProblemCardReview, decisions: Sequence[dict]) -> None:
@@ -221,13 +215,7 @@ class ProblemCardService:
         review.decisions = applied
         review.status, review.completed_at = COMPLETED, utcnow()
         if created:
-            await self.jobs.add(
-                Job(
-                    user_id=user.id,
-                    kind=EMBED_CARDS,
-                    payload={"card_ids": [card.id for card in created]},
-                )
-            )
+            await self.jobs.queue_card_embedding(user.id, [card.id for card in created])
         await self.session.commit()
 
         url = self.settings.database_url

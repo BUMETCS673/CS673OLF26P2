@@ -40,11 +40,16 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/cadence}
       REDIS_URL: ${REDIS_URL:-redis://valkey:6379/0}
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-0}
-      # The stand-in models unless .env says "gemini" and has a key.
+      # The stand-in models unless .env names a vendor and has its key.
       AI_WRITER_PROVIDER: ${AI_WRITER_PROVIDER:-fake}
       AI_WRITER_MODEL: ${AI_WRITER_MODEL:-}
       # Follows the writer, so setting only the writer can't leave a fake judge approving cards.
       AI_JUDGE_PROVIDER: ${AI_JUDGE_PROVIDER:-${AI_WRITER_PROVIDER:-fake}}
+      AI_HELPER_PROVIDER: ${AI_HELPER_PROVIDER:-${AI_WRITER_PROVIDER:-fake}}
+      AI_HELPER_MODEL: ${AI_HELPER_MODEL:-}
+      AI_WRITER_FALLBACKS: ${AI_WRITER_FALLBACKS:-}
+      AI_JUDGE_FALLBACKS: ${AI_JUDGE_FALLBACKS:-}
+      AI_HELPER_FALLBACKS: ${AI_HELPER_FALLBACKS:-}
       AI_EMBEDDER_PROVIDER: ${AI_EMBEDDER_PROVIDER:-${AI_WRITER_PROVIDER:-fake}}
       AI_EMBEDDER_MODEL: ${AI_EMBEDDER_MODEL:-}
       AI_WRITER_THINKING: ${AI_WRITER_THINKING:-}

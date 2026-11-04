@@ -22,6 +22,9 @@ from app.models import KnowledgeChunk
 
 # High, because "X is 5" and "X is 7" are also very close. A starting point, to tune.
 NEAR_DUPLICATE_SIMILARITY = 0.97
+# Card-copy matches above this go to the same-fact model check.
+# Set below the lowest same-fact pair in the eval (0.959).
+SAME_FACT_CANDIDATE = 0.95
 
 # Remembers whether it was shared, so undoing a hide can't share what never passed its checks.
 _HIDE = {
@@ -50,6 +53,7 @@ class CardMatch:
     chunk_id: str
     accepted_by: int
     similarity: float
+    content: str
 
 
 class KnowledgeRepository:
@@ -72,6 +76,7 @@ class KnowledgeRepository:
                     literal(position, Integer).label("position"),
                     KnowledgeChunk.langchain_id,
                     KnowledgeChunk.accepted_by,
+                    KnowledgeChunk.content,
                     distance.label("distance"),
                 )
                 .where(*conditions)
@@ -113,12 +118,9 @@ class KnowledgeRepository:
         return [
             None
             if row is None
-            else CardMatch(str(row.langchain_id), row.accepted_by, 1 - row.distance)
+            else CardMatch(str(row.langchain_id), row.accepted_by, 1 - row.distance, row.content)
             for row in rows
         ]
-
-    async def closest_card(self, vector: list[float], embedding_model: str) -> CardMatch | None:
-        return (await self.closest_cards([vector], embedding_model))[0]
 
     async def has_chunks(self, embedding_model: str) -> bool:
         return await self.session.scalar(

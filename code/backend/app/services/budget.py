@@ -1,13 +1,13 @@
 """Daily AI budgets, and recording what each run spent.
 
-Budgets are best effort: two simultaneous requests can both pass a check. Google's own counters
-remain the final word.
+Budgets are best effort: two simultaneous requests can both pass a check. The vendors' own
+counters remain the final word.
 """
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import timedelta
 
-from app.ai.models import Role, model_name
+from app.ai.models import ModelSpec, Role, RunModels, model_chain, plan_models
 from app.ai.usage import RunUsage
 from app.core.settings import Settings
 from app.models import AiUsage, utcnow
@@ -21,24 +21,74 @@ TUTOR = "tutor"
 MATERIALS = "materials"
 SUGGESTIONS = "suggestions"
 
+# Which limit a run would pass.
+SITE = "site"
+USER = "user"
+
 
 class BudgetService:
     def __init__(self, usage: UsageRepository, settings: Settings):
         self.usage = usage
         self.settings = settings
 
-    async def within_model_limits(self, cost: Mapping[Role, int], reserve: int = 0) -> bool:
-        """Whether each model has room for `cost`, a run's worst case, plus `reserve` to spare."""
-        since = utcnow() - BUDGET_WINDOW
-        by_model: dict[str, int] = {}
-        for role, calls in cost.items():
-            model = model_name(role, self.settings)
-            by_model[model] = by_model.get(model, 0) + calls
-        spent = await self.usage.calls_by_model(by_model, since)
-        return all(
-            spent.get(model, 0) + calls + reserve <= self.settings.model_daily_limit(model)
-            for model, calls in by_model.items()
-        )
+    async def pick_models(
+        self, cost: Mapping[Role, int], reserve: int = 0, *, judged: Role | None = None
+    ) -> RunModels | None:
+        """The run's models, each role starting on its first model with room.
+
+        Room means space for `cost`, a run's worst case, plus `reserve`, and roles that pick
+        the same model share it. A run with a judge names the role whose cards it checks in
+        `judged`. None means some role has no model left.
+        """
+        names = {spec.name for role in cost for spec in model_chain(role, self.settings)}
+        spent = await self.usage.calls_by_model(names, utcnow() - BUDGET_WINDOW)
+
+        def with_room(role: Role, chain: Sequence[ModelSpec]) -> ModelSpec | None:
+            calls = cost[role]
+
+            def has_room(spec: ModelSpec) -> bool:
+                needed = spent.get(spec.name, 0) + calls + reserve
+                return needed <= self.settings.model_daily_limit(spec.name)
+
+            spec = next(filter(has_room, chain), None)
+            if spec is not None:
+                spent[spec.name] = spent.get(spec.name, 0) + calls
+            return spec
+
+        return plan_models(self.settings, cost, judged=judged, start=with_room)
+
+    async def within_model_limits(
+        self, cost: Mapping[Role, int], reserve: int = 0, *, judged: Role | None = None
+    ) -> bool:
+        """Whether every role has a model with room for `cost` plus `reserve`."""
+        return await self.pick_models(cost, reserve, judged=judged) is not None
+
+    async def limit_reached(
+        self,
+        feature: str,
+        user_id: int,
+        cost: Mapping[Role, int],
+        *,
+        user_limit: int,
+        site_limit: int | None = None,
+        reserve: int = 0,
+        judged: Role | None = None,
+    ) -> tuple[str | None, RunModels | None]:
+        """SITE or USER for the first limit a run of `cost` would pass, or else the models to use.
+
+        A role with no model left counts as the site's limit. `judged` is as in `pick_models`.
+        """
+        calls = sum(cost.values())
+        if site_limit is None:
+            site, own = 0, await self.user_feature_calls(feature, user_id)
+        else:
+            site, own = await self.feature_calls(feature, user_id)
+        if site_limit is not None and site + calls > site_limit:
+            return SITE, None
+        if own + calls > user_limit:
+            return USER, None
+        models = await self.pick_models(cost, reserve, judged=judged)
+        return (None, models) if models is not None else (SITE, None)
 
     async def feature_calls(self, feature: str, user_id: int) -> tuple[int, int]:
         """A feature's calls in the window, across the site and for one user."""

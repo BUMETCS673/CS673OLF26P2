@@ -3,7 +3,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.checkpoints import discard_threads
-from app.core.errors import NotFound
 from app.core.settings import Settings
 from app.models import Deck, User, utcnow
 from app.repositories.cards import CardRepository
@@ -26,12 +25,6 @@ class DeckService:
         self.cards = cards
         self.settings = settings
 
-    async def _owned(self, deck_id: int, user: User) -> Deck:
-        deck = await self.decks.get_owned(deck_id, user.id)
-        if deck is None:
-            raise NotFound(DECK_NOT_FOUND)
-        return deck
-
     async def _read(self, deck: Deck) -> DeckRead:
         return (await self._read_many([deck]))[0]
 
@@ -45,8 +38,8 @@ class DeckService:
     async def list_decks(self, user: User) -> list[DeckRead]:
         return await self._read_many(await self.decks.list_for_user(user.id))
 
-    async def get(self, deck_id: int, user: User) -> DeckRead:
-        return await self._read(await self._owned(deck_id, user))
+    async def get(self, deck: Deck) -> DeckRead:
+        return await self._read(deck)
 
     async def create(self, user: User, body: DeckCreate) -> DeckRead:
         deck = await self.decks.add(
@@ -55,15 +48,13 @@ class DeckService:
         await self.session.commit()
         return await self._read(deck)
 
-    async def update(self, deck_id: int, user: User, body: DeckUpdate) -> DeckRead:
-        deck = await self._owned(deck_id, user)
+    async def update(self, deck: Deck, body: DeckUpdate) -> DeckRead:
         for field, value in body.model_dump(exclude_unset=True).items():
             setattr(deck, field, value)
         await self.session.commit()
         return await self._read(deck)
 
-    async def delete(self, deck_id: int, user: User) -> None:
-        deck = await self._owned(deck_id, user)
+    async def delete(self, deck: Deck) -> None:
         thread_ids = await self.decks.graph_thread_ids(deck.id)
         await self.decks.delete(deck.id)
         await self.session.commit()

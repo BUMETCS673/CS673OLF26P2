@@ -19,6 +19,8 @@ SCHEMA = "langgraph"
 POOL_MAX_SIZE = 4  # per process
 
 _pools: dict[str, AsyncConnectionPool] = {}
+# One saver per database, so each graph compiles once.
+_savers: dict[str, AsyncPostgresSaver] = {}
 _pools_lock = asyncio.Lock()
 
 
@@ -51,12 +53,14 @@ async def _pool_for(database_url: str) -> AsyncConnectionPool:
         async with pool.connection() as connection:
             await AsyncPostgresSaver(connection).setup()
         _pools[database_url] = pool
+        _savers[database_url] = AsyncPostgresSaver(pool)
         return pool
 
 
 @asynccontextmanager
 async def open_checkpointer(database_url: str) -> AsyncIterator[AsyncPostgresSaver]:
-    yield AsyncPostgresSaver(await _pool_for(database_url))
+    await _pool_for(database_url)
+    yield _savers[database_url]
 
 
 async def discard_threads(database_url: str, thread_ids: Iterable[str]) -> None:
@@ -73,3 +77,4 @@ async def close_checkpointers() -> None:
     for pool in _pools.values():
         await pool.close()
     _pools.clear()
+    _savers.clear()

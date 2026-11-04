@@ -126,11 +126,11 @@ def _url(deck) -> str:
 
 
 @pytest.fixture
-def fake_writer(monkeypatch):
-    monkeypatch.setattr(get_settings(), "ai_writer_provider", "fake")
+def fake_helper(monkeypatch):
+    monkeypatch.setattr(get_settings(), "ai_helper_provider", "fake")
 
 
-async def test_suggestions_return_three_topics_and_record_usage(client, session, deck, fake_writer):
+async def test_suggestions_return_three_topics_and_record_usage(client, session, deck, fake_helper):
     response = await client.post(_url(deck))
 
     assert response.status_code == 200
@@ -138,7 +138,7 @@ async def test_suggestions_return_three_topics_and_record_usage(client, session,
     assert await session.scalar(select(AiUsage.feature)) == SUGGESTIONS
 
 
-async def test_suggestions_see_the_decks_cards(client, deck, make_card, monkeypatch, fake_writer):
+async def test_suggestions_see_the_decks_cards(client, deck, make_card, monkeypatch, fake_helper):
     await make_card(deck, front="What divides?", back="Cells")
     seen = []
 
@@ -160,25 +160,25 @@ async def test_someone_elses_deck_has_no_suggestions(client, me, make_deck, make
     assert (await client.post(_url(await make_deck(other)))).status_code == 404
 
 
-async def test_suggestions_have_a_daily_limit(client, deck, fake_writer, monkeypatch):
+async def test_suggestions_have_a_daily_limit(client, deck, fake_helper, monkeypatch):
     monkeypatch.setattr(get_settings(), "ai_suggestions_user_daily_limit", 1)
 
     assert (await client.post(_url(deck))).status_code == 200
     assert (await client.post(_url(deck))).status_code == 429
 
 
-async def test_a_full_model_limit_refuses_suggestions(client, deck, fake_writer, monkeypatch):
+async def test_a_full_model_limit_refuses_suggestions(client, deck, fake_helper, monkeypatch):
     async def full(*_, **__):
-        return False
+        return None
 
-    monkeypatch.setattr(BudgetService, "within_model_limits", full)
+    monkeypatch.setattr(BudgetService, "pick_models", full)
 
     assert (await client.post(_url(deck))).status_code == 429
 
 
 @pytest.mark.parametrize(("error", "status"), [(AIRateLimited(), 429), (AIUnavailable(), 503)])
 async def test_a_failed_model_call_is_reported(
-    client, deck, fake_writer, monkeypatch, error, status
+    client, deck, fake_helper, monkeypatch, error, status
 ):
     async def fail(*_):
         raise error

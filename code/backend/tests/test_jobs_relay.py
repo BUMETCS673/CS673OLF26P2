@@ -1,7 +1,6 @@
 """The relay that sends jobs from Postgres to Redis."""
 
 import asyncio
-from contextlib import suppress
 from datetime import timedelta
 
 import pytest
@@ -185,8 +184,7 @@ async def test_a_new_job_wakes_the_relay_without_waiting_for_a_poll(engine, comm
         assert await asyncio.wait_for(sent.get(), timeout=5) == second
     finally:
         relay.cancel()
-        with suppress(asyncio.CancelledError):
-            await relay
+        await asyncio.gather(relay, return_exceptions=True)
 
 
 async def test_two_relays_never_take_the_same_job(committed):

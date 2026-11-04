@@ -29,9 +29,9 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command, interrupt
 
 from app.ai.cards.checks import back_fits, clean_cards
+from app.ai.graphs import compiled, thread_config
 from app.ai.judge import PASSED, SKIPPED, NoEvidence, judge_cards
-from app.ai.models import AIRateLimited, AIUnavailable, Role, ai_errors
-from app.ai.prompting import EXISTING_CARDS
+from app.ai.models import AIRateLimited, AIUnavailable, Role, agent_model, ai_errors
 from app.ai.schemas import CardDraft
 from app.ai.tutor.context import TutorContext
 from app.ai.tutor.prompts import MAX_PROPOSED_CARDS, tutor_system
@@ -45,8 +45,7 @@ HISTORY_WINDOW = 12  # messages sent to the model
 MAX_REPLY_CHARS = 4000  # shown to the learner
 MAX_MESSAGES = 100  # shown messages before the learner must reset
 # A turn's worst case, which the budgets reserve before it starts.
-TURN_COST = {Role.WRITER: MAX_AGENT_CALLS, Role.JUDGE: 1, Role.EMBEDDER: MAX_AGENT_CALLS - 1}
-TURN_MAX_CALLS = sum(TURN_COST.values())
+TURN_COST = {Role.HELPER: MAX_AGENT_CALLS, Role.JUDGE: 1, Role.EMBEDDER: MAX_AGENT_CALLS - 1}
 
 CANT_ANSWER = "I couldn't work that out. Could you ask it another way?"
 CANT_VERIFY = "I couldn't write a card that passed the accuracy checks, so I didn't suggest one."
@@ -85,11 +84,12 @@ async def _run_agent(context: TutorContext, history: list[AnyMessage]) -> list[A
     window = trim_messages(
         history, strategy="last", token_counter=len, max_tokens=HISTORY_WINDOW, start_on="human"
     )
+    first, fallbacks = agent_model(context.writer)
     agent = create_agent(
-        context.writer,
+        first,
         TUTOR_TOOLS,
         system_prompt=tutor_system(context.deck_name),
-        middleware=[_answer_on_last_call],
+        middleware=[_answer_on_last_call, *fallbacks],
         context_schema=TutorContext,
         checkpointer=False,  # otherwise it saves its own steps in the tutor's checkpointer
     )
@@ -135,11 +135,7 @@ async def _check(state: TutorState, runtime: Runtime[TutorContext]) -> dict:
     if not drafts:
         return {"messages": [AIMessage(CANT_VERIFY)]}
 
-    # The newest first, as card generation sends them. `cards` is oldest first.
-    existing = [
-        CardDraft(front=card["front"], back=card["back"])
-        for card in reversed(context.cards[-EXISTING_CARDS:])
-    ]
+    existing = await context.find_existing(drafts)
     verdicts = await judge_cards(context.judge, drafts, NoEvidence(), existing)
     # No usable answer keeps the cards with a warning. Otherwise only explicit approvals stay.
     kept = drafts if not verdicts else [
@@ -182,7 +178,8 @@ def _build_graph() -> StateGraph:
     return graph
 
 
-_GRAPH = _build_graph()  # compiled per run, with that run's checkpointer
+RUN_NAME = "deck_tutor"
+_GRAPH = _build_graph()
 
 
 @dataclass(frozen=True)
@@ -190,10 +187,6 @@ class TurnOutcome:
     messages: list[dict]
     proposal: dict | None
     verification: str
-
-
-def _thread(thread_id: str) -> dict:
-    return {"configurable": {"thread_id": thread_id}, "run_name": "deck_tutor"}
 
 
 def _for_learner(messages: Sequence[AnyMessage]) -> list[dict]:
@@ -216,14 +209,14 @@ async def run_turn(
 ) -> TurnOutcome:
     """Add the learner's message and run until a reply or a proposal."""
     # `messages` has a reducer, so this appends. The other fields start fresh each turn.
-    state = await _GRAPH.compile(checkpointer=checkpointer).ainvoke(
+    state = await compiled(_GRAPH, checkpointer).ainvoke(
         {
             "messages": [HumanMessage(text)],
             "raw_cards": [],
             "proposal": None,
             "verification": PASSED,
         },
-        _thread(thread_id),
+        thread_config(thread_id, RUN_NAME),
         context=context,
         # Saving once per turn avoids rewriting the chat at every step. A crash loses that turn.
         durability="exit",
@@ -235,11 +228,11 @@ async def run_turn(
 
 async def resume_turn(checkpointer: BaseCheckpointSaver, thread_id: str, closing: str) -> None:
     """Finish a paused turn. It needs no context, since only `review` runs and reads none."""
-    await _GRAPH.compile(checkpointer=checkpointer).ainvoke(
-        Command(resume=closing), _thread(thread_id)
+    await compiled(_GRAPH, checkpointer).ainvoke(
+        Command(resume=closing), thread_config(thread_id, RUN_NAME)
     )
 
 
 async def read_messages(checkpointer: BaseCheckpointSaver, thread_id: str) -> list[dict]:
-    snapshot = await _GRAPH.compile(checkpointer=checkpointer).aget_state(_thread(thread_id))
+    snapshot = await compiled(_GRAPH, checkpointer).aget_state(thread_config(thread_id, RUN_NAME))
     return _for_learner(snapshot.values.get("messages", []))

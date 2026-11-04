@@ -4,35 +4,57 @@ import httpx
 import pytest
 from google.genai import errors
 from langchain_core.messages import HumanMessage
+from langchain_core.runnables import RunnableWithFallbacks
 from langchain_core.tools import tool
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_google_genai._common import GoogleGenerativeAIError
-from langchain_google_genai.chat_models import ChatGoogleGenerativeAIError, GoogleRateLimitError
+from langchain_google_genai.chat_models import (
+    ChatGoogleGenerativeAIError,
+    GoogleAPIError,
+    GoogleRateLimitError,
+)
 
+from app.ai.failures import FALL_BACK_ON
 from app.ai.fake import FakeChatModel, FakeEmbeddings
 from app.ai.models import (
     NOT_CONFIGURED,
     AIRateLimited,
     AITransient,
     AIUnavailable,
+    ChainFallbackMiddleware,
+    GuardedEmbeddings,
+    ModelSpec,
     Role,
+    RunModels,
+    agent_model,
     ai_errors,
+    check_model_chains,
+    first_models,
+    judge_chain,
     load_chat_model,
     load_embeddings,
+    model_chain,
+    plan_models,
+    structured_reply,
 )
+from app.ai.rate_limits import ModelBusy
 from app.ai.schemas import CardBatch, Verdicts
 from app.core.settings import EMBEDDING_DIMENSIONS, Settings
 
 
 def _settings(**values):
-    return Settings(
-        ai_writer_provider="gemini",
-        ai_judge_provider="gemini",
-        ai_embedder_provider="gemini",
-        gemini_api_key="not-a-real-key",
-        ai_model_rate_limits="",
-        **values,
-    )
+    defaults = {
+        "ai_writer_provider": "gemini",
+        "ai_judge_provider": "gemini",
+        "ai_embedder_provider": "gemini",
+        "gemini_api_key": "not-a-real-key",
+        "ai_model_rate_limits": "",
+    }
+    return Settings(**{**defaults, **values})
+
+
+def _api_error(kind, code):
+    return kind(code, {"error": {"code": code, "message": "private text", "status": "X"}})
 
 
 @tool
@@ -51,14 +73,23 @@ def finish(answer: str) -> str:
 
 
 def test_each_role_has_its_own_model():
-    settings = _settings(ai_writer_model="lite", ai_judge_model="flash")
+    settings = _settings(
+        ai_writer_model="lite",
+        ai_judge_model="flash",
+        ai_judge_fallbacks="gemini:lite",
+        ai_helper_provider="gemini",
+        ai_helper_model="mini",
+    )
+
+    models = first_models(settings, [Role.WRITER, Role.JUDGE], judged=Role.WRITER)
 
     assert load_chat_model(Role.WRITER, settings).model.endswith("lite")
-    assert load_chat_model(Role.JUDGE, settings).model.endswith("flash")
+    assert load_chat_model(Role.JUDGE, settings, models=models).model.endswith("flash")
+    assert load_chat_model(Role.HELPER, settings).model.endswith("mini")
 
 
 def test_the_real_chat_model_makes_one_attempt_with_our_settings():
-    model = load_chat_model(Role.WRITER, _settings())
+    model = load_chat_model(Role.WRITER, _settings(ai_writer_fallbacks=""))
 
     assert isinstance(model, ChatGoogleGenerativeAI)
     assert model.max_retries == 1
@@ -66,11 +97,203 @@ def test_the_real_chat_model_makes_one_attempt_with_our_settings():
     assert model.temperature is None
 
 
+@pytest.mark.parametrize(
+    ("model", "level"), [("gemini-3.5-flash-lite", "low"), ("gemini-2.5-flash-lite", None)]
+)
+def test_only_gemini_3_gets_a_thinking_level(model, level):
+    settings = _settings(ai_writer_model=model, ai_writer_fallbacks="")
+
+    assert load_chat_model(Role.WRITER, settings).thinking_level == level
+
+
+def test_a_role_lists_its_own_model_first_then_its_fallbacks():
+    settings = _settings(
+        ai_writer_model="lite",
+        ai_writer_fallbacks="gemini:big, gemini:small, gemini:lite",
+    )
+
+    assert model_chain(Role.WRITER, settings) == [
+        ModelSpec("gemini", "lite"),
+        ModelSpec("gemini", "big"),
+        ModelSpec("gemini", "small"),
+    ]
+
+
+def test_a_fallback_that_isnt_set_up_is_skipped():
+    settings = _settings(ai_writer_model="lite", ai_writer_fallbacks="not-a-vendor:big")
+
+    assert model_chain(Role.WRITER, settings) == [ModelSpec("gemini", "lite")]
+
+
+def test_a_role_with_later_models_gets_them_as_fallbacks():
+    settings = _settings(ai_writer_fallbacks="gemini:big,gemini:small")
+
+    model = load_chat_model(Role.WRITER, settings)
+
+    assert isinstance(model, RunnableWithFallbacks)
+    assert isinstance(model.runnable, ChatGoogleGenerativeAI)
+    assert [fallback.model.split("/")[-1] for fallback in model.fallbacks] == ["big", "small"]
+    assert model.exceptions_to_handle == FALL_BACK_ON
+
+
+def _spec(name):
+    return ModelSpec("gemini", name)
+
+
+def _ranked(**values):
+    """A judge ranking big > mid > small > tiny."""
+    return _settings(
+        ai_judge_model="big", ai_judge_fallbacks="gemini:mid,gemini:small,gemini:tiny", **values
+    )
+
+
+def test_the_judge_chain_stops_above_every_model_it_checks():
+    # A chain that isn't strongest first, like the helper's, still ranks by its strongest.
+    above = judge_chain(_ranked(), [_spec("small"), _spec("mid")])
+
+    assert above == [_spec("big")]
+
+
+def test_the_judge_plans_above_every_model_the_helper_may_fall_back_to():
+    settings = _ranked(
+        ai_helper_provider="gemini", ai_helper_model="small", ai_helper_fallbacks="gemini:mid"
+    )
+
+    models = plan_models(settings, [Role.HELPER, Role.JUDGE], judged=Role.HELPER)
+
+    assert models.chain(Role.HELPER) == (_spec("small"), _spec("mid"))
+    assert models.chain(Role.JUDGE) == (_spec("big"),)
+
+
+def test_the_judge_falls_back_only_above_the_writer():
+    settings = _ranked(ai_writer_model="small", ai_writer_fallbacks="")
+    models = first_models(settings, [Role.WRITER, Role.JUDGE], judged=Role.WRITER)
+
+    judge = load_chat_model(Role.JUDGE, settings, models=models)
+
+    assert [fallback.model.split("/")[-1] for fallback in judge.fallbacks] == ["mid"]
+
+
+def test_a_judge_with_nothing_above_the_writer_isnt_set_up():
+    settings = _ranked(ai_writer_model="big", ai_writer_fallbacks="")
+
+    with pytest.raises(AIUnavailable, match=NOT_CONFIGURED):
+        first_models(settings, [Role.WRITER, Role.JUDGE], judged=Role.WRITER)
+
+
+def test_a_run_with_a_judge_must_say_what_it_checks():
+    with pytest.raises(ValueError):
+        plan_models(_settings(), [Role.WRITER, Role.JUDGE])
+    with pytest.raises(ValueError):
+        load_chat_model(Role.JUDGE, _settings())
+
+
+def test_the_default_chains_pass_the_startup_check():
+    check_model_chains(_settings(ai_helper_provider="gemini"))
+
+
+@pytest.mark.parametrize("writer", ["big", "unranked"])
+def test_a_judge_that_cant_rank_above_the_writer_stops_startup(writer):
+    settings = _ranked(ai_writer_model=writer, ai_writer_fallbacks="")
+
+    with pytest.raises(ValueError, match=writer):
+        check_model_chains(settings)
+
+
+def test_the_startup_check_waits_for_the_ai_to_be_set_up():
+    check_model_chains(_ranked(ai_writer_model="unranked", gemini_api_key=""))
+
+
+class BusyModel(FakeChatModel):
+    def _generate(self, *_, **__):
+        raise ModelBusy()
+
+
+class OverloadedModel(FakeChatModel):
+    def _generate(self, *_, **__):
+        raise _api_error(GoogleAPIError, 503)
+
+
+class BrokenModel(FakeChatModel):
+    def _generate(self, *_, **__):
+        raise ValueError("not a limit")
+
+
+@pytest.mark.parametrize("first", [BusyModel, OverloadedModel])
+async def test_a_rate_limited_or_overloaded_call_is_answered_by_the_next_model(first):
+    model = first().with_fallbacks([FakeChatModel()], exceptions_to_handle=FALL_BACK_ON)
+
+    reply = await structured_reply(model, CardBatch, [HumanMessage("Write cards.")])
+
+    assert isinstance(reply, CardBatch)
+
+
+async def test_other_failures_dont_fall_back():
+    model = BrokenModel().with_fallbacks([FakeChatModel()], exceptions_to_handle=FALL_BACK_ON)
+
+    with pytest.raises(ValueError):
+        await structured_reply(model, CardBatch, [HumanMessage("Write cards.")])
+
+
+def test_an_agent_gets_the_fallbacks_as_middleware():
+    first, fallback = FakeChatModel(), FakeChatModel()
+
+    model, [middleware] = agent_model(first.with_fallbacks([fallback]))
+
+    assert model is first
+    assert isinstance(middleware, ChainFallbackMiddleware)
+    assert middleware.models == [fallback]
+    assert agent_model(first) == (first, [])
+
+
+class _Request:
+    def __init__(self, model):
+        self.model = model
+
+    def override(self, model):
+        return _Request(model)
+
+
+@pytest.mark.parametrize(
+    ("error", "answered_by"),
+    [(ModelBusy(), "later"), (_api_error(GoogleAPIError, 503), "later"), (ValueError(), None)],
+)
+async def test_an_agent_falls_back_only_where_another_model_can_answer(error, answered_by):
+    async def handler(request):
+        if request.model == "first":
+            raise error
+        return request.model
+
+    middleware = ChainFallbackMiddleware(["later"])
+
+    if answered_by is None:
+        with pytest.raises(type(error)):
+            await middleware.awrap_model_call(_Request("first"), handler)
+    else:
+        assert await middleware.awrap_model_call(_Request("first"), handler) == answered_by
+
+
+def test_a_fake_role_has_no_fallbacks():
+    settings = Settings(ai_writer_provider="fake", ai_writer_fallbacks="gemini:big")
+
+    assert model_chain(Role.WRITER, settings) == [ModelSpec("fake", "fake")]
+
+
+def test_a_picked_model_is_loaded_instead_of_the_first():
+    models = RunModels({Role.WRITER: (ModelSpec("gemini", "big"),)})
+
+    model = load_chat_model(Role.WRITER, _settings(), models=models)
+
+    assert isinstance(model, ChatGoogleGenerativeAI)
+    assert model.model.endswith("big")
+
+
 def test_the_real_embeddings_use_our_vector_size():
     embeddings = load_embeddings(_settings())
 
-    assert isinstance(embeddings, GoogleGenerativeAIEmbeddings)
-    assert embeddings.output_dimensionality == EMBEDDING_DIMENSIONS
+    assert isinstance(embeddings, GuardedEmbeddings)
+    assert isinstance(embeddings.embeddings, GoogleGenerativeAIEmbeddings)
+    assert embeddings.embeddings.output_dimensionality == EMBEDDING_DIMENSIONS
 
 
 def test_fake_is_a_setting():
@@ -162,10 +385,6 @@ async def test_the_same_text_gets_the_same_vector():
 # --- errors -------------------------------------------------------------------------------
 
 
-def _api_error(kind, code):
-    return kind(code, {"error": {"code": code, "message": "private text", "status": "X"}})
-
-
 @pytest.mark.parametrize(
     ("raised", "expected"),
     [
@@ -175,24 +394,31 @@ def _api_error(kind, code):
         (_api_error(errors.ClientError, 400), AIUnavailable),
         (_api_error(errors.ServerError, 503), AITransient),
         (_api_error(errors.ServerError, 501), AIUnavailable),
+        (_api_error(errors.ServerError, 504), AITransient),
         (httpx.ConnectError("offline"), AITransient),
         (httpx.ReadTimeout("slow"), AIUnavailable),
     ],
 )
 def test_vendor_failures_become_our_errors(raised, expected):
-    with pytest.raises(expected) as caught, ai_errors():
+    def hides_the_vendor_error(error):
+        return type(error) is expected and "private" not in str(error) and error.__cause__ is None
+
+    with pytest.raises(expected, check=hides_the_vendor_error), ai_errors():
         raise raised
 
-    assert type(caught.value) is expected
-    assert "private" not in str(caught.value)
-    assert caught.value.__cause__ is None
 
-
-def test_a_wrapped_rate_limit_from_embeddings_is_recognized():
+@pytest.mark.parametrize(
+    ("cause", "expected"),
+    [
+        (_api_error(errors.ClientError, 429), AIRateLimited),
+        (_api_error(errors.ServerError, 503), AITransient),
+    ],
+)
+def test_a_wrapped_error_from_embeddings_is_read_by_its_status(cause, expected):
     wrapped = GoogleGenerativeAIError("failed")
-    wrapped.__cause__ = _api_error(errors.ClientError, 429)
+    wrapped.__cause__ = cause
 
-    with pytest.raises(AIRateLimited), ai_errors():
+    with pytest.raises(expected), ai_errors():
         raise wrapped
 
 

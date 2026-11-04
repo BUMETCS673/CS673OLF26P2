@@ -1,34 +1,26 @@
 """Request and response bodies for cards."""
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict
 
-from app.schemas.common import UtcDatetime, required_text
+from app.schemas.common import UtcDatetime, text_up_to
 
 TEXT_MAX = 2000
+CardText = text_up_to(TEXT_MAX)
 
 
 class CardCreate(BaseModel):
     """`origin` isn't accepted: only accepting an AI suggestion can set it."""
 
-    front: str
-    back: str
-
-    @field_validator("front", "back", mode="before")
-    @classmethod
-    def _check_text(cls, value: object, info) -> str:
-        return required_text(value, info.field_name, TEXT_MAX)
+    front: CardText
+    back: CardText
 
 
 class CardUpdate(BaseModel):
     """Only the fields sent are changed, which is why the service uses `exclude_unset`."""
 
-    front: str | None = None
-    back: str | None = None
-
-    @field_validator("front", "back", mode="before")
-    @classmethod
-    def _check_text(cls, value: object, info) -> str:
-        return required_text(value, info.field_name, TEXT_MAX)
+    # Not Optional, so an explicit null is rejected rather than saved.
+    front: CardText = None
+    back: CardText = None
 
 
 class CardRead(BaseModel):

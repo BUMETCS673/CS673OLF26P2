@@ -15,6 +15,7 @@ from langchain_core.indexing import aindex
 from langchain_core.stores import ByteStore
 from langchain_core.vectorstores import VectorStore
 from sqlalchemy.ext.asyncio import AsyncEngine
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from app.ai.models import AIRateLimited, AITransient, ai_errors
 
@@ -47,6 +48,20 @@ def with_embedding_cache(embeddings: Embeddings, cache: ByteStore, model: str) -
     )
 
 
+def with_query_cache(embeddings: Embeddings, cache: ByteStore, model: str) -> Embeddings:
+    """Reuse vectors for repeated searches. For queries only.
+
+    Queries get their own namespace, since some models embed a query and a document differently.
+    """
+    return CacheBackedEmbeddings.from_bytes_store(
+        embeddings,
+        cache,
+        namespace=f"{model}:query",
+        key_encoder="sha256",
+        query_embedding_cache=True,
+    )
+
+
 async def create_record_manager(engine: AsyncEngine) -> SQLRecordManager:
     """Tracks what's been indexed. It creates its own table if needed."""
     manager = SQLRecordManager(_NAMESPACE, engine=engine)
@@ -67,18 +82,15 @@ def add_source(
     return list(chunks)
 
 
+@retry(
+    retry=retry_if_exception_type((AIRateLimited, AITransient)),
+    stop=stop_after_attempt(ATTEMPTS),
+    wait=wait_exponential(multiplier=BACKOFF_SECONDS),
+    reraise=True,
+)
 async def _index_batch(
     batch: Sequence[Document], store: VectorStore, record_manager: SQLRecordManager
 ) -> None:
-    for attempt in range(ATTEMPTS - 1):
-        try:
-            with ai_errors():
-                await aindex(
-                    batch, record_manager, store, batch_size=len(batch), key_encoder=chunk_id
-                )
-            return
-        except (AIRateLimited, AITransient):
-            await asyncio.sleep(BACKOFF_SECONDS * 2**attempt)
     with ai_errors():
         await aindex(batch, record_manager, store, batch_size=len(batch), key_encoder=chunk_id)
 

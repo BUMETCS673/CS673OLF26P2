@@ -279,7 +279,7 @@ async def test_a_run_gets_the_deck_and_its_cards(session, me, deck, make_context
 
     assert seen[0].deck_name == deck.name
     assert seen[0].owner_id == me.id
-    assert seen[0].existing == [CardDraft(front="Old Q", back="Old A")]
+    assert seen[0].deck_id == deck.id
     assert seen[0].existing_fronts == ["Old Q"]
 
 

@@ -73,8 +73,10 @@ def _response(status: int, message: str, field: str | None = None, headers=None)
 
 def _validation_message(error: dict, field: str) -> str:
     """Our wording for the cases the frontend shows, and Pydantic's for anything else."""
-    if error["type"] in ("missing", "string_type"):
+    if error["type"] in ("missing", "string_type", "string_too_short"):
         return f"{field} is required."
+    if error["type"] == "string_too_long":
+        return f"{field} must be at most {error['ctx']['max_length']} characters."
     return error["msg"].removeprefix("Value error, ")
 
 

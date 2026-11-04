@@ -6,17 +6,22 @@ when it returns. No database transaction stays open while the model runs.
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from datetime import timedelta
 
+from langchain_core.stores import ByteStore
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.cards.checks import clean_cards, normalized_fronts
+from app.ai.cards.existing import existing_card_finder
 from app.ai.checkpoints import discard_threads, open_checkpointer
+from app.ai.knowledge.indexing import with_query_cache
 from app.ai.models import (
     AIRateLimited,
     AIUnavailable,
     Role,
+    RunModels,
     ai_errors,
     load_chat_model,
     load_embeddings,
@@ -28,7 +33,6 @@ from app.ai.tutor.context import TutorContext, no_similar_cards
 from app.ai.tutor.graph import (
     MAX_MESSAGES,
     TURN_COST,
-    TURN_MAX_CALLS,
     read_messages,
     resume_turn,
     run_turn,
@@ -38,15 +42,13 @@ from app.ai.tutor.tools import MAX_TOOL_CARDS
 from app.ai.usage import RunUsage
 from app.core.errors import BudgetExceeded, Conflict, InvalidRequest, NotAvailable, NotFound
 from app.core.settings import Settings
-from app.models import Card, Deck, Job, TutorConversation, User, utcnow
-from app.models.job import EMBED_CARDS
+from app.models import Card, Deck, TutorConversation, User, utcnow
 from app.models.tutor import AWAITING_DECISION, IDLE, REPLYING
 from app.repositories.cards import CardRepository
-from app.repositories.decks import DeckRepository
 from app.repositories.jobs import JobRepository
 from app.repositories.tutor import TutorRepository
 from app.schemas.tutor import TutorView
-from app.services.budget import TUTOR, BudgetService
+from app.services.budget import TUTOR, USER, BudgetService
 from app.services.decks import DECK_NOT_FOUND
 
 logger = logging.getLogger(__name__)
@@ -64,25 +66,20 @@ class TutorService:
         self,
         session: AsyncSession,
         conversations: TutorRepository,
-        decks: DeckRepository,
         cards: CardRepository,
         jobs: JobRepository,
         budget: BudgetService,
         settings: Settings,
+        cache: ByteStore | None = None,  # for embeddings
     ):
         self.session = session
         self.conversations = conversations
-        self.decks = decks
         self.cards = cards
         self.jobs = jobs
         self.budget = budget
         self.settings = settings
-
-    async def _owned_deck(self, deck_id: int, user: User) -> Deck:
-        deck = await self.decks.get_owned(deck_id, user.id)
-        if deck is None:
-            raise NotFound(DECK_NOT_FOUND)
-        return deck
+        self.cache = cache
+        self._session_in_use = asyncio.Lock()
 
     def _view(self, conversation: TutorConversation | None, messages: list[dict]) -> TutorView:
         return TutorView(
@@ -92,9 +89,8 @@ class TutorService:
             proposal=conversation.pending_proposal if conversation else None,
         )
 
-    async def view(self, deck_id: int, user: User) -> TutorView:
-        await self._owned_deck(deck_id, user)
-        conversation = await self.conversations.for_deck(deck_id)
+    async def view(self, deck: Deck) -> TutorView:
+        conversation = await self.conversations.for_deck(deck.id)
         if conversation is None:
             return self._view(None, [])
         await self.session.commit()  # the checkpointer may wait for a connection of its own
@@ -102,15 +98,19 @@ class TutorService:
             messages = await read_messages(checkpointer, conversation.thread_id)
         return self._view(conversation, messages)
 
-    async def _check_budgets(self, user_id: int) -> None:
-        settings = self.settings
-        site, own = await self.budget.feature_calls(TUTOR, user_id)
-        if site + TURN_MAX_CALLS > settings.ai_tutor_daily_limit:
-            raise BudgetExceeded(SITE_LIMIT)
-        if own + TURN_MAX_CALLS > settings.ai_tutor_user_daily_limit:
-            raise BudgetExceeded(USER_LIMIT)
-        if not await self.budget.within_model_limits(TURN_COST):
-            raise BudgetExceeded(SITE_LIMIT)
+    async def _check_budgets(self, user_id: int) -> RunModels:
+        """The models this turn uses, if every budget has room."""
+        reached, models = await self.budget.limit_reached(
+            TUTOR,
+            user_id,
+            TURN_COST,
+            user_limit=self.settings.ai_tutor_user_daily_limit,
+            site_limit=self.settings.ai_tutor_daily_limit,
+            judged=Role.HELPER,
+        )
+        if reached:
+            raise BudgetExceeded(USER_LIMIT if reached == USER else SITE_LIMIT)
+        return models
 
     def _similar_card_finder(
         self, deck_id: int, usage: RunUsage
@@ -121,7 +121,8 @@ class TutorService:
         except AIUnavailable:
             return no_similar_cards
         model = model_name(Role.EMBEDDER, self.settings)
-        session_in_use = asyncio.Lock()  # a model can ask for several searches at once
+        if self.cache is not None:
+            embeddings = with_query_cache(embeddings, self.cache, model)
 
         async def find_similar(query: str) -> list[dict]:
             try:
@@ -129,28 +130,35 @@ class TutorService:
                     vector = await embeddings.aembed_query(query)
             except (AIRateLimited, AIUnavailable):
                 return []  # the tool still has word matches
-            async with session_in_use:
-                found = [
+            async with self._cards_in_use() as cards:
+                return [
                     {"front": card.front, "back": card.back, "lapses": card.lapses}
-                    for card in await self.cards.nearest_in_deck(
-                        deck_id, vector, model, MAX_TOOL_CARDS
-                    )
+                    for card in await cards.nearest_in_deck(deck_id, vector, model, MAX_TOOL_CARDS)
                 ]
-                await self.session.commit()  # frees the connection while the model runs
-            return found
 
         return find_similar
 
-    async def send_message(self, deck_id: int, user: User, text: str) -> TutorView:
+    @asynccontextmanager
+    async def _cards_in_use(self) -> AsyncIterator[CardRepository]:
+        """One search at a time, since a model can ask for several at once."""
+        async with self._session_in_use:
+            yield self.cards
+            await self.session.commit()  # frees the connection while the model runs
+
+    async def send_message(self, deck: Deck, user: User, text: str) -> TutorView:
         """Run one turn of the chat, and save what it produced."""
-        deck = await self._owned_deck(deck_id, user)
+        deck_id = deck.id
         if not self.settings.ai_tutor_enabled:
             raise NotAvailable(TURNED_OFF)
-        await self._check_budgets(user.id)
+        models = await self._check_budgets(user.id)
         usage = RunUsage()
         try:
-            writer = load_chat_model(Role.WRITER, self.settings, usage, learner_waiting=True)
-            judge = load_chat_model(Role.JUDGE, self.settings, usage, learner_waiting=True)
+            writer = load_chat_model(
+                Role.HELPER, self.settings, usage, learner_waiting=True, models=models
+            )
+            judge = load_chat_model(
+                Role.JUDGE, self.settings, usage, learner_waiting=True, models=models
+            )
         except AIUnavailable as error:
             raise NotAvailable(error.message) from None
 
@@ -176,6 +184,14 @@ class TutorService:
             deck_name=deck.name,
             cards=cards,
             find_similar=self._similar_card_finder(deck_id, usage),
+            find_existing=existing_card_finder(
+                deck_id,
+                self._cards_in_use,
+                self.settings,
+                usage,
+                cache=self.cache,
+                learner_waiting=True,
+            ),
         )
         await self.session.commit()  # holds the claim for other requests, and frees the connection
 
@@ -223,9 +239,9 @@ class TutorService:
         await self.session.commit()
         return self._view(conversation, outcome.messages)
 
-    async def decide(self, deck_id: int, user: User, proposal_id: str, accept: bool) -> TutorView:
+    async def decide(self, deck: Deck, user: User, proposal_id: str, accept: bool) -> TutorView:
         """Add or decline the cards waiting for a decision."""
-        await self._owned_deck(deck_id, user)
+        deck_id = deck.id
         # The lock, the status and the id tie this approval to one proposal, and use it once.
         conversation = await self.conversations.for_deck(deck_id, lock=True)
         proposal = conversation.pending_proposal if conversation else None
@@ -251,13 +267,7 @@ class TutorService:
                 ]
             )
         if added:
-            await self.jobs.add(
-                Job(
-                    user_id=user.id,
-                    kind=EMBED_CARDS,
-                    payload={"card_ids": [card.id for card in added]},
-                )
-            )
+            await self.jobs.queue_card_embedding(user.id, [card.id for card in added])
         conversation.pending_proposal = None
         conversation.status = IDLE
         conversation.status_at = utcnow()
@@ -282,10 +292,9 @@ class TutorService:
             messages = await read_messages(checkpointer, conversation.thread_id)
         return self._view(conversation, messages)
 
-    async def reset(self, deck_id: int, user: User) -> None:
+    async def reset(self, deck: Deck) -> None:
         """Delete the deck's chat and its saved history."""
-        await self._owned_deck(deck_id, user)
-        conversation = await self.conversations.for_deck(deck_id)
+        conversation = await self.conversations.for_deck(deck.id)
         if conversation is None:
             return
         if conversation.status == REPLYING:

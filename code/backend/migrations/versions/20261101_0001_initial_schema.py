@@ -139,6 +139,7 @@ def upgrade() -> None:
         sa.Column("problem_at_lapses", sa.Integer(), nullable=False),
         sa.Column("embedding", Vector(768)),
         sa.Column("embedding_model", sa.String(64)),
+        sa.Column("confirmed_chunk_id", sa.Uuid()),  # FK is added after knowledge_chunks
         sa.Column("created_at", TIMESTAMP, nullable=False),
         sa.Column("updated_at", TIMESTAMP, nullable=False),
         sa.ForeignKeyConstraint(
@@ -387,6 +388,15 @@ def upgrade() -> None:
         ["content_tsv"],
         postgresql_using="gin",
     )
+    op.create_foreign_key(
+        "fk_cards_confirmed_chunk_id_knowledge_chunks",
+        "cards",
+        "knowledge_chunks",
+        ["confirmed_chunk_id"],
+        ["langchain_id"],
+        ondelete="SET NULL",
+    )
+    op.create_index("ix_cards_confirmed_chunk_id", "cards", ["confirmed_chunk_id"])
 
     op.create_table(
         "chunk_reports",
@@ -422,6 +432,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.drop_constraint("fk_cards_confirmed_chunk_id_knowledge_chunks", "cards", type_="foreignkey")
     for table in (
         "card_reports", "chunk_reports", "knowledge_chunks", "document_file_parts", "documents",
         "tutor_conversations",

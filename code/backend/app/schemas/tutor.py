@@ -2,20 +2,16 @@
 
 from typing import Any
 
-from pydantic import BaseModel, StrictBool, field_validator
+from pydantic import BaseModel, StrictBool
 
-from app.schemas.common import required_text
+from app.schemas.common import text_up_to
 
 MESSAGE_MAX = 2000
+MessageText = text_up_to(MESSAGE_MAX)
 
 
 class TutorMessageCreate(BaseModel):
-    text: str
-
-    @field_validator("text", mode="before")
-    @classmethod
-    def _check_text(cls, value: object, info) -> str:
-        return required_text(value, info.field_name, MESSAGE_MAX)
+    text: MessageText
 
 
 class ProposalDecision(BaseModel):

@@ -8,7 +8,6 @@ is down, calls go ahead rather than stop.
 import asyncio
 import logging
 
-from langchain_core.embeddings import Embeddings
 from langchain_core.rate_limiters import BaseRateLimiter
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
@@ -75,24 +74,3 @@ class RedisRateLimiter(BaseRateLimiter):
         """Everything here calls models asynchronously, and a sync call shouldn't fail for this."""
         return True
 
-
-class RateLimitedEmbeddings(Embeddings):
-    """LangChain's embeddings have no `rate_limiter` setting, unlike its chat models."""
-
-    def __init__(self, embeddings: Embeddings, limiter: BaseRateLimiter):
-        self._embeddings = embeddings
-        self._limiter = limiter
-
-    def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        return self._embeddings.embed_documents(texts)
-
-    def embed_query(self, text: str) -> list[float]:
-        return self._embeddings.embed_query(text)
-
-    async def aembed_documents(self, texts: list[str]) -> list[list[float]]:
-        await self._limiter.aacquire()
-        return await self._embeddings.aembed_documents(texts)
-
-    async def aembed_query(self, text: str) -> list[float]:
-        await self._limiter.aacquire()
-        return await self._embeddings.aembed_query(text)

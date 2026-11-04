@@ -7,7 +7,7 @@ from sqlalchemy import ColumnElement, Update, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Job, utcnow
-from app.models.job import DONE, FAILED, JOBS_CHANNEL, QUEUED, RUNNING
+from app.models.job import DONE, EMBED_CARDS, FAILED, JOBS_CHANNEL, QUEUED, RUNNING
 
 RESEND_AFTER = timedelta(minutes=1)  # still queued this long after sending means it was lost
 
@@ -26,6 +26,15 @@ class JobRepository:
         await self.session.flush()
         await self.session.execute(select(func.pg_notify(JOBS_CHANNEL, "")))
         return job
+
+    async def queue_card_embedding(
+        self, user_id: int, card_ids: list[int], share: bool = True
+    ) -> Job:
+        """`share=False` keeps a learner's own cards out of the knowledge base."""
+        payload: dict[str, Any] = {"card_ids": card_ids}
+        if not share:
+            payload["share"] = False
+        return await self.add(Job(user_id=user_id, kind=EMBED_CARDS, payload=payload))
 
     async def count_unfinished(self, user_id: int, kind: str) -> int:
         return await self.session.scalar(

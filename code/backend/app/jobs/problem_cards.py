@@ -8,8 +8,8 @@ from datetime import timedelta
 from typing import Any
 
 from app.ai.checkpoints import discard_threads, open_checkpointer
-from app.ai.models import Role, load_chat_model
-from app.ai.problem_cards.checks import similar_card_finder
+from app.ai.models import Role, RunModels, load_chat_model
+from app.ai.problem_cards.checks import MAX_SIMILAR_CARDS
 from app.ai.problem_cards.context import ProblemCardContext
 from app.ai.problem_cards.graph import ReviewOutcome, start_review
 from app.ai.usage import RunUsage
@@ -27,20 +27,23 @@ from app.services.problem_cards import REFLAG_AFTER
 
 MAX_CARDS_PER_REVIEW = 5  # bounds the size of the one model call
 JOB_COST = {Role.WRITER: 1, Role.JUDGE: 1}
-JOB_CALLS = sum(JOB_COST.values())
 BUDGET_RETRY_DELAY = timedelta(hours=6)  # budgets cover a rolling 24 hours, so room comes back
 
 
-async def _can_run(budget: BudgetService, settings: Settings, user_id: int) -> bool:
+async def _models_with_room(
+    budget: BudgetService, settings: Settings, user_id: int
+) -> RunModels | None:
     """Background work stops early, so it can't use up the quota for learners' own requests."""
-    site, learner = await budget.feature_calls(PROBLEM_CARDS, user_id)
-    return (
-        site + JOB_CALLS <= settings.ai_problem_cards_daily_limit
-        and learner + JOB_CALLS <= settings.ai_problem_cards_user_daily_limit
-        and await budget.within_model_limits(
-            JOB_COST, reserve=settings.ai_problem_cards_model_reserve
-        )
+    _, models = await budget.limit_reached(
+        PROBLEM_CARDS,
+        user_id,
+        JOB_COST,
+        user_limit=settings.ai_problem_cards_user_daily_limit,
+        site_limit=settings.ai_problem_cards_daily_limit,
+        reserve=settings.ai_problem_cards_model_reserve,
+        judged=Role.WRITER,
     )
+    return models
 
 
 async def _postpone(context: JobContext, review_id: int) -> dict[str, Any]:
@@ -97,24 +100,27 @@ async def review_problem_cards(context: JobContext, settings: Settings) -> dict[
             return None
         deck_id, thread_id = review.deck_id, review.thread_id
         budget = BudgetService(UsageRepository(session), settings)
-        has_budget = await _can_run(budget, settings, context.user_id)
-        if has_budget:
+        models = await _models_with_room(budget, settings, context.user_id)
+        if models is not None:
             cards = CardRepository(session)
             flagged = await cards.problem_cards(deck_id, MAX_CARDS_PER_REVIEW)
-            deck_cards = [
-                {"id": card.id, "front": card.front, "back": card.back}
-                for card in await cards.texts_in_deck(deck_id)
-            ]
-    if not has_budget:
+            similar = await cards.similar_in_deck([card.id for card in flagged], MAX_SIMILAR_CARDS)
+            fronts = await cards.fronts_in_deck(deck_id)
+    if models is None:
         return await _postpone(context, review_id)
     if not flagged:
         return await _finish_empty(context, review_id)
 
-    items = []
-    find_similar = similar_card_finder(deck_cards)
-    for card in flagged:
-        item = {"id": card.id, "front": card.front, "back": card.back, "lapses": card.lapses}
-        items.append({**item, "similar": find_similar(item)})
+    items = [
+        {
+            "id": card.id,
+            "front": card.front,
+            "back": card.back,
+            "lapses": card.lapses,
+            "similar": [{"front": row.front, "back": row.back} for row in similar[card.id]],
+        }
+        for card in flagged
+    ]
     card_ids = [card.id for card in flagged]
     async with context.session_factory() as session:
         await ProblemCardRepository(session).update(review_id, card_ids=card_ids)
@@ -126,10 +132,10 @@ async def review_problem_cards(context: JobContext, settings: Settings) -> dict[
         async with open_checkpointer(settings.database_url) as checkpointer:
             outcome = await start_review(
                 ProblemCardContext(
-                    writer=load_chat_model(Role.WRITER, settings, usage),
-                    judge=load_chat_model(Role.JUDGE, settings, usage),
+                    writer=load_chat_model(Role.WRITER, settings, usage, models=models),
+                    judge=load_chat_model(Role.JUDGE, settings, usage, models=models),
                     cards=items,
-                    existing_fronts=[card["front"] for card in deck_cards],
+                    existing_fronts=fronts,
                 ),
                 checkpointer,
                 thread_id,

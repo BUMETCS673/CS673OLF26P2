@@ -6,9 +6,9 @@
                           +------ repair
 
 `writer` may search once before writing, inside its own agent. `repair` runs at most once, which
-is what guarantees the cycle ends. Failures:
+is what guarantees the cycle ends. LangGraph retries each model node on transient failures.
 
-- `writer` raises AIRateLimited or AIUnavailable, and the job retries the whole run.
+- `writer` failing fails the run.
 - `judge` keeps its cards and marks the batch "skipped" if it gets no usable answer.
 - `repair` keeps the approved cards if its call fails.
 
@@ -16,8 +16,11 @@ Cards that still fail after the repair are dropped.
 """
 
 import logging
+import uuid
 from dataclasses import dataclass, field
 
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.graph import END, START, StateGraph
 from langgraph.runtime import Runtime
 
@@ -26,8 +29,9 @@ from app.ai.cards.checks import back_fits, clean_cards, normalized_fronts
 from app.ai.cards.context import CardContext
 from app.ai.cards.state import CardState
 from app.ai.cards.writer import write_directly, write_with_search
+from app.ai.graphs import TRANSIENT_RETRY, invoke_with_fallbacks, thread_config
 from app.ai.judge import PASSED, SKIPPED, judge_cards
-from app.ai.models import AIRateLimited, AIUnavailable
+from app.ai.models import AIRateLimited, AITransient, AIUnavailable
 from app.ai.schemas import CardDraft
 
 logger = logging.getLogger(__name__)
@@ -63,15 +67,19 @@ def _validate(state: CardState, runtime: Runtime[CardContext]) -> dict:
     }
 
 
+def _unchecked(state: CardState) -> dict:
+    """Keeps the pending cards and marks the batch unchecked."""
+    return {"pending": [], "approved": state["pending"], "failed": [], "verification": SKIPPED}
+
+
 async def _judge(state: CardState, runtime: Runtime[CardContext]) -> dict:
     context = runtime.context
     pending = state["pending"]
     evidence = context.evidence.with_found(state["found"])
-    verdicts = await judge_cards(context.judge, pending, evidence, context.existing)
-
-    # No answer says nothing about the cards, so they're kept, and the batch is marked unchecked.
+    existing = await context.find_existing(pending)
+    verdicts = await judge_cards(context.judge, pending, evidence, existing, raise_transient=True)
     if not verdicts:
-        return {"pending": [], "approved": pending, "failed": [], "verification": SKIPPED}
+        return _unchecked(state)
 
     approved, failed = [], list(state["failed"])
     for index, card in enumerate(pending):
@@ -93,10 +101,17 @@ async def _repair(state: CardState, runtime: Runtime[CardContext]) -> dict:
     )
     try:
         cards = await write_directly(context.writer, prompts.rules(len(failed)), body)
+    except AITransient:
+        raise  # retried by LangGraph, then replaced by _no_repair
     except (AIRateLimited, AIUnavailable) as error:
         logger.warning("card_repair outcome=failed type=%s", type(error).__name__)
-        cards = []
+        return _no_repair(state)
     return {"pending": cards, "failed": [], "repairs": 1}
+
+
+def _no_repair(_: CardState) -> dict:
+    """Ends the repair with no new cards, which keeps the approved ones."""
+    return {"pending": [], "failed": [], "repairs": 1}
 
 
 def _can_repair(state: CardState) -> bool:
@@ -115,19 +130,34 @@ def _after_judge(state: CardState) -> str:
 
 def _build_graph():
     graph = StateGraph(CardState, context_schema=CardContext)
-    graph.add_node("writer", _writer)
+    graph.add_node("writer", _writer, retry_policy=TRANSIENT_RETRY)
     graph.add_node("validate", _validate)
-    graph.add_node("judge", _judge)
-    graph.add_node("repair", _repair)
+    graph.add_node("judge", _judge, retry_policy=TRANSIENT_RETRY)
+    graph.add_node("repair", _repair, retry_policy=TRANSIENT_RETRY)
     graph.add_edge(START, "writer")
     graph.add_edge("writer", "validate")
     graph.add_conditional_edges("validate", _after_validate, ["judge", "repair", END])
     graph.add_conditional_edges("judge", _after_judge, ["repair", END])
     graph.add_edge("repair", "validate")
-    return graph.compile()
+    # The saver holds each run's state for the fallbacks, and CardDraft is listed to deserialize.
+    saver = InMemorySaver(serde=JsonPlusSerializer(allowed_msgpack_modules=[CardDraft]))
+    return graph.compile(checkpointer=saver)
 
 
 _GRAPH = _build_graph()
+_FALLBACKS = {"judge": _unchecked, "repair": _no_repair}
+
+
+def _start() -> dict:
+    return {
+        "pending": [],
+        "approved": [],
+        "failed": [],
+        "repairs": 0,
+        "verification": PASSED,
+        "found": [],
+        "source_chunk_ids": [],
+    }
 
 
 @dataclass(frozen=True)
@@ -140,20 +170,15 @@ class CardOutcome:
 
 async def run_card_graph(context: CardContext) -> CardOutcome:
     """Run to the end. Raises AIRateLimited or AIUnavailable if the writer fails."""
-    state = await _GRAPH.ainvoke(
-        {
-            "pending": [],
-            "approved": [],
-            "failed": [],
-            "repairs": 0,
-            "verification": PASSED,
-            "found": [],
-            "source_chunk_ids": [],
-        },
-        # Metadata passes down to every model call in the run, so traces show the prompt version.
-        {"run_name": "card_generation", "metadata": {"prompt_version": prompts.PROMPT_VERSION}},
-        context=context,
+    thread_id = str(uuid.uuid4())
+    # Metadata passes down to every model call in the run, so traces show the prompt version.
+    config = thread_config(
+        thread_id, "card_generation", metadata={"prompt_version": prompts.PROMPT_VERSION}
     )
+    try:
+        state = await invoke_with_fallbacks(_GRAPH, _start(), config, _FALLBACKS, context=context)
+    finally:
+        await _GRAPH.checkpointer.adelete_thread(thread_id)
     # Counts only, since card text and a judge's reasons can hold learner content.
     logger.info(
         "card_graph kept=%d repairs=%d verification=%s",

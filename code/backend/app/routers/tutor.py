@@ -2,32 +2,32 @@
 
 from fastapi import APIRouter, Response, status
 
-from app.dependencies import CurrentUser, TutorServiceDep
+from app.dependencies import CurrentUser, OwnedDeck, TutorServiceDep
 from app.schemas.tutor import ProposalDecision, TutorMessageCreate, TutorView
 
 router = APIRouter(prefix="/api/decks/{deck_id}/tutor", tags=["tutor"])
 
 
 @router.get("")
-async def get_tutor(deck_id: int, user: CurrentUser, service: TutorServiceDep) -> TutorView:
-    return await service.view(deck_id, user)
+async def get_tutor(deck: OwnedDeck, service: TutorServiceDep) -> TutorView:
+    return await service.view(deck)
 
 
 @router.post("/messages")
 async def send_message(
-    deck_id: int, body: TutorMessageCreate, user: CurrentUser, service: TutorServiceDep
+    deck: OwnedDeck, body: TutorMessageCreate, user: CurrentUser, service: TutorServiceDep
 ) -> TutorView:
-    return await service.send_message(deck_id, user, body.text)
+    return await service.send_message(deck, user, body.text)
 
 
 @router.post("/proposal")
 async def decide_proposal(
-    deck_id: int, body: ProposalDecision, user: CurrentUser, service: TutorServiceDep
+    deck: OwnedDeck, body: ProposalDecision, user: CurrentUser, service: TutorServiceDep
 ) -> TutorView:
-    return await service.decide(deck_id, user, body.proposal_id, body.accept)
+    return await service.decide(deck, user, body.proposal_id, body.accept)
 
 
 @router.delete("", status_code=status.HTTP_204_NO_CONTENT)
-async def reset_tutor(deck_id: int, user: CurrentUser, service: TutorServiceDep) -> Response:
-    await service.reset(deck_id, user)
+async def reset_tutor(deck: OwnedDeck, service: TutorServiceDep) -> Response:
+    await service.reset(deck)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

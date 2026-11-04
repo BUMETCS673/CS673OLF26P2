@@ -5,15 +5,13 @@ from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import Conflict, NotFound
-from app.models import User, utcnow
+from app.models import Deck, User, utcnow
 from app.repositories.cards import CardRepository
-from app.repositories.decks import DeckRepository
 from app.repositories.knowledge import KnowledgeRepository
 from app.repositories.users import UserRepository
 from app.scheduler import LEARN_AHEAD, CardSchedule, CardState, answer_card
 from app.schemas.study import DueCards, ReviewRequest, StudyCardRead
 from app.services.cards import CARD_NOT_FOUND
-from app.services.decks import DECK_NOT_FOUND
 from app.services.problem_cards import ProblemCardService
 from app.services.trust import grant_if_earned
 
@@ -31,24 +29,20 @@ class StudyService:
     def __init__(
         self,
         session: AsyncSession,
-        decks: DeckRepository,
         cards: CardRepository,
         problem_cards: ProblemCardService,
         knowledge: KnowledgeRepository,
         users: UserRepository,
     ):
         self.session = session
-        self.decks = decks
         self.cards = cards
         self.problem_cards = problem_cards
         self.knowledge = knowledge
         self.users = users
 
-    async def due_cards(self, deck_id: int, user: User) -> DueCards:
-        if await self.decks.get_owned(deck_id, user.id) is None:
-            raise NotFound(DECK_NOT_FOUND)
+    async def due_cards(self, deck: Deck) -> DueCards:
         now = utcnow()
-        due = await self.cards.due_cards(deck_id, now)
+        due = await self.cards.due_cards(deck.id, now)
         return DueCards(
             **{
                 name: [StudyCardRead.build(card, now) for card in cards]

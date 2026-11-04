@@ -4,28 +4,34 @@ A failed run saves no batch, so it doesn't use the learner's allowance, though i
 count against each model's limit.
 """
 
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from functools import partial
 from typing import Any
 
+from langchain_core.stores import ByteStore
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.ai.cards import prompts
 from app.ai.cards.context import CardContext
+from app.ai.cards.existing import existing_card_finder
 from app.ai.cards.graph import run_card_graph
 from app.ai.judge import DocumentEvidence, TopicEvidence
+from app.ai.knowledge.indexing import with_query_cache
 from app.ai.knowledge.retrieval import KnowledgeRetriever
 from app.ai.knowledge.store import create_store
 from app.ai.models import (
     AIUnavailable,
     Role,
+    RunModels,
     ai_errors,
+    first_models,
     load_chat_model,
     load_embeddings,
     model_name,
 )
-from app.ai.prompting import EXISTING_CARDS
 from app.ai.schemas import CardDraft
 from app.ai.usage import RunUsage
 from app.core.errors import InvalidRequest, NotFound
@@ -39,6 +45,7 @@ from app.repositories.knowledge import KnowledgeRepository
 from app.repositories.usage import UsageRepository
 from app.schemas.generations import FILE
 from app.services.budget import GENERATE, BudgetService
+from app.services.generations import WORST_CASE_CALLS
 
 DECK_GONE = "That deck no longer exists."
 NOT_COVERED = "That file doesn't seem to cover this topic. Try another one."
@@ -58,8 +65,9 @@ class CardRequest:
     topic: str | None
     document_id: int | None
     owner_id: int
-    existing: list[CardDraft]
+    deck_id: int
     existing_fronts: list[str]
+    models: RunModels
 
 
 @dataclass(frozen=True)
@@ -86,17 +94,26 @@ async def _build_retriever(
     document_id: int | None,
     k: int,
     viewer_id: int | None = None,
+    cache: ByteStore | None = None,
 ) -> KnowledgeRetriever:
     embeddings = load_embeddings(settings, usage)
+    model = model_name(Role.EMBEDDER, settings)
     return KnowledgeRetriever(
+        # The store only searches by vector here, so only the retriever embeds.
         store=await create_store(engine, embeddings),
         engine=engine,
-        embeddings=embeddings,
-        embedding_model=model_name(Role.EMBEDDER, settings),
+        embeddings=with_query_cache(embeddings, cache, model) if cache is not None else embeddings,
+        embedding_model=model,
         document_id=document_id,
         viewer_id=viewer_id,
         k=k,
     )
+
+
+@asynccontextmanager
+async def _card_repository(engine: AsyncEngine) -> AsyncIterator[CardRepository]:
+    async with AsyncSession(engine) as session:
+        yield CardRepository(session)
 
 
 async def _has_chunks(engine: AsyncEngine, settings: Settings) -> bool:
@@ -106,7 +123,11 @@ async def _has_chunks(engine: AsyncEngine, settings: Settings) -> bool:
 
 
 async def _search_for_prompt(
-    request: CardRequest, usage: RunUsage, engine: AsyncEngine, settings: Settings
+    request: CardRequest,
+    usage: RunUsage,
+    engine: AsyncEngine,
+    settings: Settings,
+    cache: ByteStore | None = None,
 ) -> KnowledgeRetriever | None:
     """A retriever over everyone's materials, if there's anything a search could find.
 
@@ -117,14 +138,24 @@ async def _search_for_prompt(
     try:
         k = chunks_for(request.count)
         return await _build_retriever(
-            engine, settings, usage, document_id=None, k=k, viewer_id=request.owner_id
+            engine,
+            settings,
+            usage,
+            document_id=None,
+            k=k,
+            viewer_id=request.owner_id,
+            cache=cache,
         )
     except AIUnavailable:
         return None
 
 
 async def _file_material(
-    request: CardRequest, usage: RunUsage, engine: AsyncEngine, settings: Settings
+    request: CardRequest,
+    usage: RunUsage,
+    engine: AsyncEngine,
+    settings: Settings,
+    cache: ByteStore | None = None,
 ) -> tuple[str, list[str]]:
     """The file's passages on the topic and their IDs, found by code, since the learner chose both.
 
@@ -132,7 +163,7 @@ async def _file_material(
     """
     k = chunks_for(request.count)
     retriever = await _build_retriever(
-        engine, settings, usage, document_id=request.document_id, k=k
+        engine, settings, usage, document_id=request.document_id, k=k, cache=cache
     )
     with ai_errors():
         found = await retriever.ainvoke(request.topic)
@@ -143,29 +174,37 @@ async def _file_material(
 
 
 async def write_cards(
-    request: CardRequest, usage: RunUsage, engine: AsyncEngine, settings: Settings
+    request: CardRequest,
+    usage: RunUsage,
+    engine: AsyncEngine,
+    settings: Settings,
+    cache: ByteStore | None = None,
 ) -> CardResult:
     """Set up the card graph for the request's mode, and run it."""
     name, description, count = request.deck_name, request.deck_description, request.count
     retriever = None
     file_chunk_ids: list[str] = []
     if request.mode == FILE:
-        material, file_chunk_ids = await _file_material(request, usage, engine, settings)
+        material, file_chunk_ids = await _file_material(
+            request, usage, engine, settings, cache
+        )
         body = prompts.file_body(count, name, description, material, request.topic)
         evidence = DocumentEvidence(request.topic, material)
     else:
-        retriever = await _search_for_prompt(request, usage, engine, settings)
+        retriever = await _search_for_prompt(request, usage, engine, settings, cache)
         body = prompts.prompt_body(count, name, description, request.prompt)
         evidence = TopicEvidence(request.prompt)
 
     outcome = await run_card_graph(
         CardContext(
-            writer=load_chat_model(Role.WRITER, settings, usage),
-            judge=load_chat_model(Role.JUDGE, settings, usage),
+            writer=load_chat_model(Role.WRITER, settings, usage, models=request.models),
+            judge=load_chat_model(Role.JUDGE, settings, usage, models=request.models),
             count=count,
             body=body,
             evidence=evidence,
-            existing=request.existing,
+            find_existing=existing_card_finder(
+                request.deck_id, partial(_card_repository, engine), settings, usage, cache=cache
+            ),
             existing_fronts=request.existing_fronts,
             retriever=retriever,
         )
@@ -190,7 +229,7 @@ async def _record_usage(
         await session.commit()
 
 
-async def _save(context: JobContext, settings: Settings, deck_id: int, result: CardResult) -> int:
+async def _save(context: JobContext, writer_model: str, deck_id: int, result: CardResult) -> int:
     """Save the batch, once per job, even if two workers both reach this point."""
     payload = context.payload
     async with context.session_factory() as session:
@@ -205,7 +244,7 @@ async def _save(context: JobContext, settings: Settings, deck_id: int, result: C
                     requested_count=payload["count"],
                     prompt=payload["prompt"] or payload["topic"],
                     source_filename=payload["file_name"],
-                    model=model_name(Role.WRITER, settings),
+                    model=writer_model,
                     verification=result.verification,
                     empty=not result.drafts,
                     prompt_version=result.prompt_version,
@@ -239,9 +278,11 @@ async def generate_cards(
         deck = await DeckRepository(session).get_owned(deck_id, context.user_id)
         if deck is None:
             raise NotFound(DECK_GONE)
-        cards = CardRepository(session)
-        newest = await cards.newest_in_deck(deck_id, EXISTING_CARDS)
-        fronts = await cards.fronts_in_deck(deck_id)
+        fronts = await CardRepository(session).fronts_in_deck(deck_id)
+        # The service checked for room when queueing. No room here tries each role's chain.
+        budget = BudgetService(UsageRepository(session), settings)
+        models = await budget.pick_models(WORST_CASE_CALLS, judged=Role.WRITER)
+    models = models or first_models(settings, WORST_CASE_CALLS, judged=Role.WRITER)
 
     request = CardRequest(
         mode=payload["mode"],
@@ -252,8 +293,9 @@ async def generate_cards(
         topic=payload["topic"],
         document_id=payload["document_id"],
         owner_id=context.user_id,
-        existing=[CardDraft(front=card.front, back=card.back) for card in newest],
+        deck_id=deck_id,
         existing_fronts=fronts,
+        models=models,
     )
     usage = RunUsage()
     version = None
@@ -261,6 +303,7 @@ async def generate_cards(
         await context.report({"stage": "writing"})
         result = await write(request, usage)
         version = result.prompt_version
-        return {"generation_id": await _save(context, settings, deck_id, result)}
+        writer = models.first(Role.WRITER).name
+        return {"generation_id": await _save(context, writer, deck_id, result)}
     finally:
         await _record_usage(context, settings, deck_id, usage, version)

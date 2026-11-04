@@ -135,7 +135,9 @@ async def test_deleting_a_deck_deletes_its_cards(client, session, me, make_deck,
     deck = await make_deck(me)
     card = await make_card(deck)
 
-    assert (await client.delete(f"/api/decks/{deck.id}")).status_code == 204
+    deleted = await client.delete(f"/api/decks/{deck.id}")
+
+    assert deleted.status_code == 204
 
     assert (await client.get(f"/api/decks/{deck.id}")).status_code == 404
     session.expunge_all()

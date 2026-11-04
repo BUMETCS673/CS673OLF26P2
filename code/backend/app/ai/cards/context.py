@@ -7,9 +7,9 @@ from functools import cached_property
 from langchain_core.language_models import BaseChatModel
 
 from app.ai.cards.checks import normalized_fronts
+from app.ai.cards.existing import FindExisting, no_existing_cards
 from app.ai.judge import Evidence
 from app.ai.knowledge.retrieval import KnowledgeRetriever
-from app.ai.schemas import CardDraft
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -19,7 +19,7 @@ class CardContext:
     count: int
     body: str  # the request, as prompts.prompt_body() or prompts.file_body() built it
     evidence: Evidence
-    existing: Sequence[CardDraft] = ()  # the deck's newest cards, for the judge
+    find_existing: FindExisting = no_existing_cards  # the deck's cards a batch might repeat
     existing_fronts: Sequence[str] = ()  # all of the deck's fronts, for removing exact repeats
     retriever: KnowledgeRetriever | None = None  # with one, the writer may search once
 

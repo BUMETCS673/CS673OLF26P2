@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy import func, select, text
 
 from app.ai.fake import FakeEmbeddings
+from app.core.settings import EMBEDDING_DIMENSIONS
 from app.models import (
     AiGeneration,
     Card,
@@ -18,6 +19,7 @@ from app.models import (
     utcnow,
 )
 from app.models.job import EMBED_CARDS
+from app.repositories.cards import CardRepository
 from app.repositories.knowledge import KnowledgeRepository
 from app.services import cards as service_module
 from app.services.reindex import reindex
@@ -144,10 +146,12 @@ async def test_deleting_a_card_removes_it(client, me, make_deck, make_card):
     deck = await make_deck(me)
     card = await make_card(deck)
 
-    assert (await client.delete(f"/api/cards/{card.id}")).status_code == 204
+    deleted = await client.delete(f"/api/cards/{card.id}")
+    again = await client.delete(f"/api/cards/{card.id}")
 
+    assert deleted.status_code == 204
     assert (await client.get(f"/api/decks/{deck.id}/cards")).json() == []
-    assert (await client.delete(f"/api/cards/{card.id}")).status_code == 404
+    assert again.status_code == 404
 
 
 async def test_a_new_card_queues_a_private_embedding(client, session, make_deck, me):
@@ -181,7 +185,7 @@ def make_chunk(session):
             **{
                 "langchain_id": uuid.uuid4(),
                 "content": "A passage",
-                "embedding": [1.0, *[0.0] * 767],
+                "embedding": [1.0, *[0.0] * (EMBEDDING_DIMENSIONS - 1)],
                 "embedding_model": "m",
                 "shared": True,
                 **fields,
@@ -232,15 +236,22 @@ async def test_a_second_learners_report_reaches_the_copy_they_confirmed(
     client, session, make_user, make_deck, make_card, make_chunk, me
 ):
     first = await make_user("first@example.com")
-    copy = await make_chunk(accepted_by=first.id)
+    vector = [1.0, *[0.0] * (EMBEDDING_DIMENSIONS - 1)]
+    copy = await make_chunk(accepted_by=first.id, embedding=vector)
+    # Same vector but not confirmed, so it stays visible.
+    lookalike = await make_chunk(accepted_by=first.id, embedding=vector)
     card = await make_card(
-        await make_deck(me), embedding=[1.0, *[0.0] * 767], embedding_model="m"
+        await make_deck(me),
+        embedding=vector,
+        embedding_model="m",
+        confirmed_chunk_id=copy.langchain_id,
     )
 
     await _report(client, card)
 
     session.expunge_all()
     assert (await session.get(KnowledgeChunk, copy.langchain_id)).hidden is True
+    assert (await session.get(KnowledgeChunk, lookalike.langchain_id)).hidden is False
 
 
 async def test_a_hidden_chunk_cant_be_shared_again(session, make_chunk):
@@ -378,9 +389,9 @@ async def test_batched_nearest_searches_answer_each_vector_in_order(
     session, make_user, make_chunk
 ):
     learner = await make_user("learner@example.com")
-    first = [1.0, *[0.0] * 767]
-    second = [0.0, 1.0, *[0.0] * 766]
-    between = [1.0, 1.0, *[0.0] * 766]
+    first = [1.0, *[0.0] * (EMBEDDING_DIMENSIONS - 1)]
+    second = [0.0, 1.0, *[0.0] * (EMBEDDING_DIMENSIONS - 2)]
+    between = [1.0, 1.0, *[0.0] * (EMBEDDING_DIMENSIONS - 2)]
     copy = await make_chunk(accepted_by=learner.id, embedding=first)
     await make_chunk(embedding=second)
     knowledge = KnowledgeRepository(session)
@@ -441,3 +452,24 @@ async def test_a_document_or_user_can_be_hidden_at_once(session, make_user, make
     assert (await session.get(KnowledgeChunk, uploaded.langchain_id)).hidden is True
     assert (await session.get(KnowledgeChunk, accepted.langchain_id)).hidden is True
     assert (await session.get(KnowledgeChunk, kept.langchain_id)).hidden is False
+
+
+async def test_similar_cards_come_from_the_same_deck_closest_first(
+    session, me, make_user, make_deck, make_card
+):
+    deck, other_deck = await make_deck(me), await make_deck(await make_user("o@example.com"))
+
+    def vector(x, y):
+        return [x, y, *[0.0] * (EMBEDDING_DIMENSIONS - 2)]
+
+    flagged = await make_card(deck, embedding=vector(1.0, 0.0), embedding_model="m")
+    await make_card(deck, back="far", embedding=vector(0.0, 1.0), embedding_model="m")
+    await make_card(deck, back="close", embedding=vector(1.0, 0.1), embedding_model="m")
+    await make_card(deck, back="other model", embedding=vector(1.0, 0.0), embedding_model="x")
+    await make_card(other_deck, back="other deck", embedding=vector(1.0, 0.0), embedding_model="m")
+    no_vector = await make_card(deck)
+
+    similar = await CardRepository(session).similar_in_deck([flagged.id, no_vector.id], 5)
+
+    assert [row.back for row in similar[flagged.id]] == ["close", "far"]
+    assert similar[no_vector.id] == []

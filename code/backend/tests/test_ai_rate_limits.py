@@ -2,20 +2,23 @@
 
 import asyncio
 
+import httpx
 import pytest
 from langchain_core.embeddings import Embeddings
+from langchain_google_genai.chat_models import GoogleAPIError, GoogleRateLimitError
 from redis.exceptions import ConnectionError as RedisConnectionError
 
 from app.ai import rate_limits
 from app.ai.models import (
     AT_CAPACITY,
     AIRateLimited,
+    GuardedEmbeddings,
     Role,
     ai_errors,
     load_chat_model,
     load_embeddings,
 )
-from app.ai.rate_limits import ModelBusy, RateLimitedEmbeddings, RedisRateLimiter
+from app.ai.rate_limits import ModelBusy, RedisRateLimiter
 from app.ai.usage import RoleUsage
 from app.core.redis import get_redis
 from app.core.settings import Settings
@@ -87,21 +90,34 @@ async def test_a_long_queue_refuses_without_taking_a_turn(limiter, waits):
     assert len(waits) == 1 and waits[0] <= 0.1  # no turn was added by the refusal
 
 
-def test_a_refused_call_spends_nothing():
+def _google_error(kind, code):
+    return kind(code, {"error": {"code": code, "message": "x", "status": "X"}})
+
+
+@pytest.mark.parametrize(
+    ("error", "spent"),
+    [
+        (ModelBusy(), 0),
+        (_google_error(GoogleRateLimitError, 429), 0),
+        (_google_error(GoogleAPIError, 503), 0),
+        (_google_error(GoogleAPIError, 500), 1),
+        (httpx.ReadTimeout("slow"), 1),
+        (ValueError(), 1),
+    ],
+)
+def test_only_a_refused_call_spends_nothing(error, spent):
     usage = RoleUsage("writer", "test-model")
     usage.on_chat_model_start()
-    usage.on_llm_error(ModelBusy())
-    assert usage.calls == 0
-
-    usage.on_chat_model_start()
-    usage.on_llm_error(ValueError())
-    assert usage.calls == 1
+    usage.on_llm_error(error)
+    assert usage.calls == spent
 
 
 def test_being_refused_becomes_a_message_for_the_learner():
-    with pytest.raises(AIRateLimited) as refused, ai_errors():
+    def says_at_capacity(error):
+        return error.message == AT_CAPACITY
+
+    with pytest.raises(AIRateLimited, check=says_at_capacity), ai_errors():
         raise ModelBusy()
-    assert refused.value.message == AT_CAPACITY
 
 
 async def test_not_blocking_says_no_without_taking_a_turn(limiter, waits):
@@ -148,7 +164,7 @@ async def test_embeddings_wait_their_turn_before_calling():
         async def aacquire(self):
             events.append("turn")
 
-    embeddings = RateLimitedEmbeddings(_Recording(events), _Limiter())
+    embeddings = GuardedEmbeddings(_Recording(events), _Limiter(), None)
 
     await embeddings.aembed_documents(["a"])
     await embeddings.aembed_query("b")
@@ -179,12 +195,12 @@ def test_a_chat_model_with_a_limit_gets_a_limiter():
 def test_embeddings_with_a_limit_are_wrapped():
     embeddings = load_embeddings(_settings("embedder-model:30"))
 
-    assert isinstance(embeddings, RateLimitedEmbeddings)
+    assert isinstance(embeddings.limiter, RedisRateLimiter)
 
 
 def test_a_model_with_no_limit_gets_no_limiter():
     assert load_chat_model(Role.WRITER, _settings("")).rate_limiter is None
-    assert not isinstance(load_embeddings(_settings("")), RateLimitedEmbeddings)
+    assert not isinstance(load_embeddings(_settings("")), GuardedEmbeddings)
 
 
 def test_other_models_use_the_default_limit():
@@ -197,4 +213,4 @@ def test_fake_models_arent_limited():
     settings = Settings(ai_writer_provider="fake", ai_embedder_provider="fake")
 
     assert load_chat_model(Role.WRITER, settings).rate_limiter is None
-    assert not isinstance(load_embeddings(settings), RateLimitedEmbeddings)
+    assert not isinstance(load_embeddings(settings), GuardedEmbeddings)

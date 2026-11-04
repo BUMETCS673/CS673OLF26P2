@@ -8,9 +8,11 @@ from fastapi import FastAPI
 from langchain_core.tracers.langchain import wait_for_all_tracers
 
 from app.ai.checkpoints import close_checkpointers
+from app.ai.models import check_model_chains
 from app.core.database import get_engine
 from app.core.errors import register_error_handlers
 from app.core.redis import get_redis
+from app.core.settings import get_settings
 from app.routers import (
     auth,
     cards,
@@ -27,7 +29,8 @@ from app.routers import (
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    """Send waiting traces and close the connection pools on shutdown."""
+    """Check the model chains on startup. Send waiting traces and close the pools on shutdown."""
+    check_model_chains(get_settings())
     yield
     await asyncio.to_thread(wait_for_all_tracers)
     await close_checkpointers()
