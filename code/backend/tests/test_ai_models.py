@@ -26,6 +26,7 @@ from app.ai.models import (
     ModelSpec,
     Role,
     RunModels,
+    _with_schema,
     agent_model,
     ai_errors,
     check_model_chains,
@@ -279,6 +280,18 @@ def test_a_fake_role_has_no_fallbacks():
     assert model_chain(Role.WRITER, settings) == [ModelSpec("fake", "fake")]
 
 
+@pytest.mark.parametrize(
+    ("model", "through_a_tool"), [("gemma-4-31b-it", True), ("gemini-3.5-flash-lite", False)]
+)
+def test_only_gemma_replies_in_a_schema_through_a_tool_call(model, through_a_tool):
+    models = RunModels({Role.HELPER: (ModelSpec("gemini", model),)})
+    chat = load_chat_model(Role.HELPER, _settings(), models=models)
+
+    structured = _with_schema(chat, CardBatch)
+
+    assert ("tools" in structured.first.kwargs) is through_a_tool
+
+
 def test_a_picked_model_is_loaded_instead_of_the_first():
     models = RunModels({Role.WRITER: (ModelSpec("gemini", "big"),)})
 
@@ -405,6 +418,17 @@ def test_vendor_failures_become_our_errors(raised, expected):
 
     with pytest.raises(expected, check=hides_the_vendor_error), ai_errors():
         raise raised
+
+
+def test_a_failure_is_logged_by_its_kind_class_and_status(caplog):
+    def logs_the_failure(_error):
+        [line] = [record for record in caplog.records if record.getMessage() == "ai call failed"]
+        assert (line.failure, line.vendor_error, line.status) == ("overloaded", "ServerError", 503)
+        assert "private" not in caplog.text
+        return True
+
+    with pytest.raises(AITransient, check=logs_the_failure), ai_errors():
+        raise _api_error(errors.ServerError, 503)
 
 
 @pytest.mark.parametrize(

@@ -45,7 +45,8 @@ class Failure(Enum):
         return self in {Failure.OVERLOADED, Failure.SERVER_ERROR, Failure.TRANSIENT}
 
 
-def _status(error: BaseException) -> int | None:
+def status_of(error: BaseException) -> int | None:
+    """The HTTP status a vendor's error carries, if any."""
     if isinstance(error, errors.APIError):
         return error.code
     # Embeddings wrap the SDK's error, so its status is on the cause.
@@ -72,7 +73,7 @@ def classify(error: BaseException) -> Failure | None:
         return Failure.BUSY
     if isinstance(error, GoogleRateLimitError):
         return Failure.RATE_LIMITED
-    status = _status(error)
+    status = status_of(error)
     if status is not None:
         return _from_status(status)
     if isinstance(error, GoogleGenerativeAIError):

@@ -43,17 +43,18 @@ class BudgetService:
         names = {spec.name for role in cost for spec in model_chain(role, self.settings)}
         spent = await self.usage.calls_by_model(names, utcnow() - BUDGET_WINDOW)
 
-        def with_room(role: Role, chain: Sequence[ModelSpec]) -> ModelSpec | None:
-            calls = cost[role]
-
+        def with_room(
+            role: Role, chain: Sequence[ModelSpec], picked: Mapping[Role, ModelSpec]
+        ) -> ModelSpec | None:
             def has_room(spec: ModelSpec) -> bool:
-                needed = spent.get(spec.name, 0) + calls + reserve
+                # The other roles already on this model take their share of its room first.
+                shared = sum(
+                    cost[other] for other, used in picked.items() if used == spec and other != role
+                )
+                needed = spent.get(spec.name, 0) + shared + cost[role] + reserve
                 return needed <= self.settings.model_daily_limit(spec.name)
 
-            spec = next(filter(has_room, chain), None)
-            if spec is not None:
-                spent[spec.name] = spent.get(spec.name, 0) + calls
-            return spec
+            return next(filter(has_room, chain), None)
 
         return plan_models(self.settings, cost, judged=judged, start=with_room)
 

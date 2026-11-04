@@ -82,6 +82,15 @@ services:
         sync: false
       - key: AI_JUDGE_MODEL
         sync: false
+      # Metrics and logs for Grafana Cloud, from its OpenTelemetry connection page: the OTLP
+      # endpoint, and "Authorization=Basic%20<token>" as the headers. Without an endpoint,
+      # nothing is sent and the logs stay on Render.
+      - key: OTEL_EXPORTER_OTLP_ENDPOINT
+        sync: false
+      - key: OTEL_EXPORTER_OTLP_HEADERS
+        sync: false
+      - key: OTEL_RESOURCE_ATTRIBUTES
+        value: deployment.environment.name=production
 
   - type: web
     name: cadence-frontend

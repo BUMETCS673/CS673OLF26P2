@@ -58,6 +58,7 @@ It's aimed at people who need to retain a lot of discrete facts: students in med
 | **Data** | PostgreSQL with pgvector |
 | **AI** | LangChain, LangGraph, Google Gemini |
 | **AI tracing and evaluations** | LangSmith |
+| **Metrics and logs** | OpenTelemetry, Grafana Cloud (Prometheus, Loki) |
 | **Delivery** | Docker, GitHub Actions, Render |
 
 ## Getting Started
@@ -109,11 +110,50 @@ The frontend tests use Vitest:
 docker compose exec frontend npm test
 ```
 
+## Observability
+
+### Logs
+
+The API and the worker write one line per event to stdout. On Render that's JSON, which any log tool can read as is. Locally, `LOG_FORMAT=text` in `.env` makes it easier to read in a terminal.
+
+| Setting | Default | Values |
+|---|---|---|
+| `LOG_FORMAT` | `json` (`text` in Docker Compose) | `json`, `text` |
+| `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+
+Every JSON line has `time`, `level`, `logger` and `message`, and these fields when they apply:
+
+- **A request's lines** have `request_id`. The ID comes back in the `X-Request-ID` response header. An `X-Request-ID` sent by a proxy is kept if it's a plain ID.
+- **When a request ends**, one `request` line from `app.access` adds `method`, `route` (the template, like `/api/decks/{deck_id}`), `status` and `duration_ms`. Health checks log at `DEBUG`, so they don't fill the log.
+- **An unhandled error** logs `unhandled error` with its `error_type` and `stack`, the code it ran through.
+- **A background job's lines** have `job_id`, `kind` and `attempt`.
+- **When an AI call fails**, an `ai call failed` line adds `failure` (such as `rate_limited` or `overloaded`), `vendor_error` and, when there is one, the HTTP `status`.
+
+Logs never include what a learner wrote or uploaded, or an error's message, which can quote it. They hold types, counts and IDs only. Model calls are traced separately in LangSmith when `LANGSMITH_TRACING=true`.
+
+### Metrics and Grafana
+
+With an OpenTelemetry endpoint set, each process also sends its metrics and its log lines over OTLP. Grafana Cloud stores the metrics in Prometheus and the lines in Loki, with each line's fields as attributes. Without an endpoint, nothing is sent.
+
+1. In Grafana Cloud, open **Connections → OpenTelemetry (OTLP)** and create a token.
+2. On the backend's Render **Environment** tab, set `OTEL_EXPORTER_OTLP_ENDPOINT` to the endpoint it shows, and `OTEL_EXPORTER_OTLP_HEADERS` to `Authorization=Basic%20<the encoded token>`. Locally, put the same two in `.env`.
+3. In Grafana, **Dashboards → New → Import** [doc/grafana/cadence-dashboard.json](doc/grafana/cadence-dashboard.json), and pick your Prometheus and Loki data sources.
+
+| Metric (as named in Prometheus) | Labels | What it counts |
+|---|---|---|
+| `http_server_request_duration_seconds` | `http_route`, `http_request_method`, `http_response_status_code` | Each API request and how long it took. Health checks aren't measured, and a path no route matched is `unmatched`. |
+| `cadence_jobs_total`, `cadence_job_duration_seconds` | `kind`, `outcome` (`done`, `retried`, `failed`) | Each background job attempt, and how long it ran |
+| `cadence_ai_calls_total` | `role`, `model`, `outcome` (`ok`, or the failure, like `rate_limited`) | Each model call |
+| `cadence_ai_tokens_total` | `role`, `model`, `direction` (`input`, `output`) | Tokens each model used |
+
+Each series also has `job` (`cadence/api` or `cadence/worker`) and `instance`, one per process. On Render, the API's two workers and the job worker share one container, so they report separately. Set `OTEL_RESOURCE_ATTRIBUTES` to tag where they run, as `render.yaml` does with `deployment.environment.name=production`.
+
 ## Repository Structure
 
 ```
 doc/          Project documentation — SPPP, SDD, STD, meeting minutes,
-              progress reports, iteration presentations, CI/CD guide
+              progress reports, iteration presentations, CI/CD guide,
+              and the Grafana dashboard
 demo/         Demo videos, and links to the presentation videos
 code/
   plans/      Team implementation plans, one per iteration or lab

@@ -11,8 +11,11 @@ from app.ai.checkpoints import close_checkpointers
 from app.ai.models import check_model_chains
 from app.core.database import get_engine
 from app.core.errors import register_error_handlers
+from app.core.logs import configure_logging
 from app.core.redis import get_redis
+from app.core.requests import RequestMiddleware
 from app.core.settings import get_settings
+from app.core.telemetry import start_telemetry
 from app.routers import (
     auth,
     cards,
@@ -29,16 +32,22 @@ from app.routers import (
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    """Check the model chains on startup. Send waiting traces and close the pools on shutdown."""
-    check_model_chains(get_settings())
+    """Set up logging and telemetry, and check the model chains, on startup. On shutdown, send
+    waiting traces, metrics and logs, and close the pools."""
+    settings = get_settings()
+    configure_logging(settings)
+    stop_telemetry = start_telemetry("api")
+    check_model_chains(settings)
     yield
     await asyncio.to_thread(wait_for_all_tracers)
+    await asyncio.to_thread(stop_telemetry)
     await close_checkpointers()
     await get_redis().aclose()
     await get_engine().dispose()
 
 
 app = FastAPI(title="Cadence", lifespan=lifespan)
+app.add_middleware(RequestMiddleware)
 register_error_handlers(app)
 app.include_router(health.router)
 app.include_router(auth.router)

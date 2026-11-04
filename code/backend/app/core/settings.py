@@ -2,6 +2,7 @@
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -25,29 +26,45 @@ class Settings(BaseSettings):
     redis_url: str = "redis://valkey:6379/0"
     session_cookie_secure: bool = False  # true whenever it's served over HTTPS
     session_days: int = 30
+    log_level: str = "INFO"
+    log_format: Literal["json", "text"] = "json"  # text is easier to read in a terminal
 
     # "gemini" or "fake" for each role. Fake needs no key, and returns sample content.
-    # Google's quotas are per model, so each role falls back to other Gemini models, in order,
-    # as "vendor:model,vendor:model", once a model's daily limit is reached. A fake role has none.
-    # The Flash models allow 20 calls a day each, so only the judge uses them. The writer and
-    # helper share the Flash-Lite models, at 1,500 a day each, starting on different ones so the
-    # load spreads.
+    # Google's quotas are per model, so each role falls back to other models, in order, as
+    # "vendor:model,vendor:model", once a model's daily limit is reached. A fake role has none.
+    # Gemma 4 runs on the same Gemini key. Free-tier calls a day: Flash 20, 3.5 and
+    # 3.1 Flash-Lite 1,500, Gemma 4 14,400.
+    #
+    # The judge's chain is also the strength order, strongest first, and ranks every writer and
+    # helper model, so the judge always checks a weaker model's cards. From published results:
+    # 3.5 Flash-Lite often beats 3 Flash (Google's own figures), Gemma 4 31B scores close to
+    # 3.1 Flash-Lite but states more wrong facts, Gemma 4 26B is a step below 31B.
+    #
+    # The writer starts on the Flash-Lites. The helper makes the most calls, so it starts on Gemma,
+    # which leaves the Flash-Lites to the writer, and stops at 3.1 Flash-Lite, so the tutor's judge
+    # can still use 3.5 Flash-Lite and 3 Flash. When no judge above the writer has room, the run
+    # moves the writer down its chain, which opens more judges to it, rather than refusing.
     ai_writer_provider: str = "gemini"
     ai_writer_model: str = "gemini-3.5-flash-lite"
     ai_writer_thinking: str = "low"
-    ai_writer_fallbacks: str = "gemini:gemini-3.1-flash-lite,gemini:gemini-2.5-flash-lite"
+    ai_writer_fallbacks: str = (
+        "gemini:gemini-3.1-flash-lite,gemini:gemma-4-31b-it,gemini:gemma-4-26b-a4b-it"
+    )
     ai_judge_provider: str = "gemini"
     ai_judge_model: str = "gemini-3.8-flash"
     ai_judge_thinking: str = "low"
     ai_judge_fallbacks: str = (
         "gemini:gemini-3.7-flash,gemini:gemini-3.6-flash,gemini:gemini-3.5-flash,"
-        "gemini:gemini-3.5-flash-lite,gemini:gemini-3.1-flash-lite,gemini:gemini-2.5-flash-lite"
+        "gemini:gemini-3.5-flash-lite,gemini:gemini-3-flash-preview,gemini:gemini-3.1-flash-lite,"
+        "gemini:gemma-4-31b-it,gemini:gemma-4-26b-a4b-it"
     )
     # The tutor chat, file screening, topic suggestions and the same-fact check.
     ai_helper_provider: str = "gemini"
-    ai_helper_model: str = "gemini-3.1-flash-lite"
-    ai_helper_thinking: str = "low"
-    ai_helper_fallbacks: str = "gemini:gemini-3.5-flash-lite,gemini:gemini-2.5-flash-lite"
+    ai_helper_model: str = "gemma-4-31b-it"
+    ai_helper_thinking: str = "low"  # Gemini 3 only, so the Gemma models don't get it
+    ai_helper_fallbacks: str = (
+        "gemini:gemma-4-26b-a4b-it,gemini:gemini-3.1-flash-lite"
+    )
     ai_embedder_provider: str = "gemini"
     ai_embedder_model: str = "gemini-embedding-001"
     gemini_api_key: str = ""
@@ -68,14 +85,16 @@ class Settings(BaseSettings):
     # About 90% of Google's free tier, since our count is best effort.
     ai_model_daily_limit: int = 18  # the Flash models, at 20 a day
     ai_model_daily_limits: str = (
-        "gemini-3.5-flash-lite:1350,gemini-3.1-flash-lite:1350,gemini-2.5-flash-lite:1350,"
-        "gemini-embedding-001:900"
+        "gemini-3.5-flash-lite:1350,gemini-3.1-flash-lite:1350,"
+        "gemma-4-31b-it:12960,gemma-4-26b-a4b-it:12960,gemini-embedding-001:900"
     )
     # Calls per model per minute across all workers, in the same form. 0 means no limit.
     ai_model_rate_limit: int = 4  # the Flash models, at 5 a minute
+    # Gemma 4's own limits aren't published. These assume Gemma 3's 30 a minute. A call over its
+    # tokens-a-minute cap gets a 429, which falls back to the next model and isn't charged.
     ai_model_rate_limits: str = (
-        "gemini-3.5-flash-lite:9,gemini-3.1-flash-lite:9,gemini-2.5-flash-lite:9,"
-        "gemini-embedding-001:100"
+        "gemini-3.5-flash-lite:9,gemini-3.1-flash-lite:9,"
+        "gemma-4-31b-it:27,gemma-4-26b-a4b-it:27,gemini-embedding-001:100"
     )
 
     @field_validator("database_url")

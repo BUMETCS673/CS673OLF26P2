@@ -4,14 +4,10 @@ Services raise the errors below, which know nothing about HTTP. The handlers tur
 everything else that can go wrong, into a response.
 """
 
-import logging
-
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException
-
-logger = logging.getLogger(__name__)
 
 _CODES = {
     400: "bad_request",
@@ -101,5 +97,5 @@ def register_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(Exception)
     async def _unexpected(_: Request, exc: Exception) -> JSONResponse:
-        logger.exception("Unhandled error", exc_info=exc)
+        # RequestMiddleware has logged it already, with the request's ID.
         return _response(500, "Something went wrong.")

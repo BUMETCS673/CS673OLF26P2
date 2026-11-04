@@ -351,8 +351,20 @@ async def test_the_judge_falls_back_only_to_models_above_the_writer(session, cha
     assert models.chain(Role.JUDGE) == (ModelSpec("gemini", "a"),)
 
 
-async def test_a_judge_with_nothing_above_the_writer_means_no_room(session, chained, me):
+async def test_a_full_judge_moves_the_writer_down_so_another_judge_ranks_above(
+    session, chained, me
+):
     session.add(_spent(me, 5, model="j"))
+    await session.commit()
+
+    models = await chained.pick_models({Role.WRITER: 3, Role.JUDGE: 1}, judged=Role.WRITER)
+
+    assert models.chain(Role.WRITER) == (ModelSpec("gemini", "b"), ModelSpec("gemini", "c"))
+    assert models.chain(Role.JUDGE) == (ModelSpec("gemini", "a"),)
+
+
+async def test_no_judge_above_any_writer_start_means_no_room(session, chained, me):
+    session.add_all([_spent(me, 5, model=model) for model in "jab"])
     await session.commit()
 
     assert await chained.pick_models({Role.WRITER: 3, Role.JUDGE: 1}, judged=Role.WRITER) is None
