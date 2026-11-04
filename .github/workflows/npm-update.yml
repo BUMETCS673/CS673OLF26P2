@@ -29,24 +29,15 @@ jobs:
         with:
           node-version: 22
 
+      # npm 10 crashes on vitest's optional peer dependencies, which npm 11 fixes.
+      - run: npm install -g npm@11.21.1
+
       # Inputs go through env so they're never pasted into the script.
-      # The versions are written to package.json first, since adding packages that peer each
-      # other at exact versions crashes npm install.
       - name: Install the packages
         env:
           PACKAGES: ${{ inputs.packages }}
-          FIELD: ${{ inputs.dev && 'devDependencies' || 'dependencies' }}
-        run: |
-          for spec in $PACKAGES; do
-            name="${spec%@*}"
-            version="${spec##*@}"
-            if [ -z "$name" ] || [ "$name" = "$spec" ]; then
-              echo "::error::$spec has no version"
-              exit 1
-            fi
-            npm pkg set "$FIELD.$name=$version"
-          done
-          npm install
+          SAVE: ${{ inputs.dev && '--save-dev' || '--save-prod' }}
+        run: npm install --save-exact "$SAVE" $PACKAGES
 
       - name: Keep npm's logs
         if: failure()
