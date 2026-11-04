@@ -23,11 +23,12 @@
  * Human role: plan approval and code review by Duc Anh Nguyen.
  */
 
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { createDecksApi } from '../api/decks.js';
 import { createStudyApi } from '../api/study.js';
 import { useApi } from '../api/useApi.js';
+import { useSuggestions } from '../suggestions/SuggestionsContext.jsx';
 import DeckLoadError from '../components/DeckLoadError.jsx';
 import { useLoad } from '../hooks/useLoad.js';
 import RatingButtons from '../components/study/RatingButtons.jsx';
@@ -54,9 +55,11 @@ export default function StudyPage() {
   const studyApi = useApi(createStudyApi);
   // Both hooks memoize on the session, so this only changes when the session does.
   const api = useMemo(() => ({ getDeck: decksApi.getDeck, ...studyApi }), [decksApi, studyApi]);
+  const { setSessionDone } = useSuggestions();
   // key={id}: a different deck mounts a fresh view, as on DeckDetailPage.
   return <div className="study">
-    <StudyView key={id} api={api} deckId={id} onExit={() => navigate(`/decks/${id}`)} />
+    <StudyView key={id} api={api} deckId={id} onExit={() => navigate(`/decks/${id}`)}
+      onSessionDone={setSessionDone} />
   </div>;
 }
 
@@ -68,8 +71,10 @@ export default function StudyPage() {
  *   deckId  string, from the route
  *   onExit  () => void, back to the deck page
  *   now     () => number, in milliseconds. Defaults to Date.now; tests pass a fixed clock.
+ *   onSessionDone  (boolean) => void, optional. True while the summary shows, which lets
+ *                  Problem Cards show its notice.
  */
-export function StudyView({ api, deckId, onExit, now = Date.now }) {
+export function StudyView({ api, deckId, onExit, now = Date.now, onSessionDone }) {
   // Try again and Study more both reload. The session is keyed on the revision, so Study
   // more mounts a new session with a fresh reducer instead of needing a "restart" action.
   const load = useCallback(
@@ -93,7 +98,8 @@ export function StudyView({ api, deckId, onExit, now = Date.now }) {
 
   const [deck, due] = data;
   return <StudySession key={revision} api={api} deck={deck} due={due} now={now}
-    mode={mode} onModeChange={setMode} onExit={onExit} onStudyMore={reload} />;
+    mode={mode} onModeChange={setMode} onExit={onExit} onStudyMore={reload}
+    onSessionDone={onSessionDone} />;
 }
 
 /**
@@ -106,8 +112,15 @@ const isTyping = (target) => {
 };
 
 /** One session over `due`, from the first card to the summary. */
-function StudySession({ api, deck, due, now, mode, onModeChange, onExit, onStudyMore }) {
+function StudySession({ api, deck, due, now, mode, onModeChange, onExit, onStudyMore, onSessionDone }) {
   const [state, dispatch] = useReducer(sessionReducer, { due, now: now() }, initSession);
+
+  useEffect(() => {
+    if (!state.finished) return undefined;
+    onSessionDone?.(true);
+    return () => onSessionDone?.(false);
+  }, [state.finished, onSessionDone]);
+
   // Rule 11: one review request per card shown. The ref holds the session state the request
   // was sent from, so a second click or key press made from that same state does nothing.
   // A flag isn't enough: it would clear before React re-renders and re-attaches the
@@ -151,7 +164,8 @@ function StudySession({ api, deck, due, now, mode, onModeChange, onExit, onStudy
   // Space reveals (in flashcard mode only), and 1-4 rate once the answer is showing
   // (decision P10). In typed mode, Enter checks, and then Enter on the focused suggested
   // button accepts it; the browser does both.
-  useEffect(() => {
+  // A layout effect, so the listener is attached by the time the card shows.
+  useLayoutEffect(() => {
     if (state.finished) return undefined;
     function onKeyDown(event) {
       if (event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;

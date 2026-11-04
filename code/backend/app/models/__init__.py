@@ -1,21 +1,23 @@
-"""Models live in one module each; import them from here.
-
-    from app.models import AiGeneration, Card, Deck, User
-"""
-
-# Iteration 3, Step 0a: exporting AiGeneration.
-# AI Utilization: ~100% of that change
-# AI Tools Used: Claude Code (Claude Opus 5.5)
-# AI-Assisted Activities:
-#   Data model development
-# Human role: plan approval, code review, and hands-on testing by Miles Cameron.
+"""Every table, so importing this registers them all on `Base.metadata`."""
 
 from app.models.ai_generation import AiGeneration
-from app.models.base import TimestampMixin, as_utc, iso, utcnow
+from app.models.ai_usage import AiUsage
+from app.models.base import Base, TimestampMixin, utcnow
 from app.models.card import Card
+from app.models.card_report import CardReport, ChunkReport
 from app.models.deck import Deck
-from app.models.user import User
+from app.models.document import Document, DocumentFilePart
+from app.models.job import Job
+from app.models.knowledge_chunk import KnowledgeChunk
+from app.models.problem_card_review import ProblemCardReview
+from app.models.tutor import TutorConversation
+from app.models.user import User, normalize_email
+from app.models.user_session import UserSession
 
 __all__ = [
-    "AiGeneration", "Card", "Deck", "TimestampMixin", "User", "as_utc", "iso", "utcnow",
+    "AiGeneration", "AiUsage", "Base", "Card", "CardReport", "ChunkReport", "Deck", "Document",
+    "DocumentFilePart",
+    "Job", "KnowledgeChunk", "ProblemCardReview", "TimestampMixin", "TutorConversation", "User",
+    "UserSession",
+    "normalize_email", "utcnow",
 ]

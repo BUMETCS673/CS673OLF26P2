@@ -31,6 +31,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import CardForm from '../components/CardForm';
 import CardRow from '../components/CardRow';
+import ProblemCardsBanner from '../components/ProblemCardsBanner.jsx';
 import { deckLoadMessage } from '../components/deckLoadMessage.js';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { createDecksApi } from '../api/decks.js';
@@ -57,10 +58,14 @@ function RoutedDeckDetail({ id, location, navigate }) {
   }, [location, navigate]);
   return <DeckDetailView api={decksApi} deckId={id} startAdding={startAdding}
     onBack={() => navigate('/decks')} onStudy={() => navigate(`/decks/${id}/study`)}
-    onGenerate={() => navigate(`/decks/${id}/generate`)} />;
+    onGenerate={() => navigate(`/decks/${id}/generate`)}
+    onReviewProblemCards={() => navigate(`/decks/${id}/problem-cards`)}
+    onAskTutor={() => navigate(`/decks/${id}/tutor`)} />;
 }
 
-export function DeckDetailView({ api, deckId, onBack, onStudy, onGenerate, startAdding = false }) {
+export function DeckDetailView({
+  api, deckId, onBack, onStudy, onGenerate, onReviewProblemCards, onAskTutor, startAdding = false,
+}) {
   // The page is mounted with key={id}, so a different deck remounts this component rather
   // than loading again in place. `now` is taken once per load, for every CardRow.
   const load = useCallback(
@@ -104,7 +109,9 @@ export function DeckDetailView({ api, deckId, onBack, onStudy, onGenerate, start
           <div className="page-actions">
             {!adding && <button className="button secondary" onClick={() => { setNotice(''); setAdding(true); }}>+ Add card</button>}
             <button className="button secondary" onClick={onGenerate}>Generate with AI</button>
+            {onAskTutor && <button className="button secondary" onClick={onAskTutor}>Ask tutor</button>}
             {cards.length > 0 && <button className="button primary" onClick={onStudy}>{studyLabel(deck.due_counts)}</button>}</div></div>
+        <ProblemCardsBanner deckId={deckId} onReview={onReviewProblemCards} />
         {adding && <section className="card-composer" aria-labelledby="add-card-heading">
           <div className="composer-heading"><div><p className="eyebrow">{cards.length === 0 ? 'Your first flashcard' : 'One more idea'}</p>
             <h2 id="add-card-heading">{cards.length === 0 ? 'What do you want to remember?' : 'Add to your collection'}</h2></div>
@@ -125,7 +132,7 @@ export function DeckDetailView({ api, deckId, onBack, onStudy, onGenerate, start
           onSave={async (id, body) => {
             const updated = await api.updateCard(id, body);
             setCards((items) => items.map((item) => item.id === id ? updated : item)); setNotice('Card updated.');
-          }} onDelete={async (id) => {
+          }} onReport={(id) => api.reportCard(id)} onDelete={async (id) => {
             await api.deleteCard(id); setCards((items) => items.filter((item) => item.id !== id)); refreshDeck();
             setNotice('Card deleted.');
           }} />)}</ul>}

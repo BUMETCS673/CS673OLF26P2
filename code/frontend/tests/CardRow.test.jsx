@@ -87,3 +87,49 @@ test('a manual card, or one with no origin, has no AI badge', () => {
   rerender(<ul><CardRow card={card} index={0} onSave={vi.fn()} onDelete={vi.fn()} now={NOW} /></ul>);
   expect(screen.queryByText('AI-generated')).toBeNull();
 });
+
+const aiCard = { ...card, origin: 'ai' };
+
+test('only an AI card can be reported', () => {
+  renderRow({ card: { ...card, origin: 'manual' } });
+  expect(screen.queryByRole('button', { name: 'Report card 1' })).toBeNull();
+});
+
+test('reporting asks first, then says it worked and keeps the card', async () => {
+  const onReport = vi.fn().mockResolvedValue(null);
+  renderRow({ card: aiCard, onReport });
+
+  fireEvent.click(screen.getByRole('button', { name: 'Report card 1' }));
+  expect(onReport).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Report card' }));
+
+  expect(await screen.findByRole('status')).toHaveProperty(
+    'textContent',
+    expect.stringContaining('Reported'),
+  );
+  expect(onReport).toHaveBeenCalledWith(7);
+  expect(screen.queryByRole('button', { name: 'Report card 1' })).toBeNull();
+  expect(screen.getByText('la biblioteca')).toBeTruthy();
+});
+
+test('cancelling a report sends nothing', () => {
+  const onReport = vi.fn();
+  renderRow({ card: aiCard, onReport });
+
+  fireEvent.click(screen.getByRole('button', { name: 'Report card 1' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+  expect(onReport).not.toHaveBeenCalled();
+  expect(screen.getByRole('button', { name: 'Report card 1' })).toBeTruthy();
+});
+
+test('a failed report shows why, and can be tried again', async () => {
+  const onReport = vi.fn().mockRejectedValue(new Error("You've reached today's limit."));
+  renderRow({ card: aiCard, onReport });
+
+  fireEvent.click(screen.getByRole('button', { name: 'Report card 1' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Report card' }));
+
+  expect((await screen.findByRole('alert')).textContent).toBe("You've reached today's limit.");
+  expect(screen.getByRole('button', { name: 'Report card' })).toBeTruthy();
+});

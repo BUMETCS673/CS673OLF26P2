@@ -97,19 +97,19 @@ test('decided cards show their outcome and lose their buttons', () => {
 test('fewer cards than asked for says so', () => {
   renderList(generationWith(Array(8).fill('pending'), 10));
 
-  expect(screen.getByText('Gemini returned 8 of the 10 you asked for.')).toBeTruthy();
+  expect(screen.getByText('The AI returned 8 of the 10 you asked for.')).toBeTruthy();
 });
 
 test('a full batch has no shortfall note', () => {
   renderList(generationWith(['pending', 'pending']));
 
-  expect(screen.queryByText(/Gemini returned/)).toBeNull();
+  expect(screen.queryByText(/The AI returned/)).toBeNull();
 });
 
 test('no cards offers another try', () => {
   const { onGenerateMore } = renderList(generationWith([], 10));
 
-  expect(screen.getByText("Gemini couldn't write cards from that. Try a different prompt or file."))
+  expect(screen.getByText("The AI couldn't write cards from that. Try a different prompt or file."))
     .toBeTruthy();
   fireEvent.click(button('Generate more'));
   expect(onGenerateMore).toHaveBeenCalledOnce();
@@ -165,4 +165,16 @@ test('an error shows its message in an alert', () => {
   renderList(generationWith(['pending']), { error });
 
   expect(screen.getByRole('alert').textContent).toBe('Generation not found.');
+});
+
+test('a batch the accuracy check skipped says so', () => {
+  renderList({ ...generationWith(['pending']), verification: 'skipped' });
+
+  expect(screen.getByText(/accuracy check didn't run/)).toBeTruthy();
+});
+
+test('a checked batch shows no accuracy warning', () => {
+  renderList({ ...generationWith(['pending']), verification: 'passed' });
+
+  expect(screen.queryByText(/accuracy check didn't run/)).toBeNull();
 });

@@ -35,7 +35,8 @@ COPY . .
 RUN npm run build
 
 
-FROM nginx:1.27-alpine AS prod
+# The stable line. 1.27's Alpine 3.21 never got the libexpat fix for CVE-2026-117610/118370.
+FROM nginx:1.30-alpine AS prod
 
 # Same reason as the backend: the pinned tag lags the distro's patched packages. This is
 # where the openssl and c-ares CVEs Trivy reported get fixed.

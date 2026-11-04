@@ -1,8 +1,22 @@
-"""Shared bits every model uses: UTC timestamps and how we put them in JSON."""
+"""What every model shares: the declarative base, UTC time and timestamps."""
 
 from datetime import UTC, datetime
 
-from app.extensions import db
+from sqlalchemy import DateTime, MetaData
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+# Named constraints, so a migration can always refer to one.
+NAMING_CONVENTION = {
+    "ix": "ix_%(column_0_label)s",
+    "uq": "uq_%(table_name)s_%(column_0_N_name)s",
+    "ck": "ck_%(table_name)s_%(constraint_name)s",
+    "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+    "pk": "pk_%(table_name)s",
+}
+
+
+class Base(DeclarativeBase):
+    metadata = MetaData(naming_convention=NAMING_CONVENTION)
 
 
 def utcnow() -> datetime:
@@ -10,32 +24,10 @@ def utcnow() -> datetime:
     return datetime.now(UTC)
 
 
-def as_utc(value: datetime | None) -> datetime | None:
-    """`value` as a timezone-aware UTC datetime, or None.
-
-    Values read back from the database can come out naive -- SQLite always does. We only
-    ever store UTC, so attach it rather than silently shifting the time. Anything that
-    already has a timezone is converted.
-    """
-    if value is None:
-        return None
-    if value.tzinfo is None:
-        return value.replace(tzinfo=UTC)
-    return value.astimezone(UTC)
-
-
-def iso(value: datetime | None) -> str | None:
-    """Format a timestamp the way the API contract shows it: 2026-09-17T14:00:00Z."""
-    value = as_utc(value)
-    if value is None:
-        return None
-    return value.isoformat().replace("+00:00", "Z")
-
-
 class TimestampMixin:
     """`created_at` and `updated_at`, maintained for you."""
 
-    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
-    updated_at = db.Column(
-        db.DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
