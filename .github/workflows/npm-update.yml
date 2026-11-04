@@ -29,6 +29,9 @@ jobs:
         with:
           node-version: 22
 
+      # npm install fails on a lockfile with no node_modules, so this installs them first.
+      - run: npm ci
+
       # Inputs go through env so they're never pasted into the script.
       - name: Install the packages
         env:
