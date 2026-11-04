@@ -23,7 +23,7 @@
  * Human role: plan approval and code review by Duc Anh Nguyen.
  */
 
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { createDecksApi } from '../api/decks.js';
 import { createStudyApi } from '../api/study.js';
@@ -164,7 +164,8 @@ function StudySession({ api, deck, due, now, mode, onModeChange, onExit, onStudy
   // Space reveals (in flashcard mode only), and 1-4 rate once the answer is showing
   // (decision P10). In typed mode, Enter checks, and then Enter on the focused suggested
   // button accepts it; the browser does both.
-  useEffect(() => {
+  // A layout effect, so the listener is attached by the time the card shows.
+  useLayoutEffect(() => {
     if (state.finished) return undefined;
     function onKeyDown(event) {
       if (event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
