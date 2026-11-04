@@ -64,6 +64,13 @@ services:
         value: "1"
       - key: PORT
         value: "5000"
+      # Process counts for the free plan's 512 MB. Change them here or in the dashboard.
+      - key: WEB_CONCURRENCY
+        value: "1"
+      - key: TASKIQ_WORKERS
+        value: "1"
+      - key: TASKIQ_MAX_ASYNC_TASKS
+        value: "20"
       # The real models. Each chat role falls back to other Gemini models once a model's daily
       # limit is reached. Set AI_WRITER_PROVIDER to "fake" in the dashboard for sample cards.
       - key: AI_WRITER_PROVIDER
