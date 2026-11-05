@@ -1,10 +1,9 @@
 """Anki's scheduling algorithm: when each card is next due (Lab 3, Story 1).
 
 Step 0a wrote the interface below and Story 1 fills in `answer_card()`. Stories 2 and 5
-code against these names too, so they're frozen -- see "The scheduler interface" in
-code/plans/LAB_3_PLAN.md before changing any of them.
+code against these names too, so they're frozen.
 
-This module is pure (rule 7 in the plan). It imports nothing from Flask, SQLAlchemy, or
+This module is pure. It imports nothing from Flask, SQLAlchemy, or
 app.models, and it never reads the clock: `now` is always passed in, UTC-aware.
 `Card.schedule` converts between a database row and a `CardSchedule`.
 """
@@ -82,7 +81,7 @@ def answer_card(card: CardSchedule, rating: Rating, now: datetime) -> CardSchedu
     """The card's schedule after the learner answers it with `rating` at `now`.
 
     Anki's default scheduler with Anki's default settings, minus the random fuzz Anki
-    adds to review intervals (decision L1). Written from the rules in the plan, not
+    adds to review intervals (decision L1). Written from Anki's rules, not
     translated from Anki's source (decision D5).
 
     An answer before a review card is due is scored as if on time: Anki's early-review

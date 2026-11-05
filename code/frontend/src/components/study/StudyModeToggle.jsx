@@ -4,7 +4,7 @@
  * AI-Assisted Activities:
  *   UI component development
  *   Documentation
- * Human role: requirements (F5 in code/plans/ITERATION_3_PLAN.md), direction, and review by
+ * Human role: requirements, direction, and review by
  * Nurzat Mukhamedali.
  */
 

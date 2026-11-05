@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 //
-// F2: the four rating buttons. One test per acceptance example under F2 in
-// code/plans/FINALIZE_ITERATION_2_PLAN.md, plus the order and names F1's tests rely on.
+// F2: the four rating buttons. One test per acceptance example, plus the order and names F1's tests rely on.
 //
 // AI Utilization: ~100% of this file's code
 // AI Tools Used: Claude Code (Claude Opus 5.5)
@@ -64,14 +63,14 @@ test('each button names its keyboard shortcut, 1 to 4 in order', () => {
     .toEqual(['1', '2', '3', '4']);
 });
 
-// F5 (Iteration 3): the optional `suggested` prop, as C9 in code/plans/ITERATION_3_PLAN.md.
+// F5 (Iteration 3): the optional `suggested` prop.
 // The tests above are Iteration 2's and run unchanged.
 //
 // AI Utilization: ~100% of the tests below
 // AI Tools Used: Devin (Cognition AI)
 // AI-Assisted Activities:
 //   Unit test creation
-// Human role: acceptance examples (F5 in the plan), direction, and review by Nurzat Mukhamedali.
+// Human role: acceptance examples, direction, and review by Nurzat Mukhamedali.
 
 test('suggested="good": Good has the class, a name ending ", suggested", and focus; the others none', () => {
   render(<RatingButtons intervals={NEW_CARD_INTERVALS} disabled={false} onRate={vi.fn()} suggested="good" />);

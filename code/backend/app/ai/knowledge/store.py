@@ -6,7 +6,7 @@ from langchain_postgres.v2.hybrid_search_config import HybridSearchConfig, recip
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 TABLE_NAME = "knowledge_chunks"
-METADATA_COLUMNS = [
+METADATA_COLUMNS = [  # real columns instead of JSON so filters can use indexes
     "embedding_model",
     "owner_id",
     "document_id",
@@ -20,8 +20,8 @@ METADATA_COLUMNS = [
 
 async def create_store(engine: AsyncEngine, embeddings: Embeddings) -> PGVectorStore:
     """A store using hybrid search: vectors for meaning, and keywords for exact terms."""
-    return await PGVectorStore.create(
-        PGEngine.from_engine(engine),
+    return await PGVectorStore.create(  # binds to the existing table it creates nothing
+        PGEngine.from_engine(engine),  # reuses the app's pool instead of opening another
         embedding_service=embeddings,
         table_name=TABLE_NAME,
         metadata_columns=METADATA_COLUMNS,

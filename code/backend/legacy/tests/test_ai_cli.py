@@ -1,13 +1,13 @@
 """B2: `flask ai-smoke`, the one-card check against the configured provider.
 
-One test per acceptance example under B2 in code/plans/ITERATION_3_PLAN.md, plus the
+One test per acceptance example under B2, plus the
 failures around them. Every test runs on the stand-in or a patched provider (rule 16).
 """
 
 # AI Utilization: ~100% of this file's code
 # AI Tools Used: Claude Code (Claude Opus 5.5)
 # AI-Assisted Activities:
-#   Unit test creation (from the plan's acceptance examples)
+#   Unit test creation
 # Human role: plan approval, code review, and hands-on testing by Miles Cameron.
 
 import re

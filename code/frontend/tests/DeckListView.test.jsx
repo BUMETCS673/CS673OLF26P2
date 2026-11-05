@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 //
 // F4: due counts and the Study button on the deck list. The acceptance example for
-// DeckListView under F4 in code/plans/FINALIZE_ITERATION_2_PLAN.md, plus the decks that
+// DeckListView, plus the decks that
 // don't carry due_counts yet (rule 10). The Iteration 1 behaviors stay covered by
 // DeckListPage.test.jsx.
 //
@@ -9,7 +9,7 @@
 // AI Tools Used: Devin (Cognition AI)
 // AI-Assisted Activities:
 //   Unit test creation
-// Human role: acceptance examples (F4 in the plan), direction, and review by Nurzat Mukhamedali.
+// Human role: acceptance examples, direction, and review by Nurzat Mukhamedali.
 
 import { afterEach, expect, test, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';

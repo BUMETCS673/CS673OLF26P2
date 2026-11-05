@@ -4,7 +4,7 @@
  * AI Tools Used: Devin (Cognition AI)
  * AI-Assisted Activities:
  *   UI component development
- * Human role: requirements (F4 in code/plans/FINALIZE_ITERATION_2_PLAN.md), direction,
+ * Human role: requirements, direction,
  * and review by Nurzat Mukhamedali.
  *
  * Iteration 3 refactor: loading through useLoad() and useApi().

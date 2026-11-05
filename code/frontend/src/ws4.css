@@ -1,6 +1,6 @@
 /* WS4's deck pages: layout only, scoped to .ws4. Colors, fonts, buttons, fields, panels,
    and the page container all come from styles.css, so nothing here names a color or a
-   font (rule 14 in code/plans/FINALIZE_ITERATION_2_PLAN.md). */
+   font. */
 
 /* Step 0c: these rules moved onto styles.css's tokens; a few are WS4's, unchanged.
    AI Utilization: ~100% of Step 0c's changes
@@ -14,7 +14,7 @@
    AI Tools Used: Devin (Cognition AI)
    AI-Assisted Activities:
      UI layout
-   Human role: requirements (F4 in the plan), direction, and review by Nurzat Mukhamedali. */
+   Human role: requirements, direction, and review by Nurzat Mukhamedali. */
 
 /* --- headings and counts ----------------------------------------------------- */
 .ws4 .section-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-4); }

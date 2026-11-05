@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 //
-// F2's tests: one per acceptance example under F2 in code/plans/ITERATION_3_PLAN.md, plus
+// F2's tests: one per acceptance example, plus
 // the singular and plural wording and each decided card's label.
 //
 // AI Utilization: ~100% of this file's code
 // AI Tools Used: Claude Code (Claude Opus 5.5)
 // AI-Assisted Activities:
-//   Unit test creation (from the plan's acceptance examples)
+//   Unit test creation
 // Human role: plan review, code review, and CI verification by Duc Anh Nguyen.
 
 import { afterEach, expect, test, vi } from 'vitest';

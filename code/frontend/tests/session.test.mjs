@@ -2,7 +2,7 @@
 // AI Tools Used: Claude Code (Claude Opus 5.5)
 // AI-Assisted Activities:
 //   Unit test creation (red first, from Story 3's acceptance examples)
-// Human role: checked every Given/When/Then row in the plan had a test before opening the
+// Human role: checked every Given/When/Then row had a test before opening the
 // PR, by Duc Anh Nguyen.
 
 import { test } from 'vitest';
@@ -123,14 +123,13 @@ test('a card showing, skipped: the next card shows, and the counts do not change
   assert.deepEqual(next.counts, { again: 0, hard: 0, good: 0, easy: 0 });
 });
 
-// F5 (Iteration 3): the `answer` field, as C9 in code/plans/ITERATION_3_PLAN.md. One test per
-// session row of F5's acceptance table.
+// F5 (Iteration 3): the `answer` field. One test per session row of F5's acceptance table.
 //
 // AI Utilization: ~100% of the tests below
 // AI Tools Used: Devin (Cognition AI)
 // AI-Assisted Activities:
 //   Unit test creation
-// Human role: acceptance examples (F5 in the plan), direction, and review by Nurzat Mukhamedali.
+// Human role: acceptance examples, direction, and review by Nurzat Mukhamedali.
 
 const GRADED = { typed: 'el aeropuerto', verdict: 'correct', suggestedRating: 'good' };
 const revealWith = (state, graded) => deepFreeze(sessionReducer(state, { type: 'reveal', answer: graded }));

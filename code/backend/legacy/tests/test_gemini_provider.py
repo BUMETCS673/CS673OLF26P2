@@ -1,6 +1,6 @@
 """B2: GeminiProvider, the one real call to Google.
 
-One test per acceptance example under B2 in code/plans/ITERATION_3_PLAN.md. Nothing here
+One test per acceptance example under B2. Nothing here
 reaches the network (rule 16): every provider is handed a fake client whose
 `models.generate_content` records what it was asked and returns, or raises, what the
 test needs. The one test that builds a real client patches `genai.Client` first.
@@ -9,7 +9,7 @@ test needs. The one test that builds a real client patches `genai.Client` first.
 # AI Utilization: ~100% of this file's code
 # AI Tools Used: Claude Code (Claude Opus 5.5)
 # AI-Assisted Activities:
-#   Unit test creation (from the plan's acceptance examples)
+#   Unit test creation
 # Human role: plan approval, code review, and hands-on testing by Miles Cameron.
 
 import json
@@ -337,7 +337,7 @@ def test_googles_429_is_rate_limited():
         httpx.ReadTimeout("timed out"),
         httpx.ConnectError("no route"),
         # A 200 whose body isn't JSON, from a proxy say. The SDK raises this as a
-        # ValueError, not an APIError, so the plan's table doesn't catch it by itself.
+        # ValueError, not an APIError, so the status table doesn't catch it by itself.
         errors.UnknownApiResponseError("Failed to parse response as JSON."),
     ],
     ids=["400", "403", "503", "500", "timeout", "connect", "unparseable"],

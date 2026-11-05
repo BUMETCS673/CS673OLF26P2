@@ -30,8 +30,7 @@ import '../generate.css';
  * The generate page at /decks/:id/generate (Iteration 3, Step 0b).
  *
  * The wrapper reads the route and the hooks, and GenerateView takes everything as props,
- * so a test can render it with a fake `api` (rule 12). See C7 in
- * code/plans/ITERATION_3_PLAN.md.
+ * so a test can render it with a fake `api` (rule 12).
  */
 export default function GeneratePage() {
   const { id } = useParams();

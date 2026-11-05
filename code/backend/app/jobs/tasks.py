@@ -31,13 +31,14 @@ from app.models.job import EMBED_CARDS, GENERATE_CARDS, INDEX_MATERIAL, REVIEW_P
 
 
 async def _index_material(context: JobContext) -> dict[str, Any] | None:
-    cache = RedisByteStore(get_redis())
+    cache = RedisByteStore(get_redis())  # the embedding cache lets re-indexing skip repeat chunks
     return await index_material(context, get_engine(), get_settings(), cache)
 
 
 async def _generate_cards(context: JobContext) -> dict[str, Any]:
     settings = get_settings()
     cache = RedisByteStore(get_redis())
+    # partial gives the graph a one-argument writer with its dependencies bound here
     write = partial(write_cards, engine=get_engine(), settings=settings, cache=cache)
     return await generate_cards(context, settings, write)
 
@@ -51,6 +52,7 @@ async def _review_problem_cards(context: JobContext) -> dict[str, Any] | None:
     return await review_problem_cards(context, get_settings())
 
 
+# a job's `kind` column picks its handler so one Taskiq task serves every kind
 HANDLERS: dict[str, Handler] = {
     REVIEW_PROBLEM_CARDS: _review_problem_cards,
     EMBED_CARDS: _embed_cards,
@@ -67,11 +69,13 @@ async def ping() -> str:
 
 @broker.task
 async def execute_job(job_id: int) -> None:
+    # only the id travels through Redis since the job's row in Postgres holds the rest
     events = JobEvents(get_redis())
     await run_job(job_id, get_session_factory(), HANDLERS, publish_event=events.publish)
 
 
 async def _publish(job_id: int) -> None:
+    # .kiq() adds it to the broker's stream instead of calling it directly
     await execute_job.kiq(job_id)
 
 
@@ -80,10 +84,13 @@ async def start_relay(state: TaskiqState) -> None:
     """Sets up logging and telemetry, then checks the model chains, so a bad one stops the
     worker before it takes a job."""
     settings = get_settings()
+    # Step 1: logs and metrics first so startup problems are recorded
     configure_logging(settings)
-    state.stop_telemetry = start_telemetry("worker")
+    state.stop_telemetry = start_telemetry("worker")  # kept on state to flush at shutdown
+    # Step 2: fail fast on a misconfigured model chain before any job is taken
     check_model_chains(settings)
-    state.relay = asyncio.create_task(
+    # Step 3: run the relay beside the tasks in this same event loop
+    state.relay = asyncio.create_task(  # a background task so startup returns at once
         run_relay(settings.database_url, get_session_factory(), _publish)
     )
 
@@ -91,11 +98,14 @@ async def start_relay(state: TaskiqState) -> None:
 @broker.on_event(TaskiqEvents.WORKER_SHUTDOWN)
 async def stop_relay(state: TaskiqState) -> None:
     """In this order, since the relay uses the database until it stops."""
+    # Step 1: stop the relay and wait for it to finish its current batch
     state.relay.cancel()
-    with suppress(asyncio.CancelledError):
+    with suppress(asyncio.CancelledError):  # cancelling raises this inside the task
         await state.relay
-    await asyncio.to_thread(wait_for_all_tracers)
-    await asyncio.to_thread(state.stop_telemetry)
-    await close_checkpointers()
+    # Step 2: flush what's still buffered Both block so they run in threads
+    await asyncio.to_thread(wait_for_all_tracers)  # LangSmith traces
+    await asyncio.to_thread(state.stop_telemetry)  # the last metrics and logs
+    # Step 3: close the connections last since the steps above may still use them
+    await close_checkpointers()  # LangGraph's Postgres pools
     await get_redis().aclose()
-    await get_engine().dispose()
+    await get_engine().dispose()  # SQLAlchemy's pool

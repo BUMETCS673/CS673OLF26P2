@@ -4,14 +4,14 @@
  * AI-Assisted Activities:
  *   UI component development
  *   Documentation
- * Human role: requirements (F6 in code/plans/ITERATION_3_PLAN.md), direction, and review by
+ * Human role: requirements, direction, and review by
  * Nurzat Mukhamedali.
  */
 
 import { useId, useState } from 'react';
 
 /**
- * Typed mode's answer box (Iteration 3, F6), as C9 in code/plans/ITERATION_3_PLAN.md says.
+ * Typed mode's answer box (Iteration 3, F6).
  *
  * props:
  *   answer    the reducer's graded answer, { typed, verdict, suggestedRating }, or null

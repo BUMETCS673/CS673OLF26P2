@@ -2,10 +2,8 @@
  * Every route — WS3 (Duc) owns this file.
  *
  * Shared file: WS4's pages are already wired up here against placeholders, so Nurzat
- * fills those in without anyone editing this file a second time. See "Shared files"
- * in code/plans/ITERATION_1_PLAN.md. Iteration 2's study page was added the same way,
- * by Step 0b in code/plans/FINALIZE_ITERATION_2_PLAN.md, and Iteration 3's generate
- * page by Step 0b in code/plans/ITERATION_3_PLAN.md.
+ * fills those in without anyone editing this file a second time. Iteration 2's
+ * study page and Iteration 3's generate page were added the same way.
  */
 
 /*

@@ -10,6 +10,7 @@ The cards are already saved, so a failure here costs the learner nothing. It onl
 searches, which is why a full budget skips the work instead of failing.
 """
 
+import logging
 import math
 from typing import Any
 
@@ -35,49 +36,56 @@ from app.repositories.usage import UsageRepository
 from app.repositories.users import UserRepository
 from app.services.budget import MATERIALS, BudgetService
 
+logger = logging.getLogger(__name__)
+
 
 def _unit(vector: list[float]) -> list[float]:
     """Scaled to length 1 once, so comparing two vectors is a dot product alone."""
-    length = math.hypot(*vector)
-    return [value / length for value in vector] if length else vector
+    length = math.hypot(*vector)  # Euclidean norm in C
+    return [value / length for value in vector] if length else vector  # a zero vector stays as is
 
 
 def _dot(first: list[float], second: list[float]) -> float:
+    # for unit vectors this is their cosine similarity computed in C
     return math.sumprod(first, second)
 
 
 def _chunk(card_id: int, text: str, model: str, accepted_by: int) -> Chunk:
-    return Chunk(
+    return Chunk(  # a LangChain Document the shape the PGVector store saves
         page_content=text,
         metadata={
-            "embedding_model": model,
-            "owner_id": None,
-            "accepted_by": accepted_by,
+            "embedding_model": model,  # search filters by model so a model change can't mix
+            "owner_id": None,  # None since it's not a private file's chunk
+            "accepted_by": accepted_by,  # the first learner to accept this fact
             "document_id": None,
             "chunk_index": None,
             "page": None,
-            "source_card_id": card_id,
+            "source_card_id": card_id,  # links the copy back to its card for reports
         },
     )
 
 
 def _near_copy(match: CardMatch | None) -> bool:
-    return match is not None and match.similarity >= NEAR_DUPLICATE_SIMILARITY
+    return match is not None and match.similarity >= NEAR_DUPLICATE_SIMILARITY  # 0.97
 
 
 async def _same_facts(
     context: JobContext, settings: Settings, usage: RunUsage, pairs: list[tuple[str, str]]
 ) -> list[bool]:
     """Returns all False when the helper budget is used up."""
-    if not pairs:
+    if not pairs:  # no candidates means no model call and no budget query
         return []
+    # Step 1: check the helper has room for every batch of pairs
     async with context.session_factory() as session:
         budget = BudgetService(UsageRepository(session), settings)
-        calls = math.ceil(len(pairs) / same_fact.BATCH_SIZE)
+        calls = math.ceil(len(pairs) / same_fact.BATCH_SIZE)  # 25 pairs per call
         models = await budget.pick_models({Role.HELPER: calls})
         if models is None:
+            # without budget treat none as the same fact which is the safe answer
             return [False] * len(pairs)
+    # Step 2: ask the helper outside the session so no connection waits on the model
     return await same_fact.same_facts(
+        # a factory so each batch gets a fresh model with the fallbacks picked above
         pairs, lambda: load_chat_model(Role.HELPER, settings, usage, models=models)
     )
 
@@ -85,55 +93,67 @@ async def _same_facts(
 async def embed_cards(
     context: JobContext, engine: AsyncEngine, settings: Settings, cache: ByteStore
 ) -> dict[str, Any]:
+    # Step 1: check the embedder has room and load the cards that still exist
     async with context.session_factory() as session:
         budget = BudgetService(UsageRepository(session), settings)
         if not await budget.within_model_limits({Role.EMBEDDER: 1}):
+            logger.info("card embedding skipped", extra={"reason": "no_budget"})
+            # skip instead of failing since the cards are saved and only search loses out
             return {"saved": 0}
         # A card deleted since it was accepted has nothing left to add.
-        cards = await CardRepository(session).get_many(context.payload["card_ids"])
+        cards = await CardRepository(session).get_many(context.payload["card_ids"])  # one IN query
     if not cards:
         return {"saved": 0}
 
+    # Step 2: embed every card in one batch call through the embedding cache
     usage = RunUsage()
     model = model_name(Role.EMBEDDER, settings)
+    # CacheBackedEmbeddings reuses vectors from Redis for identical text keyed by SHA-256
     embeddings = with_embedding_cache(load_embeddings(settings, usage), cache, model)
-    texts = [f"{card.front} {card.back}" for card in cards]
+    texts = [f"{card.front} {card.back}" for card in cards]  # front and back as one text
     try:
-        with ai_errors():
-            vectors = await embeddings.aembed_documents(texts)
+        with ai_errors():  # vendor errors become ours so the job system can retry or fail
+            vectors = await embeddings.aembed_documents(texts)  # one request for the batch
 
+        # Step 3: save each card's vector for searching its own deck
         async with context.session_factory() as session:
-            await CardRepository(session).save_embeddings(
+            await CardRepository(session).save_embeddings(  # one bulk UPDATE by primary key
                 {card.id: vector for card, vector in zip(cards, vectors, strict=True)}, model
             )
             await session.commit()
-        if not context.payload.get("share", True):
+        if not context.payload.get("share", True):  # a learner's own card is never shared
+            logger.info("card embedding saved", extra={"cards": len(cards), "shared": 0})
             return {"saved": 0}
 
+        # Step 4: find each card's nearest copy already in the knowledge base
         async with context.session_factory() as session:
             trusted = await UserRepository(session).is_trusted(context.user_id)
+            # one round trip with a UNION of per-vector nearest searches on the HNSW index
             matches = await KnowledgeRepository(session).closest_cards(vectors, model)
+        # Step 5: ask the helper whether close matches state the same fact
         # Only a trusted learner's match to another learner's copy needs the model check.
         candidates = [
             position
             for position, match in enumerate(matches)
             if trusted
             and match is not None
-            and match.accepted_by != context.user_id
-            and match.similarity >= SAME_FACT_CANDIDATE
+            and match.accepted_by != context.user_id  # matching your own copy confirms nothing
+            and match.similarity >= SAME_FACT_CANDIDATE  # 0.95 is close enough to be worth asking
         ]
         # Called outside a session to avoid holding a connection.
         pairs = [(texts[i], matches[i].content) for i in candidates]
         answers = await _same_facts(context, settings, usage, pairs)
-        same = dict(zip(candidates, answers, strict=True))
-        copies = {
+        same = dict(zip(candidates, answers, strict=True))  # position -> same fact?
+        copies = {  # the model's answer where it was asked else a 0.97 near-copy check
             position
             for position, match in enumerate(matches)
             if same.get(position, _near_copy(match))
         }
 
+        # Step 6: decide whether each card confirms another learner's copy takes it over or
+        # stays as a new chunk
         # Checked against the knowledge base, and against this batch's cards kept so far.
-        kept: list[tuple[int, str, list[float]]] = []
+        kept: list[tuple[int, str, list[float]]] = []  # (card id, text, unit vector)
         async with context.session_factory() as session:
             knowledge = KnowledgeRepository(session)
             users = UserRepository(session)
@@ -147,6 +167,7 @@ async def embed_cards(
             closest_shared = dict(
                 zip(
                     fresh,
+                    # one round trip for every fresh card against shared chunks only
                     await knowledge.closest_similarities([vectors[i] for i in fresh], model),
                     strict=True,
                 )
@@ -157,39 +178,52 @@ async def embed_cards(
                 if position in copies:
                     # A fact needs two trusted learners. If only this one is, it counts as the
                     # first, so a new account's copy can't block the fact from ever being shared.
-                    if same.get(position):
+                    if same.get(position):  # the model said same fact
                         confirmed_by_card[card.id] = match.chunk_id
-                        if match.accepted_by not in trusted_learners:
+                        if match.accepted_by not in trusted_learners:  # memoized per batch
                             trusted_learners[match.accepted_by] = await users.is_trusted(
                                 match.accepted_by
                             )
                         if trusted_learners[match.accepted_by]:
+                            # two trusted learners agree so share it
                             confirmed.append(match.chunk_id)
                         else:
                             await knowledge.take_over_card_copy(match.chunk_id, context.user_id)
-                    continue
+                    continue  # a copy adds no new chunk either way
                 closest = closest_shared[position]
-                known = closest is not None and closest >= NEAR_DUPLICATE_SIMILARITY
+                known = closest is not None and closest >= NEAR_DUPLICATE_SIMILARITY  # in KB
                 unit = _unit(vector)
+                # in-memory check so two near-identical new cards keep only one
                 repeated = any(
                     _dot(unit, other) >= NEAR_DUPLICATE_SIMILARITY for _, _, other in kept
                 )
                 if not known and not repeated:
                     kept.append((card.id, text, unit))
-            await knowledge.mark_shared(confirmed)
-            await CardRepository(session).save_confirmed_chunks(confirmed_by_card)
+            await knowledge.mark_shared(confirmed)  # one UPDATE for every confirmed chunk
+            await CardRepository(session).save_confirmed_chunks(confirmed_by_card)  # bulk UPDATE
             await session.commit()
 
+        # Step 7: add the kept cards to the knowledge base as new unshared chunks
         # The cache returns these vectors, so saving costs no second call unless Redis is down.
-        await index_chunks(
+        await index_chunks(  # LangChain's indexing API whose record manager skips saved chunks
             [_chunk(card_id, text, model, context.user_id) for card_id, text, _ in kept],
             await create_store(engine, embeddings),
             await create_record_manager(engine),
         )
+        logger.info(
+            "card embedding saved",
+            extra={
+                "cards": len(cards),
+                "same_fact_checks": len(pairs),
+                "confirmed": len(confirmed),
+                "new_chunks": len(kept),
+            },
+        )
     finally:
+        # Step 8: save what the calls spent even on failure
         async with context.session_factory() as session:
             BudgetService(UsageRepository(session), settings).record(
-                MATERIALS, context.user_id, None, usage
+                MATERIALS, context.user_id, None, usage  # counted under materials' budget
             )
             await session.commit()
-    return {"saved": len(kept)}
+    return {"saved": len(kept)}  # the job's result

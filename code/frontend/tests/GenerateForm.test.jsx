@@ -1,14 +1,14 @@
 // @vitest-environment jsdom
 //
-// F1: the generate form. One test per acceptance example under F1 in
-// code/plans/ITERATION_3_PLAN.md, plus the checks and edge cases around them. The form
+// F1: the generate form. One test per acceptance example, plus the checks
+// and edge cases around them. The form
 // is rendered on its own with props (rule 12); file reads are real FileReader reads in
 // jsdom, awaited, except where a test needs one to fail or hang.
 //
 // AI Utilization: ~100% of this file's code
 // AI Tools Used: Claude Code (Claude Opus 5.5)
 // AI-Assisted Activities:
-//   Unit test creation (from the plan's acceptance examples)
+//   Unit test creation
 // Human role: plan approval, code review, and hands-on testing by Miles Cameron.
 
 import { afterEach, expect, test, vi } from 'vitest';

@@ -1,5 +1,5 @@
 """B4's tests for accepting and rejecting AI suggestions: one per acceptance example under
-B4 in code/plans/ITERATION_3_PLAN.md, plus the edges of contract C4.
+B4, plus the edges of contract C4.
 
     POST /api/generations/<id>/accept  {"indexes": [...]}  -> 201 {cards, generation}
     POST /api/generations/<id>/reject  {"indexes": [...]}  -> 200 Generation
@@ -8,8 +8,8 @@ B4 in code/plans/ITERATION_3_PLAN.md, plus the edges of contract C4.
 # AI Utilization: 90%
 # AI Tools Used: Claude
 # AI-Assisted Activities:
-#   - Unit test creation (from the plan's acceptance examples)
-# Human role: ran the suite locally and in Docker, and checked each test against the plan,
+#   - Unit test creation
+# Human role: ran the suite locally and in Docker, and checked each test,
 # by Osasenaga Von Okunbor.
 
 import pytest

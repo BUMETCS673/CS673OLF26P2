@@ -3,8 +3,6 @@
  * the tokens on :root, then the shared pieces below them. Page stylesheets (ws4.css for
  * the deck pages, study.css for the study page) hold layout only, and use var(--...) when
  * they need a color. Nothing outside the token block names a color or a font.
- *
- * See "Style guide" and rule 14 in code/plans/FINALIZE_ITERATION_2_PLAN.md.
  */
 
 /*

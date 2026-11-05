@@ -75,7 +75,7 @@ class Config:
     SQLALCHEMY_DATABASE_URI = _database_url()
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
-    # Security basics, item 4 in the plan.
+    # Security basics.
     SESSION_COOKIE_HTTPONLY = True   # page scripts can't read the session cookie
     SESSION_COOKIE_SAMESITE = "Lax"  # other sites can't make requests as you
     SESSION_COOKIE_SECURE = os.environ.get("SESSION_COOKIE_SECURE", "0") == "1"

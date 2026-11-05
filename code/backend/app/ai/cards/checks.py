@@ -11,16 +11,18 @@ TEXT_MAX = 2000  # the same limit as a card's side
 
 # Whitespace and these marks come off both ends. Nothing else is removed.
 _END_MARKS = " .,;:!?¿¡…'\"‘’“”«»()[]{}"
-_WHITESPACE = re.compile(r"\s+")
+_WHITESPACE = re.compile(r"\s+")  # compiled once
 
 
 def normalize_front(text: str) -> str:
     """A form for comparing fronts, so case, spacing and end punctuation don't hide a repeat."""
+    # NFC makes "é" as one character equal "e" plus an accent
     text = unicodedata.normalize("NFC", text).lower()
-    return _WHITESPACE.sub(" ", text).strip(_END_MARKS)
+    return _WHITESPACE.sub(" ", text).strip(_END_MARKS)  # runs of spaces become one
 
 
 def _gives_answer_away(front: str, back: str) -> bool:
+    # the back as a whole word in the front escaped so its punctuation isn't regex syntax
     return re.search(r"(?<!\w)" + re.escape(back) + r"(?!\w)", front) is not None
 
 
@@ -39,20 +41,22 @@ def clean_cards(
     seen: set[str] = set()  # this batch's fronts
     kept: list[CardDraft] = []
     for card in cards:
-        if len(kept) >= limit:
+        if len(kept) >= limit:  # stop once there are enough without looking at the rest
             break
         front, back = card.front.strip(), card.back.strip()
+        # empty or too long to save as a card side
         if not front or not back or len(front) > TEXT_MAX or len(back) > TEXT_MAX:
             continue
         normal_front, normal_back = normalize_front(front), normalize_front(back)
-        if not normal_back or _gives_answer_away(normal_front, normal_back):
+        if not normal_back or _gives_answer_away(normal_front, normal_back):  # e.g "?" only
             continue
+        # O(1) set lookups for repeats in this batch or in any taken set
         if normal_front in seen or any(normal_front in fronts for fronts in taken):
             continue
         seen.add(normal_front)
-        kept.append(CardDraft(front=front, back=back))
+        kept.append(CardDraft(front=front, back=back))  # the stripped text not the raw reply
     return kept
 
 
 def back_fits(card: CardDraft) -> bool:
-    return len(card.back.split()) <= BACK_MAX_WORDS
+    return len(card.back.split()) <= BACK_MAX_WORDS  # words split on any whitespace

@@ -22,7 +22,7 @@ from app.schemas.jobs import JobEvent
 
 logger = logging.getLogger(__name__)
 
-LEASE = timedelta(minutes=2)
+LEASE = timedelta(minutes=2)  # a worker silent this long is presumed dead
 MAX_ATTEMPTS = 3
 RETRY_DELAY = timedelta(seconds=30)  # times the attempts so far, to give a rate limit time to pass
 SOMETHING_WENT_WRONG = "Something went wrong. Try again."
@@ -34,6 +34,7 @@ JOB_DURATION = meter.create_histogram(
     "cadence.job.duration",
     unit="s",
     description="How long a job attempt ran.",
+    # seconds spread from quick embeds to 10-minute file indexing for useful percentiles
     explicit_bucket_boundaries_advisory=[0.5, 1, 2.5, 5, 10, 20, 30, 60, 120, 300, 600],
 )
 # What became of an attempt, by the status it left the job in.
@@ -46,7 +47,8 @@ class JobContext:
 
     job_id: int
     user_id: int
-    payload: dict[str, Any]
+    payload: dict[str, Any]  # the JSON the request saved on the job row
+    # a factory not a session so each step opens and closes its own
     session_factory: async_sessionmaker[AsyncSession]
     report: Callable[[dict[str, Any]], Awaitable[None]]  # tells whoever is following the job
     attempt: int | None = None  # None when a handler runs without the job system
@@ -62,15 +64,16 @@ async def _no_event(_job_id: int, _event: JobEvent) -> None:
 
 def _safe_message(error: Exception) -> str:
     """Only messages written for learners. Other errors' text can carry their content."""
-    if isinstance(error, AIRateLimited | AIUnavailable | AppError):
+    if isinstance(error, AIRateLimited | AIUnavailable | AppError):  # our own wording
         return error.message
-    return SOMETHING_WENT_WRONG
+    return SOMETHING_WENT_WRONG  # anything else gets a generic message never the raw text
 
 
 def _is_permanent(error: Exception) -> bool:
     """Returns True for errors a retry can't fix, such as a bad key or a malformed reply."""
-    if isinstance(error, AITransient):
-        return False
+    if isinstance(error, AITransient):  # checked first since it's a subclass of AIUnavailable
+        return False  # overloaded or a dropped connection is worth another attempt
+    # unknown errors (a crash, a database blip) count as temporary and get retried
     return isinstance(error, AppError | AIUnavailable)
 
 
@@ -83,9 +86,11 @@ async def _keep_lease(
     job_id: int, attempt: int, session_factory: async_sessionmaker[AsyncSession], lease: timedelta
 ) -> None:
     """Keep extending the lease, so only a dead worker's job looks abandoned."""
-    while True:
+    while True:  # until run_job cancels it
+        # renew at half the lease so one missed renewal still leaves a minute of margin
         await asyncio.sleep(lease.total_seconds() / 2)
-        async with session_factory() as session:
+        async with session_factory() as session:  # a short session per renewal
+            # fenced by attempt so this old worker never extends a retry's newer lease
             await JobRepository(session).extend_lease(job_id, attempt, utcnow() + lease)
             await session.commit()
 
@@ -101,7 +106,7 @@ async def run_job(
 
     Every line logged meanwhile names the job, and once it's claimed, its kind and attempt.
     """
-    with log_fields(job_id=job_id):
+    with log_fields(job_id=job_id):  # a contextvar inherited by every task started inside
         await _run_job(job_id, session_factory, handlers, lease, publish_event)
 
 
@@ -112,59 +117,73 @@ async def _run_job(
     lease: timedelta,
     publish_event: PublishEvent,
 ) -> None:
+    # Step 1: claim the job or stop if another worker has it or it's finished
     async with session_factory() as session:
+        # one atomic UPDATE ... RETURNING on queued jobs so of two deliveries one wins
         job: Job | None = await JobRepository(session).claim(job_id, utcnow() + lease)
-        await session.commit()
-        if job is None:
+        await session.commit()  # the claim is visible to other workers right away
+        if job is None:  # a duplicate delivery or a retry that isn't due yet
+            logger.info("job skipped", extra={"reason": "not_claimable"})
             return
 
-        async def report(progress: dict[str, Any]) -> None:
+        async def report(progress: dict[str, Any]) -> None:  # handlers call this for progress
             await publish_event(job_id, JobEvent(status=RUNNING, progress=progress))
 
         context = JobContext(
             job.id, job.user_id, job.payload, session_factory, report, job.attempts
         )
-        kind, attempts = job.kind, job.attempts
-    add_log_fields(kind=kind, attempt=attempts)
+        kind, attempts = job.kind, job.attempts  # plain values stay safe after the session closes
+    # Step 2: tag the logs and tell followers the job started
+    add_log_fields(kind=kind, attempt=attempts)  # every line from here on carries these
+    logger.info("job started")
     await publish_event(job_id, JobEvent(status=RUNNING))
 
+    # Step 3: renew the lease in the background while the handler runs
     keep_lease = asyncio.create_task(_keep_lease(job_id, attempts, session_factory, lease))
-    started = time.perf_counter()
+    started = time.perf_counter()  # monotonic for the duration metric
     try:
+        # Step 4: run the handler for this kind inside one LangSmith trace
         # One trace per attempt, so a job's model calls appear together. The payload's ids, like
         # deck_id or document_id, label it too.
         ids = {
             key: value
             for key, value in context.payload.items()
-            if key.endswith("_id") and isinstance(value, int)
+            if key.endswith("_id") and isinstance(value, int)  # ids only never learner text
         }
         async with labelled_trace(kind, context.user_id, job_id=job_id, attempt=attempts, **ids):
             result = await handlers[kind](context)
     except Exception as error:
+        # Step 5a: on failure retry later if it may pass or fail the job for good
         # The type only: an error's text can include what the learner uploaded.
         logger.warning("job outcome=failed kind=%s type=%s", kind, type(error).__name__)
         async with session_factory() as session:
             jobs = JobRepository(session)
             if attempts < MAX_ATTEMPTS and not _is_permanent(error):
                 event = JobEvent(status=QUEUED)
+                # linear backoff of 30 s then 60 s so a rate limit has time to clear
                 changed = await jobs.requeue(job_id, attempts, utcnow() + RETRY_DELAY * attempts)
-            else:
+            else:  # out of attempts or a retry can't help
                 event = JobEvent(
                     status=FAILED, error=_safe_message(error), result=_failure_details(error)
                 )
                 changed = await jobs.fail(job_id, attempts, event.error, event.result)
             await session.commit()
     else:
+        # Step 5b: on success save the result
         event = JobEvent(status=DONE, result=result)
         async with session_factory() as session:
+            # fenced by attempt so False if the lease was lost and a retry took over
             changed = await JobRepository(session).finish(job_id, attempts, result)
             await session.commit()
     finally:
-        keep_lease.cancel()
-    labels = {"kind": kind, "outcome": _OUTCOMES[event.status]}
+        keep_lease.cancel()  # whatever happened stop renewing
+    # Step 6: record the attempt's outcome and duration for Grafana
+    labels = {"kind": kind, "outcome": _OUTCOMES[event.status]}  # done, retried or failed
     JOB_ATTEMPTS.add(1, labels)
     JOB_DURATION.record(time.perf_counter() - started, labels)
+    logger.info("job ended", extra={"outcome": labels["outcome"], "applied": changed})
 
+    # Step 7: tell followers only if this worker's write applied
     # Only after the commit, so followers never hear of a status that isn't saved yet.
-    if changed:
+    if changed:  # a worker that lost its lease stays quiet and the retry speaks instead
         await publish_event(job_id, event)

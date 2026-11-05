@@ -4,7 +4,7 @@
  * AI-Assisted Activities:
  *   Utility function development
  *   Documentation
- * Human role: requirements (F4 in code/plans/FINALIZE_ITERATION_2_PLAN.md), direction,
+ * Human role: requirements, direction,
  * and review by Nurzat Mukhamedali.
  */
 
