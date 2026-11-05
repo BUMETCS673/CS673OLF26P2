@@ -67,12 +67,13 @@ class TopicEvidence(Evidence):
 
     def judge_blocks(self) -> list[str]:
         return [
-            text_block("topic", self.topic),
+            text_block("topic", self.topic),  # escaped since the learner wrote it
+            # another learner's upload never reaches the judge and its label can't be faked
             *(text_block("reference", text) for text in self.reference if not is_unverified(text)),
         ]
 
     def with_found(self, found: Sequence[str]) -> Evidence:
-        return replace(self, reference=found)
+        return replace(self, reference=found)  # a new frozen copy never a mutation
 
 
 @dataclass(frozen=True)
@@ -83,6 +84,7 @@ class DocumentEvidence(Evidence):
     text: str
 
     def judge_blocks(self) -> list[str]:
+        # rule 2 holds every card to what this <source> text states
         return [text_block("topic", self.topic), text_block("source", self.text)]
 
 
@@ -98,13 +100,15 @@ def _prompt(
     candidates: Sequence[CardDraft], evidence: Evidence, existing: Sequence[CardDraft]
 ) -> list[SystemMessage | HumanMessage]:
     body = [
-        *evidence.judge_blocks(),
-        block("existing_cards", existing_json(existing)),
+        *evidence.judge_blocks(),  # topic, source or references depending on the mode
+        block("existing_cards", existing_json(existing)),  # already escaped inside and capped
         json_block(
             "candidates",
+            # explicit indexes so each verdict names its card instead of relying on order
             [{"index": index, **card.model_dump()} for index, card in enumerate(candidates)],
         ),
     ]
+    # rules in the system message material in the human one
     return [SystemMessage(JUDGE_RULES), HumanMessage("\n".join(body))]
 
 
@@ -121,18 +125,20 @@ async def judge_cards(
     Failures are logged rather than raised so the cards aren't lost.
     `raise_transient` lets a graph node's retry policy see transient failures.
     """
+    # Step 1: ask for one verdict per candidate as structured output
     reply = await structured_reply_or_none(
         model,
         Verdicts,
         _prompt(candidates, evidence, existing),
-        "judge",
+        "judge",  # the label in its failure log line
         raise_transient=raise_transient,
     )
-    if reply is None:
+    if reply is None:  # no usable answer so the caller marks the batch "skipped"
         return {}
 
+    # Step 2: index the verdicts keeping the first for any repeated index
     by_index: dict[int, Verdict] = {}
     for verdict in reply.verdicts:
         # The first verdict counts, if the model repeats an index.
         by_index.setdefault(verdict.index, verdict)
-    return by_index
+    return by_index  # the card graph fails any candidate left without a verdict

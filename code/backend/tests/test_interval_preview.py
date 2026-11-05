@@ -5,15 +5,14 @@ The backend works these out with the real scheduler and sends them as `intervals
 
     "intervals": {"again": 60, "hard": 600, "good": 86400, "easy": 345600}
 
-The numbers below are the reference table in
-code/plans/FINALIZE_ITERATION_2_PLAN.md ("Study cards gain `intervals` (B3)").
+The numbers below are the reference table for study cards' `intervals` (B3).
 """
 
 # AI Utilization: 90%
 # AI Tools Used: Claude
 # AI-Assisted Activities:
-#   - Unit test creation (from the plan's acceptance examples)
-# Reviewed, run, and checked against the plan's reference table by Von.
+#   - Unit test creation
+# Reviewed, run, and checked against the reference table by Von.
 
 from datetime import UTC, datetime, timedelta
 

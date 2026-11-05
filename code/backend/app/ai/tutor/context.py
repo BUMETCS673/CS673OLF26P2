@@ -10,11 +10,11 @@ from langchain_core.language_models import BaseChatModel
 from app.ai.cards.checks import normalized_fronts
 from app.ai.cards.existing import FindExisting, no_existing_cards
 
-_WORD = re.compile(r"\w+")
+_WORD = re.compile(r"\w+")  # Unicode-aware so accented words count whole
 
 
 def words(text: str) -> set[str]:
-    return set(_WORD.findall(text.lower()))
+    return set(_WORD.findall(text.lower()))  # a set so overlap is one intersection
 
 
 async def no_similar_cards(_query: str) -> list[dict]:
@@ -39,4 +39,4 @@ class TutorContext:
 
     @cached_property
     def taken_fronts(self) -> set[str]:
-        return normalized_fronts(card["front"] for card in self.cards)
+        return normalized_fronts(card["front"] for card in self.cards)  # for proposal checks

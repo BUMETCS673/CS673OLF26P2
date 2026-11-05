@@ -4,7 +4,7 @@
  * AI Tools Used: Claude
  * AI-Assisted Activities:
  *   - UI component development
- * Human role: checked against F3 in code/plans/ITERATION_3_PLAN.md, ran the tests, and
+ * Human role: checked against F3, ran the tests, and
  * opened the PR, by Osasenaga Von Okunbor.
  */
 
@@ -14,7 +14,7 @@
  * AI Tools Used: Devin (Cognition AI)
  * AI-Assisted Activities:
  *   UI component development
- * Human role: requirements (F4 in code/plans/FINALIZE_ITERATION_2_PLAN.md), direction,
+ * Human role: requirements, direction,
  * and review by Nurzat Mukhamedali.
  */
 

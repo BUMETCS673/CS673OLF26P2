@@ -33,6 +33,7 @@ def evenly_spaced[T](items: Sequence[T], limit: int) -> list[T]:
     """At most `limit` items, spread across `items` so that the end is represented too."""
     if len(items) <= limit:
         return list(items)
+    # integer steps across the list so the first item is always in and the last part too
     return [items[position * len(items) // limit] for position in range(limit)]
 
 
@@ -40,7 +41,8 @@ def clean_topics(topics: Sequence[str]) -> list[str]:
     """Usable topics, each once. Headings and a model's reply are both untrusted."""
     cleaned, seen = [], set()
     for topic in topics:
-        text = " ".join(topic.split())
+        text = " ".join(topic.split())  # collapses every run of whitespace newlines included
+        # casefold is a stronger lower() so "Straße" and "STRASSE" count as one topic
         if text and len(text) <= TOPIC_MAX_LENGTH and text.casefold() not in seen:
             seen.add(text.casefold())
             cleaned.append(text)
@@ -51,11 +53,13 @@ async def suggest_topics(
     headings: Sequence[str], chunks: Sequence[str], load_model: Callable[[], BaseChatModel]
 ) -> list[str]:
     """Topics to offer. `chunks` are the file's texts, in order. Headings cost no model call."""
+    # Step 1: use the file's own headings when there are enough at no model cost
     from_headings = clean_topics(headings)
     if len(from_headings) >= MIN_HEADINGS:
         return evenly_spaced(from_headings, MAX_TOPICS)
-    if not chunks:
+    if not chunks:  # nothing passed screening so nothing to ask about
         return []
+    # Step 2: otherwise ask the model showing 12 excerpts spread across the file
     excerpts = evenly_spaced(chunks, SAMPLE_CHUNKS)
     prompt = [
         SystemMessage(TOPIC_RULES),
@@ -66,4 +70,4 @@ async def suggest_topics(
     except AIUnavailable:
         return []
     reply = await structured_reply_or_none(model, Topics, prompt, "ai_topics")
-    return clean_topics(reply.topics)[:MAX_TOPICS] if reply else []
+    return clean_topics(reply.topics)[:MAX_TOPICS] if reply else []  # a failure offers none

@@ -1,7 +1,6 @@
 """What Gemini receives: the rules, the deck, and the mode's body (B1).
 
-The text is word for word from "The prompt: what Gemini receives" in
-code/plans/ITERATION_3_PLAN.md. `{count}` and the deck's fields are filled in first, and the
+`{count}` and the deck's fields are filled in first, and the
 learner's text is joined in last, never through `str.format`, so braces the learner typed are
 never read as placeholders.
 

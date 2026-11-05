@@ -36,24 +36,27 @@ async def same_facts(
 ) -> list[bool]:
     """Returns True for each pair the model names as the same fact."""
     try:
-        model = load_model()
+        model = load_model()  # one model shared by every batch
     except AIUnavailable:
-        return [False] * len(pairs)
+        return [False] * len(pairs)  # every pair counts as different the safe answer
 
     async def check(batch: tuple[int, ...]) -> list[int]:
         """Returns the positions named as the same fact, or none if the call fails."""
-        items = [
+        items = [  # numbered within the batch so each answer names its pair
             {"index": index, "first": pairs[position][0], "second": pairs[position][1]}
             for index, position in enumerate(batch)
         ]
         prompt = [SystemMessage(SAME_FACT_RULES), HumanMessage(json_block("cards", items))]
         reply = await structured_reply_or_none(model, SameFacts, prompt, "same_fact")
-        if reply is None:
+        if reply is None:  # a failed call counts every pair in it as different
             return []
+        # set drops repeated indexes and the range check drops made-up ones
         return [batch[index] for index in set(reply.same) if 0 <= index < len(batch)]
 
+    # Step 1: check every batch of 25 pairs concurrently
     batches = batched(range(len(pairs)), BATCH_SIZE)
-    results = await asyncio.gather(*(check(batch) for batch in batches))
-    same = {position for result in results for position in result}
+    results = await asyncio.gather(*(check(batch) for batch in batches))  # rate limiter spaces them
+    # Step 2: turn the named positions into one answer per pair in order
+    same = {position for result in results for position in result}  # a set for O(1) lookups
     logger.info("same_fact pairs=%d same=%d", len(pairs), len(same))
     return [position in same for position in range(len(pairs))]

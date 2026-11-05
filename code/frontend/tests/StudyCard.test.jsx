@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 //
-// F2: the card in a study session. One test per acceptance example under F2 in
-// code/plans/FINALIZE_ITERATION_2_PLAN.md, plus the state badge.
+// F2: the card in a study session. One test per acceptance example, plus the state badge.
 //
 // AI Utilization: ~100% of this file's code
 // AI Tools Used: Claude Code (Claude Opus 5.5)

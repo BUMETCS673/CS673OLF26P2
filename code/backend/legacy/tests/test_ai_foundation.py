@@ -1,6 +1,6 @@
 """Step 0a's own tests: what Iteration 3's AI tasks build on.
 
-One test per acceptance example under Step 0a in code/plans/ITERATION_3_PLAN.md, plus the
+One test per acceptance example under Step 0a, plus the
 pieces of the C6 contract that 0a writes in full. B1 to B4 test their own work in their
 own files.
 
@@ -12,7 +12,7 @@ when B1 and B2 merge, and this file shouldn't break when they do.
 # AI Utilization: ~100% of this file's code
 # AI Tools Used: Claude Code (Claude Opus 5.5)
 # AI-Assisted Activities:
-#   Unit test creation (from the plan's acceptance examples)
+#   Unit test creation
 # Human role: plan approval, code review, and hands-on testing by Miles Cameron.
 
 import pytest

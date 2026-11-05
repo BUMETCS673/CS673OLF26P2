@@ -12,7 +12,7 @@ import { useMaterialUpload } from '../../hooks/useMaterialUpload.js';
 import FieldMessage from './FieldMessage.jsx';
 import MaterialFields from './MaterialFields.jsx';
 
-// The server's limits (C2 in code/plans/ITERATION_3_PLAN.md). Each check here mirrors one
+// The server's limits. Each check here mirrors one
 // there, so a mistake is caught before it spends any of the free quota.
 const MAX_CARDS = 25;
 const TOPIC_MAX = 2000;

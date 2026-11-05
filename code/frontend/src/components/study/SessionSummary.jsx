@@ -4,7 +4,7 @@
  * AI-Assisted Activities:
  *   UI component development
  *   Documentation
- * Human role: requirements (F3 in code/plans/FINALIZE_ITERATION_2_PLAN.md), direction,
+ * Human role: requirements, direction,
  * and review by Duc Anh Nguyen.
  */
 
@@ -27,7 +27,7 @@ const label = (rating) => rating[0].toUpperCase() + rating.slice(1);
  * Tests can rely on: the heading "Session complete" when any count is above 0, otherwise
  * "Nothing to study right now"; a "Back to deck" button that calls onExit; and, when
  * nextLearningDue is set, a "Study more" button that calls onStudyMore. F1's tests depend
- * on that. See "The study components" in code/plans/FINALIZE_ITERATION_2_PLAN.md.
+ * on that.
  */
 export default function SessionSummary({ counts, nextLearningDue, now, onStudyMore, onExit }) {
   const answered = RATINGS.reduce((total, rating) => total + counts[rating], 0);

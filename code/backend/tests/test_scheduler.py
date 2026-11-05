@@ -1,8 +1,8 @@
 """Tests for the scheduling rules (Lab 3, Story 1).
 
 Every expected number here is what Anki's default scheduler gives for the same card and
-button, checked against Anki's source (rslib/src/scheduler/states/). The rows follow the
-acceptance examples in code/plans/LAB_3_PLAN.md, Story 1.
+button, checked against Anki's source (rslib/src/scheduler/states/). The rows follow
+Story 1's acceptance examples.
 
 `answer_card()` is pure, so these are plain asserts: no database, no app, no clock.
 """

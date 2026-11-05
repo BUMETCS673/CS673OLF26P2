@@ -11,5 +11,6 @@ from langsmith import trace
 
 def labelled_trace(name: str, user_id: int, **ids: Any) -> trace:
     """One root per piece of AI work, tagged with `name`. Use with `async with`."""
-    labels = {key: value for key, value in ids.items() if value is not None}
+    labels = {key: value for key, value in ids.items() if value is not None}  # drop empty ids
+    # tags filter runs in the LangSmith UI and metadata makes them searchable by id
     return trace(name, tags=[name], metadata={"user_id": user_id, **labels})

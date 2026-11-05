@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
 //
-// F6 (Iteration 3): the typed-answer box. What C9 in code/plans/ITERATION_3_PLAN.md says
-// about TypedAnswer, before and after grading.
+// F6 (Iteration 3): the typed-answer box. What TypedAnswer promises,
+// before and after grading.
 //
 // AI Utilization: ~100% of this file's code
 // AI Tools Used: Devin (Cognition AI)
 // AI-Assisted Activities:
 //   Unit test creation
-// Human role: acceptance examples (F6 in the plan), direction, and review by Nurzat Mukhamedali.
+// Human role: acceptance examples, direction, and review by Nurzat Mukhamedali.
 
 import { afterEach, expect, test, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';

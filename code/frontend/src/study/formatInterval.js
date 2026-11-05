@@ -10,7 +10,7 @@
 /**
  * The short label under a rating button: "<1m", "6m", "1d", "1.5mo", "100y" (Iteration 2,
  * Step 0b). The backend sends intervals in seconds; this only formats them, and never works
- * one out (rule 6 in code/plans/LAB_3_PLAN.md).
+ * one out.
  *
  * Each unit is rounded, and a value that rounds up to the next unit moves up to it: 59.5
  * minutes is "1h", not "60m". A month is 30 days and a year 365. Months and years keep one

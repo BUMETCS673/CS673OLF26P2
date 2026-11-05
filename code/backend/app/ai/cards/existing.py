@@ -42,15 +42,17 @@ def existing_card_finder(
 
     With `cache`, an accepted card's embedding job reuses the vector made here.
     """
+    # Step 1: set up the embedder once outside the closure so each call reuses it
     model = model_name(Role.EMBEDDER, settings)
     try:
         embeddings = load_embeddings(settings, usage, learner_waiting=learner_waiting)
-    except AIUnavailable:
+    except AIUnavailable:  # without an embedder the newest cards stand in for every search
         embeddings = None
     if embeddings is not None and cache is not None:
-        embeddings = with_embedding_cache(embeddings, cache, model)
+        embeddings = with_embedding_cache(embeddings, cache, model)  # shared with the embed job
 
     async def find_existing(drafts: Sequence[CardDraft]) -> Sequence[CardDraft]:
+        # Step 1: embed the candidates in one batch call before any connection opens
         vectors = None
         if embeddings is not None:
             try:
@@ -61,13 +63,15 @@ def existing_card_finder(
                     )
             except (AIRateLimited, AIUnavailable):
                 pass  # without vectors, the newest cards stand in below
-        async with open_cards() as cards:
+        # Step 2: fetch the deck's likely repeats or its newest cards without vectors
+        async with open_cards() as cards:  # a short session opened only now after the model call
             if vectors is None:
                 rows = await cards.newest_in_deck(deck_id, FALLBACK_CARDS)
             else:
+                # one query for each candidate's 3 nearest cards plus the 10 newest unembedded
                 rows = await cards.likely_repeats(
                     deck_id, vectors, model, NEAREST_PER_CARD, NEWEST_UNEMBEDDED
                 )
-        return [CardDraft(front=row.front, back=row.back) for row in rows]
+        return [CardDraft(front=row.front, back=row.back) for row in rows]  # text only
 
-    return find_existing
+    return find_existing  # a closure over deck_id and the embedder

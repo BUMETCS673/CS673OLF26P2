@@ -4,13 +4,12 @@
  * AI-Assisted Activities:
  *   Answer-checking logic
  *   Documentation
- * Human role: requirements (F4 in code/plans/ITERATION_3_PLAN.md), direction, and review by
+ * Human role: requirements, direction, and review by
  * Nurzat Mukhamedali.
  */
 
 /**
- * The typed-answer check (Iteration 3, F4), as C8 in code/plans/ITERATION_3_PLAN.md
- * describes it. Pure (rule 9): no React and no API. normalize_front() in
+ * The typed-answer check (Iteration 3, F4). Pure (rule 9): no React and no API. normalize_front() in
  * backend/app/ai/cleanup.py implements the same rule (rule 22) -- change both together.
  */
 

@@ -1,14 +1,13 @@
 // @vitest-environment jsdom
 //
-// F3: the session summary. One test per acceptance example under F3 in
-// code/plans/FINALIZE_ITERATION_2_PLAN.md, plus the Study more button F1's tests rely on
+// F3: the session summary. One test per acceptance example, plus the Study more button F1's tests rely on
 // and the edge cases the session reducer can produce.
 //
 // AI Utilization: ~100% of this file's code
 // AI Tools Used: Claude Code (Claude Opus 5.5)
 // AI-Assisted Activities:
 //   Unit test creation
-// Human role: acceptance examples (F3 in the plan), direction, and review by Duc Anh Nguyen.
+// Human role: acceptance examples, direction, and review by Duc Anh Nguyen.
 
 import { afterEach, expect, test, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';

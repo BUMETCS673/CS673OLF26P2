@@ -13,10 +13,11 @@ from langchain_google_genai.chat_models import GoogleAPIError, GoogleRateLimitEr
 
 from app.ai.rate_limits import ModelBusy
 
-RATE_LIMITED_STATUS = 429
-OVERLOADED_STATUS = 503
+RATE_LIMITED_STATUS = 429  # this model's quota is used up
+OVERLOADED_STATUS = 503  # Google is short of capacity for this model right now
+# frozenset gives fast `in` and can't be changed
 SERVER_RETRIABLE_STATUS = frozenset({500, 502, 504})
-CLIENT_RETRIABLE_STATUS = frozenset({408})
+CLIENT_RETRIABLE_STATUS = frozenset({408})  # a request timeout so the same call may still work
 
 
 class Failure(Enum):
@@ -47,11 +48,11 @@ class Failure(Enum):
 
 def status_of(error: BaseException) -> int | None:
     """The HTTP status a vendor's error carries, if any."""
-    if isinstance(error, errors.APIError):
+    if isinstance(error, errors.APIError):  # google-genai's own error carries the HTTP code
         return error.code
     # Embeddings wrap the SDK's error, so its status is on the cause.
     if isinstance(error, GoogleGenerativeAIError):
-        return getattr(error.__cause__, "code", None)
+        return getattr(error.__cause__, "code", None)  # None if the cause has no code
     return None
 
 
@@ -60,29 +61,32 @@ def _from_status(status: int) -> Failure:
         return Failure.RATE_LIMITED
     if status == OVERLOADED_STATUS:
         return Failure.OVERLOADED
-    if status in SERVER_RETRIABLE_STATUS:
+    if status in SERVER_RETRIABLE_STATUS:  # 504 here is Google giving up at our deadline
         return Failure.SERVER_ERROR
     if status in CLIENT_RETRIABLE_STATUS:
         return Failure.TRANSIENT
-    return Failure.PERMANENT
+    return Failure.PERMANENT  # 400, 401, 403, 404 and the rest mean the request itself is wrong
 
 
 def classify(error: BaseException) -> Failure | None:
     """What a vendor's or our limiter's error means. None for an error that isn't theirs."""
-    if isinstance(error, ModelBusy):
+    # Step 1: errors with a known type checked before reading any status
+    if isinstance(error, ModelBusy):  # our limiter refused so no call went out
         return Failure.BUSY
-    if isinstance(error, GoogleRateLimitError):
+    if isinstance(error, GoogleRateLimitError):  # LangChain's own 429 type
         return Failure.RATE_LIMITED
+    # Step 2: anything with an HTTP status by that status
     status = status_of(error)
     if status is not None:
         return _from_status(status)
-    if isinstance(error, GoogleGenerativeAIError):
+    # Step 3: what's left by type
+    if isinstance(error, GoogleGenerativeAIError):  # a vendor error with no status
         return Failure.PERMANENT
-    if isinstance(error, httpx.NetworkError | httpx.RemoteProtocolError):
+    if isinstance(error, httpx.NetworkError | httpx.RemoteProtocolError):  # connection dropped
         return Failure.TRANSIENT
-    if isinstance(error, httpx.HTTPError):
+    if isinstance(error, httpx.HTTPError):  # includes our own timeout
         return Failure.PERMANENT
-    return None
+    return None  # not a vendor error so ai_errors re-raises it unchanged
 
 
 # LangChain's fallbacks take exception types, not a check. A chat model raises these for our

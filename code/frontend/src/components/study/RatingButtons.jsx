@@ -11,7 +11,7 @@
  * AI Tools Used: Devin (Cognition AI)
  * AI-Assisted Activities:
  *   UI component development
- * Human role: requirements (F5 in code/plans/ITERATION_3_PLAN.md), direction, and review by
+ * Human role: requirements, direction, and review by
  * Nurzat Mukhamedali.
  */
 
@@ -22,8 +22,8 @@ const label = (rating) => rating[0].toUpperCase() + rating.slice(1);
 
 /**
  * The four rating buttons (F2). Each one shows when the card would come back if you chose
- * it, from the intervals the backend sends (B3); the frontend only formats them (rule 6
- * in code/plans/LAB_3_PLAN.md). Each button's key, 1 to 4, is shown as a hint; F1 handles
+ * it, from the intervals the backend sends (B3); the frontend only formats them.
+ * Each button's key, 1 to 4, is shown as a hint; F1 handles
  * the keys themselves.
  *
  * props:
@@ -39,7 +39,7 @@ const label = (rating) => rating[0].toUpperCase() + rating.slice(1);
  * Tests can rely on: four <button>s in RATINGS order, each accessible name starting with
  * Again, Hard, Good, or Easy ("Good, 1mo" when there's an interval); a click calls onRate
  * once with the lowercase rating; and `disabled` disables all four. F1's tests depend on
- * that. See "The study components" in code/plans/FINALIZE_ITERATION_2_PLAN.md.
+ * that.
  */
 export default function RatingButtons({ intervals, disabled, onRate, suggested }) {
   return <div className="rating-buttons" role="group" aria-label="Rate this card">

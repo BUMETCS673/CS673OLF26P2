@@ -10,8 +10,7 @@ import { formatInterval } from '../src/study/formatInterval.js';
 
 const DAY = 24 * 60 * 60;
 
-// One test per row of the table in "Frontend contracts" in
-// code/plans/FINALIZE_ITERATION_2_PLAN.md.
+// One test per row of the interval formatting table.
 
 test('under a minute is <1m: 0 and 59 seconds', () => {
   assert.equal(formatInterval(0), '<1m');
