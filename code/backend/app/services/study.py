@@ -1,5 +1,6 @@
 """A study session: which cards are due, and answering one."""
 
+import logging
 from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,13 +16,16 @@ from app.services.cards import CARD_NOT_FOUND
 from app.services.problem_cards import ProblemCardService
 from app.services.trust import grant_if_earned
 
+logger = logging.getLogger(__name__)
+
 
 def _can_answer(schedule: CardSchedule, now: datetime) -> bool:
     """New cards are always due, and learning cards can be answered up to LEARN_AHEAD early."""
     if schedule.state is CardState.NEW:
-        return True
+        return True  # new cards have no due time yet
     if schedule.state is CardState.REVIEW:
-        return schedule.due_at <= now
+        return schedule.due_at <= now  # review cards only once due with no studying ahead
+    # learning and relearning up to 20 minutes early so a session can finish its steps
     return schedule.due_at <= now + LEARN_AHEAD
 
 
@@ -34,38 +38,65 @@ class StudyService:
         knowledge: KnowledgeRepository,
         users: UserRepository,
     ):
-        self.session = session
+        self.session = session  # one request's transaction so nothing saves until commit
         self.cards = cards
         self.problem_cards = problem_cards
         self.knowledge = knowledge
         self.users = users
 
     async def due_cards(self, deck: Deck) -> DueCards:
-        now = utcnow()
-        due = await self.cards.due_cards(deck.id, now)
+        # Step 1: read the deck's due cards grouped as learning, review and new
+        now = utcnow()  # one clock reading for the query and the interval previews
+        due = await self.cards.due_cards(deck.id, now)  # grouped as learning, review and new
+        logger.info(
+            "due cards read",
+            extra={"deck_id": deck.id, **{name: len(cards) for name, cards in due.items()}},
+        )
+        # Step 2: add each card's next intervals for the rating buttons
         return DueCards(
             **{
+                # intervals in seconds per rating shown under each button
                 name: [StudyCardRead.build(card, now) for card in cards]
                 for name, cards in due.items()
             }
-        )
+        )  # 200 with the study page's queue
 
     async def review(self, card_id: int, user: User, body: ReviewRequest) -> StudyCardRead:
-        # Locked, so a double click can't answer the same card twice.
+        # Step 1: load the card locked so a double click can't answer it twice
+        # SELECT ... FOR UPDATE makes a second answer wait then see the new schedule
         card = await self.cards.get_owned(card_id, user.id, lock=True)
-        if card is None:
-            raise NotFound(CARD_NOT_FOUND)
+        if card is None:  # missing or someone else's card
+            raise NotFound(CARD_NOT_FOUND)  # 404 never 403 so it doesn't reveal the card exists
 
-        # One clock reading, so the due check and the scheduler agree on "now".
+        # Step 2: refuse a card that isn't due One clock reading so this and the scheduler
+        # agree on "now"
         now = utcnow()
-        schedule = card.schedule
+        schedule = card.schedule  # state due time interval ease step lapses as one value
         if not _can_answer(schedule, now):
-            raise Conflict("Card isn't due yet")
+            logger.info("review refused", extra={"card_id": card.id, "reason": "not_due"})
+            raise Conflict("Card isn't due yet")  # 409 to the client
 
+        # Step 3: schedule the card's next review from the rating
+        before = schedule.state
+        # Anki's algorithm pure with no I/O
         card.schedule = answer_card(schedule, body.rating, now)
         card.last_reviewed_at = now
-        await self.problem_cards.queue_if_flagged(card, user.id)
-        if card.state == CardState.REVIEW.value:
+
+        # Step 4: queue a problem card review if this lapse took the card to its limit
+        await self.problem_cards.queue_if_flagged(card, user.id)  # same transaction as the answer
+
+        # Step 5: a card that reached review may earn the learner trust so their cards can
+        # join what other learners search
+        if card.state == CardState.REVIEW.value:  # only this answer can finish a deck
             await grant_if_earned(user, card.deck_id, now, self.users, self.knowledge)
-        await self.session.commit()
-        return StudyCardRead.build(card, now)
+        await self.session.commit()  # answer, review job and trust saved together
+        logger.info(
+            "card reviewed",
+            extra={
+                "card_id": card.id,
+                "rating": str(body.rating),
+                "from_state": str(before.value),
+                "to_state": card.state,
+            },
+        )
+        return StudyCardRead.build(card, now)  # 200 with the card and its next intervals

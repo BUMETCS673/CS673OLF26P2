@@ -4,7 +4,7 @@
  * AI-Assisted Activities:
  *   State management (the session reducer), written test-first
  *   Documentation
- * Human role: checked every Given/When/Then row of Story 3 in code/plans/LAB_3_PLAN.md had a
+ * Human role: checked every Given/When/Then row of Story 3 had a
  * test before opening the PR, by Duc Anh Nguyen.
  *
  * Iteration 3, F5: the `answer` field.
@@ -12,7 +12,7 @@
  * AI Tools Used: Devin (Cognition AI)
  * AI-Assisted Activities:
  *   State management
- * Human role: requirements (F5 in code/plans/ITERATION_3_PLAN.md), direction, and review by
+ * Human role: requirements, direction, and review by
  * Nurzat Mukhamedali.
  */
 
@@ -95,8 +95,8 @@ export function initSession({ due, now }) {
 
 /**
  * Handles `reveal`, `answered`, and `skipped`. Never mutates `state`. In typed mode, `reveal`
- * carries the graded answer, { typed, verdict, suggestedRating } (C9 in
- * code/plans/ITERATION_3_PLAN.md); in flashcard mode it carries none, and `answer` is null.
+ * carries the graded answer, { typed, verdict, suggestedRating };
+ * in flashcard mode it carries none, and `answer` is null.
  */
 export function sessionReducer(state, action) {
   switch (action.type) {

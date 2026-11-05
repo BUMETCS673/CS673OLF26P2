@@ -12,7 +12,7 @@ import { pathId as id } from './request.js';
 // Study mode's two endpoints: Lab 3's due cards (story 2) and saving a review (story 5).
 // Built like createDecksApi, so it can be tested without fetch: request(path,
 // { method, body }) must return parsed JSON and reject with an Error carrying the API's
-// code and message. See "Frontend contracts" in code/plans/FINALIZE_ITERATION_2_PLAN.md.
+// code and message.
 export function createStudyApi(request) {
   return {
     getDueCards: (deckId) => request(`/api/decks/${id(deckId)}/due`),

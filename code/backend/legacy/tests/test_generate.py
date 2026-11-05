@@ -1,5 +1,5 @@
-"""B3's tests for POST /api/decks/<id>/generate: one per acceptance example under B3 in
-code/plans/ITERATION_3_PLAN.md, plus the log line and a few edges of C2.
+"""B3's tests for POST /api/decks/<id>/generate: one per acceptance example under B3,
+plus the log line and a few edges of C2.
 
 `TestConfig` uses the stand-in. The failure rows, and the ones that look at the `Prompt`,
 patch `app.services.generation.get_provider`.
@@ -8,7 +8,7 @@ patch `app.services.generation.get_provider`.
 # AI Utilization: ~100% of this file's code
 # AI Tools Used: Claude Code (Claude Opus 5.5)
 # AI-Assisted Activities:
-#   Unit test creation (from the plan's acceptance examples)
+#   Unit test creation
 # Human role: plan review, code review, and CI verification by Duc Anh Nguyen.
 
 import logging

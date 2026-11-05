@@ -1,11 +1,11 @@
-// F4: normalizeAnswer() and checkTypedAnswer(). One test per row of C8's examples table in
-// code/plans/ITERATION_3_PLAN.md, plus one for each normalization step on its own.
+// F4: normalizeAnswer() and checkTypedAnswer(). One test per row of the examples table,
+// plus one for each normalization step on its own.
 //
 // AI Utilization: ~100% of this file's code
 // AI Tools Used: Devin (Cognition AI)
 // AI-Assisted Activities:
 //   Unit test creation
-// Human role: acceptance examples (F4 in the plan), direction, and review by Nurzat Mukhamedali.
+// Human role: acceptance examples, direction, and review by Nurzat Mukhamedali.
 
 import { expect, test } from 'vitest';
 import { checkTypedAnswer, normalizeAnswer } from '../src/study/typedAnswer.js';

@@ -1,11 +1,11 @@
-// F4: describeSchedule() and describeDueCounts(). One test per row of their tables under
-// "Frontend contracts" in code/plans/FINALIZE_ITERATION_2_PLAN.md.
+// F4: describeSchedule() and describeDueCounts(). One test per row of their
+// tables.
 //
 // AI Utilization: ~100% of this file's code
 // AI Tools Used: Devin (Cognition AI)
 // AI-Assisted Activities:
 //   Unit test creation
-// Human role: acceptance examples (F4 in the plan), direction, and review by Nurzat Mukhamedali.
+// Human role: acceptance examples, direction, and review by Nurzat Mukhamedali.
 
 import { expect, test } from 'vitest';
 import { describeDueCounts, describeSchedule } from '../src/study/describeSchedule.js';

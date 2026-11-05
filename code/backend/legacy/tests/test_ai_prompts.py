@@ -1,12 +1,12 @@
-"""B1's tests for `build_prompt()`: one per acceptance example under B1 in
-code/plans/ITERATION_3_PLAN.md, plus the escaping checks, and the purity check for both of
+"""B1's tests for `build_prompt()`: one per acceptance example under B1,
+plus the escaping checks, and the purity check for both of
 B1's modules.
 """
 
 # AI Utilization: ~100% of this file's code
 # AI Tools Used: Claude Code (Claude Opus 5.5)
 # AI-Assisted Activities:
-#   Unit test creation (from the plan's acceptance examples)
+#   Unit test creation
 # Human role: plan review, code review, and CI verification by Duc Anh Nguyen.
 
 import ast

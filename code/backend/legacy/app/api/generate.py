@@ -11,7 +11,7 @@ url_prefix:
     POST /api/decks/<deck_id>/suggestions
       -> 200 {topics}      404, 429 rate_limited, 503 ai_unavailable
 
-Contract C2 in code/plans/ITERATION_3_PLAN.md, which also fixes the order of the checks:
+Contract C2, which also fixes the order of the checks:
 ownership, the JSON body, the fields top to bottom, the daily caps, then the provider.
 The logic is in `app/services/generation.py`. A request that fails at the provider saves no batch,
 so it doesn't use the learner's cap, but its calls still count toward the model's limit.

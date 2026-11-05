@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 //
-// F1: the study page. One test per acceptance example under F1 in
-// code/plans/FINALIZE_ITERATION_2_PLAN.md, plus the keyboard and error cases around them.
+// F1: the study page. One test per acceptance example, plus the keyboard and error cases around them.
 // StudyView takes a fake `api` and a fixed clock (rule 12), so nothing here mocks fetch.
 // The tests only rely on what "The study components" table promises about StudyCard,
 // RatingButtons and SessionSummary, so they pass with the 0b stubs and with F2 and F3.
@@ -10,7 +9,7 @@
 // AI Tools Used: Claude Code (Claude Opus 5.5)
 // AI-Assisted Activities:
 //   Unit test creation
-// Human role: acceptance examples (F1 in the plan), direction, and review by Duc Anh Nguyen.
+// Human role: acceptance examples, direction, and review by Duc Anh Nguyen.
 
 import { afterEach, expect, test, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
@@ -285,14 +284,14 @@ test('Study more on the summary fetches again and starts a new session', async (
   expect(screen.getByRole('button', { name: 'Show answer' })).toBeTruthy();
 });
 
-// F6 (Iteration 3): typed mode on the study page. One test per acceptance example under F6
-// in code/plans/ITERATION_3_PLAN.md, with the same fake `api` and fixed clock as above.
+// F6 (Iteration 3): typed mode on the study page. One test per acceptance example,
+// with the same fake `api` and fixed clock as above.
 //
 // AI Utilization: ~100% of the tests below
 // AI Tools Used: Devin (Cognition AI)
 // AI-Assisted Activities:
 //   Unit test creation
-// Human role: acceptance examples (F6 in the plan), direction, and review by Nurzat Mukhamedali.
+// Human role: acceptance examples, direction, and review by Nurzat Mukhamedali.
 
 const mode = (name) => screen.getByRole('radio', { name });
 const answerBox = () => screen.queryByLabelText('Your answer');

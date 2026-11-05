@@ -1,5 +1,7 @@
 """Creating, reading, changing and deleting cards."""
 
+import logging
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import BudgetExceeded, NotFound
@@ -12,6 +14,8 @@ from app.repositories.users import UserRepository
 from app.schemas.cards import CardCreate, CardUpdate
 from app.services.budget import BUDGET_WINDOW
 from app.services.trust import revoke_if_reported
+
+logger = logging.getLogger(__name__)
 
 CARD_NOT_FOUND = "Card not found"
 # A report hides shared chunks at once, so this limits how much one account can hide.
@@ -28,7 +32,7 @@ class CardService:
         generations: GenerationRepository,
         users: UserRepository,
     ):
-        self.session = session
+        self.session = session  # one request's transaction so nothing saves until commit
         self.cards = cards
         self.jobs = jobs
         self.knowledge = knowledge
@@ -37,68 +41,102 @@ class CardService:
 
     async def _queue_embedding(self, card: Card, user: User) -> None:
         """Only for searching its own deck: a learner's own text never joins the knowledge base."""
+        # an outbox row in this transaction so the worker can't miss it after commit
         await self.jobs.queue_card_embedding(user.id, [card.id], share=False)
 
     async def _owned(self, card_id: int, user: User) -> Card:
-        card = await self.cards.get_owned(card_id, user.id)
-        if card is None:
-            raise NotFound(CARD_NOT_FOUND)
+        card = await self.cards.get_owned(card_id, user.id)  # joins the deck to check the owner
+        if card is None:  # missing or someone else's card
+            raise NotFound(CARD_NOT_FOUND)  # 404 never 403 so it doesn't reveal the card exists
         return card
 
     async def list_cards(self, deck: Deck) -> list[Card]:
-        return await self.cards.list_for_deck(deck.id)
+        return await self.cards.list_for_deck(deck.id)  # ownership already checked by OwnedDeck
 
     async def create(self, deck: Deck, user: User, body: CardCreate) -> Card:
+        # Step 1: save the card
         card = await self.cards.add(Card(deck_id=deck.id, front=body.front, back=body.back))
+        # Step 2: queue its embedding in the same commit so the job can't be lost
         await self._queue_embedding(card, user)
-        await self.session.commit()
-        return card
+        await self.session.commit()  # card and its job together or neither
+        logger.info("card created", extra={"deck_id": deck.id, "card_id": card.id})
+        return card  # 201 to the client from the router
 
     async def update(self, card_id: int, user: User, body: CardUpdate) -> Card:
+        # Step 1: load the learner's card
         card = await self._owned(card_id, user)
-        changes = body.model_dump(exclude_unset=True)
+
+        # Step 2: note whether its text changes before applying the fields the request sent
+        changes = body.model_dump(exclude_unset=True)  # a PATCH so unsent fields stay as they are
         text_changed = (
-            changes.get("front", card.front) != card.front
+            changes.get("front", card.front) != card.front  # an unsent field counts as unchanged
             or changes.get("back", card.back) != card.back
         )
         for field, value in changes.items():
-            setattr(card, field, value)
-        if text_changed:
+            setattr(card, field, value)  # tracked by SQLAlchemy written as one UPDATE on commit
+
+        # Step 3: new text needs a new embedding so search finds the card by what it says now
+        if text_changed:  # a no-op edit spends no embedding call
             await self._queue_embedding(card, user)
         await self.session.commit()
-        return card
+        logger.info("card updated", extra={"card_id": card.id, "text_changed": text_changed})
+        return card  # 200 with the saved card
 
     async def report(self, card_id: int, user: User) -> None:
         """Hide what the card came from, right away, since hiding only ever narrows shared search.
 
         The card stays in the deck, and a learner keeps access to their own files.
         """
+        # Step 1: load the learner's card and refuse once they've used today's reports
         card = await self._owned(card_id, user)
+        # a rolling 24 hours instead of a calendar day so no burst at midnight
         reports = await self.cards.count_reports_since(user.id, utcnow() - BUDGET_WINDOW)
-        if reports >= MAX_REPORTS_PER_DAY:
-            raise BudgetExceeded("You've reached today's limit for reporting cards.")
-        if not await self.cards.add_report(card.id, user.id):
-            return  # already reported
+        if reports >= MAX_REPORTS_PER_DAY:  # caps how much shared content one account can hide
+            logger.info("report refused", extra={"card_id": card.id, "reason": "daily_limit"})
+            raise BudgetExceeded("You've reached today's limit for reporting cards.")  # 429
 
-        hidden = await self.knowledge.hide_card_copy(card.id)
+        # Step 2: record the report A second report of the same card does nothing more
+        # INSERT ... ON CONFLICT DO NOTHING avoids a race between checking and inserting
+        if not await self.cards.add_report(card.id, user.id):
+            logger.info("report skipped", extra={"card_id": card.id, "reason": "already_reported"})
+            return  # 204 either way since reporting twice isn't an error
+
+        # Step 3: hide every shared chunk the card came from which is its own copy, the chunk
+        # it confirmed and the material its AI batch was written from
+        hidden = await self.knowledge.hide_card_copy(card.id)  # the card's copy in shared search
         # A second learner's card has no copy of its own, since it confirmed the first learner's.
         if card.confirmed_chunk_id is not None:
             hidden += await self.knowledge.hide_chunks([str(card.confirmed_chunk_id)])
-        if card.generation_id is not None:
+        if card.generation_id is not None:  # an AI card also hides the material it was written from
             generation = await self.generations.get_owned(card.generation_id, user.id)
-            if generation is not None:
+            if generation is not None:  # None if the batch was deleted with its deck
                 hidden += await self.knowledge.hide_chunks(generation.source_chunk_ids)
 
-        trusted = user.trusted_at is not None
+        # Step 4: count the report against each hidden chunk's author
+        trusted = user.trusted_at is not None  # a trusted reporter's reports weigh on trust
+        # one insert for every hidden chunk returning the authors it counted against
         targets = await self.cards.add_chunk_reports(user.id, hidden, trusted)
-        # Only a trusted report can be the one that takes an account's trust away.
-        if trusted:
+
+        # Step 5: take trust away from authors with enough reports Only a trusted report can
+        # be the one that does it
+        if trusted:  # untrusted accounts can't knock others' trust down
             now = utcnow()
-            for target in targets:
+            for target in targets:  # few authors per card so one check each is cheap
                 await revoke_if_reported(target, now, self.users, self.knowledge)
-        await self.session.commit()
+        await self.session.commit()  # report, hiding and trust changes saved together
+        logger.info(
+            "card reported",
+            extra={
+                "card_id": card.id,
+                "hidden_chunks": len(hidden),
+                "authors": len(targets),
+            },
+        )
 
     async def delete(self, card_id: int, user: User) -> None:
-        card = await self._owned(card_id, user)
+        # Step 1: load the learner's card then delete it
+        card = await self._owned(card_id, user)  # 404 for someone else's card
+        # reports go by cascade and a shared copy stays unlinked by SET NULL
         await self.cards.delete(card.id)
         await self.session.commit()
+        logger.info("card deleted", extra={"card_id": card.id})

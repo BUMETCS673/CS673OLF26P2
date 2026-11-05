@@ -4,7 +4,7 @@
  * AI Tools Used: Claude
  * AI-Assisted Activities:
  *   - UI component development
- * Human role: checked against F3 in code/plans/ITERATION_3_PLAN.md, ran the tests, and
+ * Human role: checked against F3, ran the tests, and
  * opened the PR, by Osasenaga Von Okunbor.
  */
 
@@ -27,8 +27,7 @@
  *
  * Tests can rely on: the front is always visible, and the back isn't in the DOM at all
  * until `revealed` is true, so it can't be read early, by eye or by a screen reader. F1's
- * tests depend on that. See "The study components" in
- * code/plans/FINALIZE_ITERATION_2_PLAN.md.
+ * tests depend on that.
  */
 
 import AiBadge from '../AiBadge.jsx';

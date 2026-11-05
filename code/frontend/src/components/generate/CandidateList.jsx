@@ -17,7 +17,7 @@
 /**
  * The review list: every suggestion, to accept or reject (F2).
  *
- * Keeps C7's props and every "Tests can rely on" item (code/plans/ITERATION_3_PLAN.md).
+ * Keeps its props and everything its tests rely on.
  * Decisions are final, so a decided card shows its outcome instead of buttons.
  *
  * props:

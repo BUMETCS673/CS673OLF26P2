@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
 //
 // F5 (Iteration 3): the Flashcard / Typed answer toggle. One test per StudyModeToggle row of
-// F5's acceptance table in code/plans/ITERATION_3_PLAN.md, plus what C9 says tests can rely on.
+// F5's acceptance table, plus what tests can rely on.
 //
 // AI Utilization: ~100% of this file's code
 // AI Tools Used: Devin (Cognition AI)
 // AI-Assisted Activities:
 //   Unit test creation
-// Human role: acceptance examples (F5 in the plan), direction, and review by Nurzat Mukhamedali.
+// Human role: acceptance examples, direction, and review by Nurzat Mukhamedali.
 
 import { afterEach, expect, test, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';

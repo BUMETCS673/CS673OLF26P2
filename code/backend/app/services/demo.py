@@ -89,52 +89,62 @@ class DemoService:
 
     async def seed(self, *, reset: bool = False) -> list[SeededDeck] | None:
         """The new decks, or None if the demo user already exists and `reset` is off."""
+        # Step 1: keep an existing demo user or delete it when resetting The database's cascade
+        # removes their decks
         existing = await self.users.get_by_email(DEMO_EMAIL)
         if existing is not None:
             if not reset:
-                return None
-            await self.users.delete(existing.id)  # the database's cascade removes their decks
+                return None  # idempotent so running the seed twice changes nothing
+            await self.users.delete(existing.id)  # ON DELETE CASCADE removes decks and cards
 
-        # One clock reading, so every due time is relative to the same moment.
+        # Step 2: add the demo user One clock reading so every due time is relative to the
+        # same moment
         now = utcnow()
-        user = await self.users.add(
+        user = await self.users.add(  # flushed so the decks can point at its id
             User(
                 email=DEMO_EMAIL,
                 display_name="Demo User",
+                # a real Argon2 hash so login works
                 password_hash=await hash_password(DEMO_PASSWORD),
             )
         )
+        # Step 3: add their two decks and cards then commit everything at once
         seeded = [
             await self._add_deck(
                 user,
                 "Spanish 101",
                 "Core vocabulary",
-                [_card(front, back, now) for front, back in SPANISH_CARDS],
+                [_card(front, back, now) for front, back in SPANISH_CARDS],  # all new
             ),
             await self._add_deck(
                 user,
                 "Travel Spanish",
                 "English → Spanish, with cards at every stage",
-                _travel_cards(now),
+                _travel_cards(now),  # new, learning, review, due and not due for demos
             ),
         ]
-        await self.session.commit()
-        return seeded
+        await self.session.commit()  # all or nothing so no half-seeded demo user
+        return seeded  # the CLI prints each deck and its card count
 
     async def time_travel(self, days: int, email: str = DEMO_EMAIL) -> tuple[str, int]:
         """Move a user's due times `days` earlier. Returns their email and how many moved."""
+        # Step 1: find the user by email
+        # normalized like at sign-up so "Demo@Cadence.local" finds the same user
         user = await self.users.get_by_email(normalize_email(email))
         if user is None:
-            raise NotFound(f"No user with the email {email}.")
+            raise NotFound(f"No user with the email {email}.")  # the CLI shows this message
+        # Step 2: move all their cards' due times earlier in one update
+        # one UPDATE that shifts due_at in SQL with no rows loaded into Python
         moved = await self.cards.move_due_dates_earlier(user.id, timedelta(days=days))
         await self.session.commit()
-        return user.email, moved
+        return user.email, moved  # moved is the UPDATE's row count
 
     async def _add_deck(
         self, user: User, name: str, description: str, cards: list[Card]
     ) -> SeededDeck:
+        # Step 1: add the deck then its cards under it
         deck = await self.decks.add(Deck(user_id=user.id, name=name, description=description))
         for card in cards:
-            card.deck_id = deck.id
-        await self.cards.add_many(cards)
+            card.deck_id = deck.id  # the deck's id exists now that it's flushed
+        await self.cards.add_many(cards)  # one multi-row INSERT for the deck's cards
         return SeededDeck(deck.id, deck.name, len(cards))

@@ -1,15 +1,14 @@
 // @vitest-environment jsdom
 //
 // F4: the Study now button and the due-count badge on one deck's page. One test per
-// DeckDetailView acceptance example under F4 in code/plans/FINALIZE_ITERATION_2_PLAN.md,
-// plus the badge refreshing after a card is added or deleted (review on #56).
+// DeckDetailView acceptance example, plus the badge refreshing after a card is added or deleted (review on #56).
 // The Iteration 1 behaviors stay covered by DeckDetailPage.test.jsx.
 //
 // AI Utilization: ~100% of this file's code
 // AI Tools Used: Devin (Cognition AI)
 // AI-Assisted Activities:
 //   Unit test creation
-// Human role: acceptance examples (F4 in the plan), direction, and review by Nurzat Mukhamedali.
+// Human role: acceptance examples, direction, and review by Nurzat Mukhamedali.
 
 import { afterEach, expect, test, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';

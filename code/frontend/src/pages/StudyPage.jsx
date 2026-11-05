@@ -4,7 +4,7 @@
  * AI-Assisted Activities:
  *   UI page development
  *   Documentation
- * Human role: requirements (F1 in code/plans/FINALIZE_ITERATION_2_PLAN.md), direction,
+ * Human role: requirements, direction,
  * and review by Duc Anh Nguyen.
  *
  * Iteration 3, F6: typed mode.
@@ -12,7 +12,7 @@
  * AI Tools Used: Devin (Cognition AI)
  * AI-Assisted Activities:
  *   UI page development
- * Human role: requirements (F6 in code/plans/ITERATION_3_PLAN.md), direction, and review by
+ * Human role: requirements, direction, and review by
  * Nurzat Mukhamedali.
  *
  * Iteration 3 refactor: loading through useLoad(), useApi() and DeckLoadError.
@@ -45,8 +45,7 @@ import '../study.css';
  * The study page at /decks/:id/study (Iteration 2, F1).
  *
  * The wrapper reads the route and the hooks, and StudyView takes everything as props, so
- * a test can render it with a fake `api` and a fixed clock (rule 12 in
- * code/plans/FINALIZE_ITERATION_2_PLAN.md).
+ * a test can render it with a fake `api` and a fixed clock.
  */
 export default function StudyPage() {
   const { id } = useParams();
@@ -145,7 +144,6 @@ function StudySession({ api, deck, due, now, mode, onModeChange, onExit, onStudy
       const card = await api.reviewCard(current.id, rating);
       dispatch({ type: 'answered', rating, card, now: now() });
     } catch (err) {
-      // See "How the study page handles each review response" in the plan.
       if (err.code === 'conflict' || err.code === 'not_found') {
         dispatch({ type: 'skipped', now: now() });
       } else {

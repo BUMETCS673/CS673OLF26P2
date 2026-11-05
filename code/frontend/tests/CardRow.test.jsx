@@ -52,7 +52,7 @@ test('clicking Delete asks for confirmation before deleting anything', () => {
 // AI Tools Used: Devin (Cognition AI)
 // AI-Assisted Activities:
 //   Unit test creation
-// Human role: acceptance examples (F4 in code/plans/FINALIZE_ITERATION_2_PLAN.md), direction,
+// Human role: acceptance examples, direction,
 // and review by Nurzat Mukhamedali.
 
 test('a review card due in 25 days shows "Review · in 25d"', () => {

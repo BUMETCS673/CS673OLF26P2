@@ -4,6 +4,7 @@ Budgets are best effort: two simultaneous requests can both pass a check. The ve
 counters remain the final word.
 """
 
+import logging
 from collections.abc import Mapping, Sequence
 from datetime import timedelta
 
@@ -12,6 +13,8 @@ from app.ai.usage import RunUsage
 from app.core.settings import Settings
 from app.models import AiUsage, utcnow
 from app.repositories.usage import UsageRepository
+
+logger = logging.getLogger(__name__)
 
 BUDGET_WINDOW = timedelta(hours=24)
 
@@ -40,8 +43,12 @@ class BudgetService:
         the same model share it. A run with a judge names the role whose cards it checks in
         `judged`. None means some role has no model left.
         """
-        names = {spec.name for role in cost for spec in model_chain(role, self.settings)}
-        spent = await self.usage.calls_by_model(names, utcnow() - BUDGET_WINDOW)
+        # Step 1: count each model's calls in the last 24 hours for every model in the chains
+        # in one grouped query so walking the chains below needs no more trips to the database
+        names = {spec.name for role in cost for spec in model_chain(role, self.settings)}  # a set
+        spent = await self.usage.calls_by_model(names, utcnow() - BUDGET_WINDOW)  # calls per model
+
+        # Step 2: walk each role's chain to the first model whose daily limit has room
 
         def with_room(
             role: Role, chain: Sequence[ModelSpec], picked: Mapping[Role, ModelSpec]
@@ -51,17 +58,24 @@ class BudgetService:
                 shared = sum(
                     cost[other] for other, used in picked.items() if used == spec and other != role
                 )
+                # worst case is today's calls plus other roles' share, this run and the reserve
                 needed = spent.get(spec.name, 0) + shared + cost[role] + reserve
-                return needed <= self.settings.model_daily_limit(spec.name)
+                return needed <= self.settings.model_daily_limit(spec.name)  # about 90% of Google's
 
-            return next(filter(has_room, chain), None)
+            return next(filter(has_room, chain), None)  # first fit in chain order or None
 
-        return plan_models(self.settings, cost, judged=judged, start=with_room)
+        # plan_models also keeps the judge stronger than the writer it checks
+        models = plan_models(self.settings, cost, judged=judged, start=with_room)
+        # Step 3: log where each role starts so a slow or failing model can be traced
+        picked = ",".join(f"{role}={models.first(role).name}" for role in cost) if models else ""
+        logger.info("models picked", extra={"models": picked or "none left"})
+        return models
 
     async def within_model_limits(
         self, cost: Mapping[Role, int], reserve: int = 0, *, judged: Role | None = None
     ) -> bool:
         """Whether every role has a model with room for `cost` plus `reserve`."""
+        # a pre-check before queueing since the job picks its models again when it runs
         return await self.pick_models(cost, reserve, judged=judged) is not None
 
     async def limit_reached(
@@ -79,16 +93,26 @@ class BudgetService:
 
         A role with no model left counts as the site's limit. `judged` is as in `pick_models`.
         """
-        calls = sum(cost.values())
-        if site_limit is None:
+        # Step 1: count this feature's calls in the last 24 hours for the site and the user
+        calls = sum(cost.values())  # the run's worst case across all its roles
+        if site_limit is None:  # no site cap for this feature so skip the site-wide count
             site, own = 0, await self.user_feature_calls(feature, user_id)
         else:
-            site, own = await self.feature_calls(feature, user_id)
-        if site_limit is not None and site + calls > site_limit:
+            site, own = await self.feature_calls(feature, user_id)  # both counts in one query
+        counts = {"feature": feature, "calls": calls, "user_calls": own, "user_limit": user_limit}
+        if site_limit is not None:
+            counts |= {"site_calls": site, "site_limit": site_limit}
+        logger.info("budget checked", extra=counts)
+
+        # Step 2: refuse if this run would pass the site's or the user's limit
+        if site_limit is not None and site + calls > site_limit:  # site checked first
             return SITE, None
         if own + calls > user_limit:
             return USER, None
+
+        # Step 3: pick each role's first model with room None means a role has none left
         models = await self.pick_models(cost, reserve, judged=judged)
+        # no model left is a site-wide limit to the learner not their own
         return (None, models) if models is not None else (SITE, None)
 
     async def feature_calls(self, feature: str, user_id: int) -> tuple[int, int]:
@@ -107,15 +131,27 @@ class BudgetService:
         prompt_version: str | None = None,
     ) -> None:
         """Add a row per role that made a call. The caller commits."""
-        for usage in run.roles:
-            self.usage.add(
+        # Step 1: one row per role and model that made a call with its tokens
+        for usage in run.roles:  # roles with 0 calls are left out so refused calls cost nothing
+            logger.info(
+                "usage recorded",
+                extra={
+                    "feature": feature,
+                    "role": str(usage.role),
+                    "model": usage.model,
+                    "calls": usage.calls,
+                    "input_tokens": usage.input_tokens,
+                    "output_tokens": usage.output_tokens,
+                },
+            )
+            self.usage.add(  # added to the session only so the caller's commit writes it
                 AiUsage(
                     feature=feature,
                     role=usage.role,
                     model=usage.model,
                     user_id=user_id,
                     deck_id=deck_id,
-                    prompt_version=prompt_version,
+                    prompt_version=prompt_version,  # compares spending across prompt changes
                     calls=usage.calls,
                     input_tokens=usage.input_tokens,
                     output_tokens=usage.output_tokens,

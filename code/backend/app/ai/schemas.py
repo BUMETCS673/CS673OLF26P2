@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, StrictInt
 
 
 class CardDraft(BaseModel):
+    # descriptions go into the JSON schema the model sees so they act as instructions too
     front: str = Field(description="A question or cue with exactly one correct answer.")
     back: str = Field(description="The answer, in 5 words or fewer.")
 
@@ -17,6 +18,7 @@ class CardBatch(BaseModel):
 
 
 class Verdict(BaseModel):
+    # StrictInt refuses "3" or true instead of coercing so a sloppy reply can't hit the wrong card
     index: StrictInt = Field(description="The candidate's index.")
     ok: bool
     reason: str | None = Field(default=None, description="Why it failed, in one short sentence.")
@@ -41,7 +43,7 @@ class SameFacts(BaseModel):
 
 
 class FixOption(BaseModel):
-    kind: Literal["rewrite", "split", "contrast", "prerequisite"]
+    kind: Literal["rewrite", "split", "contrast", "prerequisite"]  # an enum in the JSON schema
     reason: str = Field(description="The likely cause and how this fixes it, in one sentence.")
     cards: list[CardDraft]
 

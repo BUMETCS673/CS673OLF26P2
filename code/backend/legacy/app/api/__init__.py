@@ -2,12 +2,10 @@
 
 WS0 wired up the first three against modules that had no routes in them yet, so WS1 and
 WS2 each only ever touched their own file. **Nobody edits this file again** — if you
-find yourself needing to, say so in the team channel first (see "Shared files" in
-code/plans/ITERATION_1_PLAN.md).
+find yourself needing to, say so in the team channel first.
 
 Iteration 3's Step 0a is the agreed exception: it registers the two AI blueprints the
-same way, so B3 and B4 only ever touch their own files (see "File ownership" in
-code/plans/ITERATION_3_PLAN.md).
+same way, so B3 and B4 only ever touch their own files.
 """
 
 # Iteration 3, Step 0a: registering generate_bp and generations_bp.

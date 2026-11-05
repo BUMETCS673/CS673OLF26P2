@@ -6,7 +6,7 @@ url_prefix:
     POST /api/generations/<generation_id>/accept  {indexes}  -> 201 {cards: [Card], generation: Generation}
     POST /api/generations/<generation_id>/reject  {indexes}  -> 200 Generation
 
-Contract C4 in code/plans/ITERATION_3_PLAN.md. Only accepting creates cards, and only it
+Contract C4. Only accepting creates cards, and only it
 sets `origin = "ai"` (rule 18). Someone else's generation answers 404.
 Step 0a creates the blueprint with no routes, so B4 only ever touches this file.
 """
@@ -26,7 +26,7 @@ Step 0a creates the blueprint with no routes, so B4 only ever touches this file.
 # AI-Assisted Activities:
 #   - API endpoint development
 #   - Input validation
-# Human role: ran the tests locally and in Docker, checked them against the plan, and
+# Human role: ran the tests locally and in Docker, checked them, and
 # opened the PR, by Osasenaga Von Okunbor.
 
 from flask import Blueprint, jsonify

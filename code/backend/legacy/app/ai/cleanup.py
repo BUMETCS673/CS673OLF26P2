@@ -1,7 +1,6 @@
 """Checking what the model sent back before a learner sees it (B1).
 
-`clean_drafts()` follows "Cleaning what comes back", and `normalize_front()` follows C8, in
-code/plans/ITERATION_3_PLAN.md.
+`clean_drafts()` follows "Cleaning what comes back", and `normalize_front()` follows C8.
 
 Pure (rule 19): no Flask, no SQLAlchemy, no `app.models`.
 """

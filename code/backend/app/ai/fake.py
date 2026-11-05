@@ -26,26 +26,27 @@ def _fill(schema: dict, key: str = "", position: int = 0) -> Any:
 
 
 def _fill_numbered(schema: dict, key: str, position: int, number: int) -> Any:
-    if "enum" in schema:
+    if "enum" in schema:  # any listed value is valid so take the first
         return schema["enum"][0]
     kind = schema.get("type")
-    if kind == "object":
+    if kind == "object":  # recurse into each field sharing this object's number
         return {
             name: _fill_numbered(field, name, position, number)
             for name, field in schema.get("properties", {}).items()
         }
-    if kind == "array":
+    if kind == "array":  # as many items as the schema allows each with a new number
         length = schema.get("maxItems", _DEFAULT_LIST_LENGTH)
         return [_fill(schema["items"], key, index) for index in range(length)]
     if kind == "integer":
-        return position
+        return position  # the item's index valid as an index back into the same list
     if kind == "boolean":
         return True
-    return f"{_LABELS.get(key, f'Sample {key}')} {number}"
+    return f"{_LABELS.get(key, f'Sample {key}')} {number}"  # e.g "Sample question 7"
 
 
 def _chosen_tool(tools: Sequence[Any], tool_choice: Any) -> dict:
     """The named tool if one is required, otherwise the last, which callers make the final step."""
+    # the OpenAI tool format with a name and a JSON schema of the arguments
     converted = [convert_to_openai_tool(tool)["function"] for tool in tools]
     for tool in converted:
         if tool["name"] == tool_choice:
@@ -61,6 +62,7 @@ class FakeChatModel(BaseChatModel):
         return "fake"
 
     def bind_tools(self, tools: Sequence[Any], *, tool_choice: Any = None, **_: Any):
+        # passed to _generate as kwargs which is also how with_structured_output works
         return self.bind(tools=tools, tool_choice=tool_choice)
 
     def _generate(
@@ -72,17 +74,17 @@ class FakeChatModel(BaseChatModel):
         tool_choice: Any = None,
         **_: Any,
     ) -> ChatResult:
-        usage = {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
-        if tools:
+        usage = {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}  # so usage rows fill
+        if tools:  # a bound tool or schema gets a call to it as the answer
             tool = _chosen_tool(tools, tool_choice)
             call = {
                 "name": tool["name"],
-                "args": _fill(tool["parameters"]),
+                "args": _fill(tool["parameters"]),  # valid arguments made from the schema
                 "id": "fake-call",
                 "type": "tool_call",
             }
             message = AIMessage(content="", tool_calls=[call], usage_metadata=usage)
-        else:
+        else:  # plain chat
             message = AIMessage(content="A sample reply.", usage_metadata=usage)
         return ChatResult(generations=[ChatGeneration(message=message)])
 
@@ -91,8 +93,9 @@ class FakeEmbeddings(Embeddings):
     """Seeded by the text, so the same text always gets the same vector."""
 
     def _vector(self, text: str) -> list[float]:
+        # its own generator keeps it deterministic with no global state
         numbers = random.Random(text)
-        return [numbers.random() for _ in range(EMBEDDING_DIMENSIONS)]
+        return [numbers.random() for _ in range(EMBEDDING_DIMENSIONS)]  # the pgvector column size
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         return [self._vector(text) for text in texts]
