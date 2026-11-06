@@ -5,16 +5,13 @@ from datetime import datetime
 
 from sqlalchemy import and_, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import TutorConversation, utcnow
 from app.models.tutor import IDLE, REPLYING
+from app.repositories.base import Repository
 
 
-class TutorRepository:
-    def __init__(self, session: AsyncSession):
-        self.session = session
-
+class TutorRepository(Repository):
     async def for_deck(self, deck_id: int, *, lock: bool = False) -> TutorConversation | None:
         statement = select(TutorConversation).where(TutorConversation.deck_id == deck_id)
         if lock:

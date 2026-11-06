@@ -44,6 +44,13 @@ class NotFound(AppError):
     status = 404
 
 
+def found[T](row: T | None, message: str) -> T:
+    """The row, or NotFound when it's missing or belongs to someone else."""
+    if row is None:
+        raise NotFound(message)  # 404 never 403 so it doesn't reveal the row exists
+    return row
+
+
 class Conflict(AppError):
     status = 409
 

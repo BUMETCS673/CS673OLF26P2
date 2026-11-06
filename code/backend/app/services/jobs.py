@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 from fastapi.sse import ServerSentEvent
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import NotFound
+from app.core.errors import found
 from app.jobs.events import READ_FAILURES, JobEvents
 from app.models import Job, User
 from app.repositories.jobs import JobRepository
@@ -27,10 +27,7 @@ class JobService:
         self.events = events  # the Redis stream the worker publishes each status to
 
     async def _owned(self, job_id: int, user_id: int) -> Job:
-        job = await self.jobs.get_owned(job_id, user_id)
-        if job is None:  # missing or someone else's job
-            raise NotFound(JOB_NOT_FOUND)  # 404 never 403
-        return job
+        return found(await self.jobs.get_owned(job_id, user_id), JOB_NOT_FOUND)
 
     async def get(self, job_id: int, user: User) -> JobRead:
         return JobRead.model_validate(await self._owned(job_id, user.id))  # one poll from the row
@@ -58,7 +55,7 @@ class JobService:
             return
 
         while True:
-            # Step 2: wait on Redis for the job's next events If Redis fails wait and go on
+            # Step 2: wait on Redis for the job's next events and keep going if Redis fails
             try:
                 # XREAD BLOCK waits in one call with no polling returning as soon as an event lands
                 entries = await self.events.read(job_id, after, int(WAIT_SECONDS * 1000))

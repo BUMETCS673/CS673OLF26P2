@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.knowledge.loaders import PDF
 from app.ai.models import Role
-from app.core.errors import BudgetExceeded, InvalidRequest, NotFound
+from app.core.errors import BudgetExceeded, InvalidRequest, found
 from app.core.settings import Settings
 from app.models import Document, Job, utcnow
 from app.models.document import FAILED, PROCESSING, QUEUED
@@ -87,9 +87,7 @@ class MaterialService:
 
     async def get(self, document_id: int, user_id: int) -> MaterialRead:
         # Step 1: load the user's file
-        document = await self.documents.get_owned(document_id, user_id)
-        if document is None:  # missing or someone else's file
-            raise NotFound(MATERIAL_NOT_FOUND)  # 404 never 403
+        document = found(await self.documents.get_owned(document_id, user_id), MATERIAL_NOT_FOUND)
         # Step 2: settle a file whose job died so the page stops waiting on it
         await self._fail_if_job_failed(document)
         return MaterialRead.model_validate(document)  # the page polls this for the stage
@@ -171,8 +169,8 @@ class MaterialService:
 
         retry = document is not None
         if retry:
-            # Step 3a: a retry of a failed file Its parts are already saved and it doesn't
-            # count as a new file
+            # Step 3a: retry a failed file whose parts are already saved without counting it as a
+            # new file
             document.status, document.stage, document.error = PROCESSING, QUEUED, None  # reset
             document.filename = filename  # keep the name it was uploaded with this time
         else:

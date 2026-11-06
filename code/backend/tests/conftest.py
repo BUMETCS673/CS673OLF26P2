@@ -166,7 +166,11 @@ def trust_everyone(monkeypatch):
     async def trusted(_repository, _user_id):
         return True
 
+    async def all_trusted(_repository, user_ids):
+        return set(user_ids)
+
     monkeypatch.setattr(UserRepository, "is_trusted", trusted)
+    monkeypatch.setattr(UserRepository, "trusted_among", all_trusted)
 
 
 @pytest.fixture

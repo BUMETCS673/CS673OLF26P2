@@ -40,10 +40,7 @@ from app.core.settings import Settings
 from app.jobs.execution import JobContext
 from app.models import AiGeneration
 from app.repositories.cards import CardRepository
-from app.repositories.decks import DeckRepository
-from app.repositories.generations import GenerationRepository
 from app.repositories.knowledge import KnowledgeRepository
-from app.repositories.usage import UsageRepository
 from app.schemas.generations import FILE
 from app.services.budget import GENERATE, BudgetService
 from app.services.generations import WORST_CASE_CALLS
@@ -235,21 +232,21 @@ async def write_cards(
 async def _record_usage(
     context: JobContext, settings: Settings, deck_id: int, usage: RunUsage, version: str | None
 ) -> None:
-    async with context.session_factory() as session:
+    async with context.transaction() as tx:
         # The deck may have been deleted during the run, and the spending still counts.
-        deck = await DeckRepository(session).get_owned(deck_id, context.user_id)
-        BudgetService(UsageRepository(session), settings).record(
+        deck = await tx.decks.get_owned(deck_id, context.user_id)
+        BudgetService(tx.usage, settings).record(
             # None for a deleted deck since the usage row's foreign key can't point at it
             GENERATE, context.user_id, deck.id if deck else None, usage, version
         )
-        await session.commit()
+        await tx.commit()
 
 
 async def _save(context: JobContext, writer_model: str, deck_id: int, result: CardResult) -> int:
     """Save the batch, once per job, even if two workers both reach this point."""
     payload = context.payload
-    async with context.session_factory() as session:
-        generations = GenerationRepository(session)
+    async with context.transaction() as tx:
+        generations = tx.generations
         try:
             # Step 1: insert the batch job_id is UNIQUE so a job can save only one
             generation = await generations.add(
@@ -272,11 +269,11 @@ async def _save(context: JobContext, writer_model: str, deck_id: int, result: Ca
                     ],
                 )
             )
-            await session.commit()
+            await tx.commit()
             return generation.id
         # Step 2: on a unique or foreign key violation check what's saved to tell which
         except IntegrityError:  # another worker saved it, or the deck was deleted
-            await session.rollback()  # the failed INSERT spoiled the transaction
+            await tx.rollback()  # the failed INSERT spoiled the transaction
             saved = await generations.get_for_job(context.job_id)
             if saved is None:  # not a duplicate so the deck's foreign key failed
                 raise NotFound(DECK_GONE) from None  # permanent so the job fails with this
@@ -289,18 +286,18 @@ async def generate_cards(
     payload = context.payload
     deck_id = payload["deck_id"]
     # Step 1: in one short session check for an earlier batch load the deck pick models
-    async with context.session_factory() as session:
+    async with context.transaction() as tx:
         # An earlier attempt saved its batch, then its worker died before finishing the job.
-        saved = await GenerationRepository(session).get_for_job(context.job_id)
+        saved = await tx.generations.get_for_job(context.job_id)
         if saved is not None:
             logger.info("generation reused", extra={"generation_id": saved.id})
             return {"generation_id": saved.id}  # no AI calls spent twice
-        deck = await DeckRepository(session).get_owned(deck_id, context.user_id)
+        deck = await tx.decks.get_owned(deck_id, context.user_id)
         if deck is None:  # deleted while the job waited
             raise NotFound(DECK_GONE)  # permanent so no retry
-        fronts = await CardRepository(session).fronts_in_deck(deck_id)  # for duplicate checks
+        fronts = await tx.cards.fronts_in_deck(deck_id)  # for duplicate checks
         # The service checked for room when queueing. No room here tries each role's chain.
-        budget = BudgetService(UsageRepository(session), settings)
+        budget = BudgetService(tx.usage, settings)
         models = await budget.pick_models(WORST_CASE_CALLS, judged=Role.WRITER)
     # the whole chains since the learner was promised a run and fallbacks can handle it
     models = models or first_models(settings, WORST_CASE_CALLS, judged=Role.WRITER)

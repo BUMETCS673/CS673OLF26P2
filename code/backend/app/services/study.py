@@ -5,7 +5,7 @@ from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import Conflict, NotFound
+from app.core.errors import Conflict, found
 from app.models import Deck, User, utcnow
 from app.repositories.cards import CardRepository
 from app.repositories.knowledge import KnowledgeRepository
@@ -64,12 +64,10 @@ class StudyService:
     async def review(self, card_id: int, user: User, body: ReviewRequest) -> StudyCardRead:
         # Step 1: load the card locked so a double click can't answer it twice
         # SELECT ... FOR UPDATE makes a second answer wait then see the new schedule
-        card = await self.cards.get_owned(card_id, user.id, lock=True)
-        if card is None:  # missing or someone else's card
-            raise NotFound(CARD_NOT_FOUND)  # 404 never 403 so it doesn't reveal the card exists
+        card = found(await self.cards.get_owned(card_id, user.id, lock=True), CARD_NOT_FOUND)
 
-        # Step 2: refuse a card that isn't due One clock reading so this and the scheduler
-        # agree on "now"
+        # Step 2: refuse a card that isn't due using one clock reading that the scheduler
+        # shares as "now"
         now = utcnow()
         schedule = card.schedule  # state due time interval ease step lapses as one value
         if not _can_answer(schedule, now):

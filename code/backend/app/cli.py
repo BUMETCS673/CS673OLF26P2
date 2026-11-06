@@ -11,10 +11,7 @@ from app.core.errors import NotFound
 from app.core.redis import get_redis
 from app.core.settings import get_settings
 from app.models import utcnow
-from app.repositories.cards import CardRepository
-from app.repositories.decks import DeckRepository
-from app.repositories.knowledge import KnowledgeRepository
-from app.repositories.users import UserRepository
+from app.repositories.unit_of_work import open_unit_of_work
 from app.services.demo import DEMO_EMAIL, DEMO_PASSWORD, DemoService
 from app.services.reindex import reindex
 
@@ -24,14 +21,8 @@ cli = typer.Typer(no_args_is_help=True)
 async def _with_service(work):
     """Run `work(service)` in one session, then close the database connections."""
     try:
-        async with get_session_factory()() as session:
-            service = DemoService(
-                session,
-                UserRepository(session),
-                DeckRepository(session),
-                CardRepository(session),
-            )
-            return await work(service)
+        async with open_unit_of_work(get_session_factory()) as tx:
+            return await work(DemoService(tx.session, tx.users, tx.decks, tx.cards))
     finally:
         await get_engine().dispose()
 
@@ -65,9 +56,9 @@ def time_travel(
 
 async def _hide(work) -> int:
     try:
-        async with get_session_factory()() as session:
-            hidden = await work(KnowledgeRepository(session))
-            await session.commit()
+        async with open_unit_of_work(get_session_factory()) as tx:
+            hidden = await work(tx.knowledge)
+            await tx.commit()
             return hidden
     finally:
         await get_engine().dispose()
@@ -103,12 +94,11 @@ def unhide_user(user_id: int) -> None:
 
 async def _unhide_user(user_id: int) -> int:
     try:
-        async with get_session_factory()() as session:
-            knowledge = KnowledgeRepository(session)
-            restored = await knowledge.unhide_user(user_id)
-            if await UserRepository(session).restore_trust(user_id, utcnow()):
-                await knowledge.share_waiting_chunks(user_id)
-            await session.commit()
+        async with open_unit_of_work(get_session_factory()) as tx:
+            restored = await tx.knowledge.unhide_user(user_id)
+            if await tx.users.restore_trust(user_id, utcnow()):
+                await tx.knowledge.share_waiting_chunks(user_id)
+            await tx.commit()
             return restored
     finally:
         await get_engine().dispose()

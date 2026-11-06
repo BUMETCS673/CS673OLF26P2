@@ -6,12 +6,10 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from sqlalchemy import ColumnElement, Row, and_, delete, func, select, true, union, update
-from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
-from app.models import Card, CardReport, ChunkReport, Deck, utcnow
-from app.repositories.knowledge import HiddenChunk
+from app.models import Card, Deck
+from app.repositories.base import ModelRepository
 from app.scheduler import LEARN_AHEAD, NEW_CARDS_PER_SESSION, REVIEWS_PER_SESSION, CardState
 
 
@@ -33,10 +31,7 @@ class DeckCounts:
     due: dict[str, int]  # capped at what one study session serves
 
 
-class CardRepository:
-    def __init__(self, session: AsyncSession):
-        self.session = session
-
+class CardRepository(ModelRepository[Card]):
     async def save_embeddings(self, vectors: dict[int, list[float]], model: str) -> None:
         """One bulk UPDATE by primary key, sent as a single batch however many cards there are."""
         if vectors:
@@ -58,47 +53,6 @@ class CardRepository:
                     for card_id, chunk_id in chunk_ids.items()
                 ],
             )
-
-    async def add_report(self, card_id: int, user_id: int) -> bool:
-        """Whether this is a new report. Repeating one changes nothing."""
-        # RETURNING, since an ORM insert's rowcount isn't reliable: it can be -1.
-        added = await self.session.scalar(
-            insert(CardReport)
-            .values(card_id=card_id, user_id=user_id)
-            .on_conflict_do_nothing(index_elements=["user_id", "card_id"])
-            .returning(CardReport.id)
-        )
-        return added is not None
-
-    async def add_chunk_reports(
-        self, reporter_id: int, hidden: Sequence[HiddenChunk], reporter_trusted: bool
-    ) -> set[int]:
-        """Who the hidden chunks are held against. The reporter's own chunks don't count."""
-        rows = [
-            {
-                "reporter_id": reporter_id,
-                "target_user_id": chunk.source_user_id,
-                "chunk_id": chunk.chunk_id,
-                "reporter_trusted": reporter_trusted,
-                "created_at": utcnow(),
-            }
-            for chunk in hidden
-            if chunk.source_user_id is not None and chunk.source_user_id != reporter_id
-        ]
-        if rows:
-            await self.session.execute(
-                insert(ChunkReport)
-                .values(rows)
-                .on_conflict_do_nothing(index_elements=["reporter_id", "chunk_id"])
-            )
-        return {row["target_user_id"] for row in rows}
-
-    async def count_reports_since(self, user_id: int, since: datetime) -> int:
-        return await self.session.scalar(
-            select(func.count())
-            .select_from(CardReport)
-            .where(CardReport.user_id == user_id, CardReport.created_at >= since)
-        )
 
     async def nearest_in_deck(
         self, deck_id: int, vector: list[float], model: str, limit: int
@@ -219,11 +173,6 @@ class CardRepository:
         if lock:
             statement = statement.with_for_update(of=Card)
         return await self.session.scalar(statement)
-
-    async def add(self, card: Card) -> Card:
-        self.session.add(card)
-        await self.session.flush()
-        return card
 
     async def add_many(self, cards: list[Card]) -> list[Card]:
         """One flush, which SQLAlchemy sends as a multi-row INSERT ... RETURNING for the ids."""

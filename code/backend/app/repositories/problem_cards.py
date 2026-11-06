@@ -5,11 +5,11 @@ from typing import Any
 
 from sqlalchemy import select, text, update
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Card, Deck, Job, ProblemCardReview
 from app.models.job import FAILED as JOB_FAILED
 from app.models.problem_card_review import COMPLETED, PENDING, QUEUED
+from app.repositories.base import Repository
 
 
 @dataclass(frozen=True)
@@ -20,10 +20,7 @@ class ActiveReview:
     job_failed: bool
 
 
-class ProblemCardRepository:
-    def __init__(self, session: AsyncSession):
-        self.session = session
-
+class ProblemCardRepository(Repository):
     async def add_if_none_active(self, user_id: int, deck_id: int, thread_id: str) -> int | None:
         """Start a review, unless the deck has one. The partial unique index decides, atomically."""
         return await self.session.scalar(

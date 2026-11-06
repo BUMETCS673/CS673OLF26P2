@@ -102,7 +102,7 @@ async def stop_relay(state: TaskiqState) -> None:
     state.relay.cancel()
     with suppress(asyncio.CancelledError):  # cancelling raises this inside the task
         await state.relay
-    # Step 2: flush what's still buffered Both block so they run in threads
+    # Step 2: flush what's still buffered in threads since both calls block
     await asyncio.to_thread(wait_for_all_tracers)  # LangSmith traces
     await asyncio.to_thread(state.stop_telemetry)  # the last metrics and logs
     # Step 3: close the connections last since the steps above may still use them

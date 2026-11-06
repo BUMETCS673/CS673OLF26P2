@@ -9,7 +9,7 @@ from app.ai.models import AIRateLimited, AIUnavailable, Role, load_chat_model
 from app.ai.schemas import CardDraft
 from app.ai.tracing import labelled_trace
 from app.ai.usage import RunUsage
-from app.core.errors import BudgetExceeded, InvalidRequest, NotAvailable, NotFound
+from app.core.errors import BudgetExceeded, InvalidRequest, NotAvailable, found
 from app.core.settings import Settings
 from app.models import AiGeneration, Card, Deck, Job, User, utcnow
 from app.models.document import READY
@@ -91,9 +91,9 @@ class GenerationService:
         # Step 1: in file mode check the file is the learner's and finished processing
         file_name = None
         if body.mode == FILE:
-            document = await self.documents.get_owned(body.document_id, user.id)
-            if document is None:  # missing or someone else's file
-                raise NotFound(MATERIAL_NOT_FOUND)  # 404 never 403
+            document = found(
+                await self.documents.get_owned(body.document_id, user.id), MATERIAL_NOT_FOUND
+            )
             if document.status != READY:  # still being indexed or failed
                 logger.info(
                     "generation refused",
@@ -105,7 +105,7 @@ class GenerationService:
         # Step 2: check the daily limits
         await self._check_caps(user.id)
 
-        # Step 3: queue the run as a job The worker does the AI calls
+        # Step 3: queue the run as a job for the worker to make the AI calls
         job = await self.jobs.add(
             Job(
                 user_id=user.id,
@@ -128,10 +128,10 @@ class GenerationService:
 
     async def _locked(self, generation_id: int, user: User) -> AiGeneration:
         # SELECT ... FOR UPDATE runs concurrent decisions on one batch one after another
-        generation = await self.generations.get_owned(generation_id, user.id, lock=True)
-        if generation is None:  # missing or someone else's batch
-            raise NotFound(GENERATION_NOT_FOUND)  # 404 never 403
-        return generation
+        return found(
+            await self.generations.get_owned(generation_id, user.id, lock=True),
+            GENERATION_NOT_FOUND,
+        )
 
     def _decide(self, generation: AiGeneration, indexes: list[int], status: str) -> list[int]:
         """Mark each pending index, returning those that changed, since decisions are final.
@@ -148,8 +148,9 @@ class GenerationService:
             if generation.candidates[index]["status"] == PENDING  # decisions are final
         ]
         # Step 3: mark them in a new list
+        marked = set(changed)  # constant-time lookups while rebuilding the list
         generation.candidates = [  # reassigned so SQLAlchemy sees the JSON change
-            {**candidate, "status": status} if index in changed else candidate
+            {**candidate, "status": status} if index in marked else candidate
             for index, candidate in enumerate(generation.candidates)
         ]
         return changed  # only these become cards so a repeat accept adds nothing
@@ -249,7 +250,7 @@ class GenerationService:
             await self.session.commit()  # the session reopens a connection just for this
 
     async def get(self, generation_id: int, user: User) -> GenerationRead:
-        generation = await self.generations.get_owned(generation_id, user.id)
-        if generation is None:  # missing or someone else's batch
-            raise NotFound(GENERATION_NOT_FOUND)  # 404 never 403
+        generation = found(
+            await self.generations.get_owned(generation_id, user.id), GENERATION_NOT_FOUND
+        )
         return GenerationRead.model_validate(generation)

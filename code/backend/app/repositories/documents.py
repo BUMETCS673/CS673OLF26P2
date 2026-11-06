@@ -4,20 +4,12 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import delete, func, insert, select, update
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Document, DocumentFilePart
+from app.repositories.base import ModelRepository
 
 
-class DocumentRepository:
-    def __init__(self, session: AsyncSession):
-        self.session = session
-
-    async def add(self, document: Document) -> Document:
-        self.session.add(document)
-        await self.session.flush()
-        return document
-
+class DocumentRepository(ModelRepository[Document]):
     async def add_part(self, document_id: int, number: int, data: bytes) -> None:
         """A plain insert, since a loaded object would keep the file's bytes in memory."""
         await self.session.execute(

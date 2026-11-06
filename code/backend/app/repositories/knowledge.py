@@ -16,9 +16,9 @@ from sqlalchemy import (
     union_all,
     update,
 )
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import KnowledgeChunk
+from app.repositories.base import Repository
 
 # High, because "X is 5" and "X is 7" are also very close. A starting point, to tune.
 NEAR_DUPLICATE_SIMILARITY = 0.97
@@ -56,10 +56,7 @@ class CardMatch:
     content: str
 
 
-class KnowledgeRepository:
-    def __init__(self, session: AsyncSession):
-        self.session = session
-
+class KnowledgeRepository(Repository):
     async def _nearest_each(
         self, vectors: Sequence[list[float]], conditions: Sequence[ColumnElement[bool]]
     ) -> list[Row | None]:
@@ -182,13 +179,14 @@ class KnowledgeRepository:
             update(KnowledgeChunk).where(*self._waiting(owner_id)).values(shared=True)
         )
 
-    async def take_over_card_copy(self, chunk_id: str, user_id: int) -> None:
-        """Count `user_id` as the first learner to accept this card's fact."""
-        await self.session.execute(
-            update(KnowledgeChunk)
-            .where(KnowledgeChunk.langchain_id == uuid.UUID(chunk_id))
-            .values(accepted_by=user_id)
-        )
+    async def take_over_card_copies(self, chunk_ids: Sequence[str], user_id: int) -> None:
+        """Count `user_id` as the first learner to accept each of these cards' facts."""
+        if chunk_ids:  # one UPDATE for every copy taken over
+            await self.session.execute(
+                update(KnowledgeChunk)
+                .where(KnowledgeChunk.langchain_id.in_([uuid.UUID(id_) for id_ in chunk_ids]))
+                .values(accepted_by=user_id)
+            )
 
     async def hide_chunks(self, chunk_ids: Sequence[str]) -> list[HiddenChunk]:
         """The chunks it hid, with who they came from."""
@@ -198,8 +196,15 @@ class KnowledgeRepository:
             KnowledgeChunk.langchain_id.in_([uuid.UUID(id_) for id_ in chunk_ids])
         )
 
-    async def hide_card_copy(self, card_id: int) -> list[HiddenChunk]:
-        return await self._hide_where(KnowledgeChunk.source_card_id == card_id)
+    async def hide_card_sources(self, card_id: int, chunk_ids: Sequence[str]) -> list[HiddenChunk]:
+        """The card's own copy and the chunks it came from, hidden in one UPDATE."""
+        condition = KnowledgeChunk.source_card_id == card_id
+        if chunk_ids:
+            # OR in one statement so a chunk listed twice is hidden and returned once
+            condition = or_(
+                condition, KnowledgeChunk.langchain_id.in_([uuid.UUID(id_) for id_ in chunk_ids])
+            )
+        return await self._hide_where(condition)
 
     async def _hide_where(self, condition) -> list[HiddenChunk]:
         result = await self.session.execute(
