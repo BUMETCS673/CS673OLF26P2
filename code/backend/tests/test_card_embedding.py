@@ -196,7 +196,11 @@ def _trust_only(monkeypatch, *user_ids):
     async def trusted(_repository, user_id):
         return user_id in user_ids
 
+    async def trusted_among(_repository, ids):
+        return {user_id for user_id in ids if user_id in user_ids}
+
     monkeypatch.setattr(UserRepository, "is_trusted", trusted)
+    monkeypatch.setattr(UserRepository, "trusted_among", trusted_among)
 
 
 async def test_a_new_account_cant_confirm_a_card(

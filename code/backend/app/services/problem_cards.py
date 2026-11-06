@@ -17,7 +17,7 @@ from app.ai.checkpoints import discard_threads, open_checkpointer
 from app.ai.problem_cards.checks import REPLACING_KINDS
 from app.ai.problem_cards.graph import resume_review
 from app.ai.tracing import labelled_trace
-from app.core.errors import Conflict, InvalidRequest, NotFound
+from app.core.errors import Conflict, InvalidRequest, found
 from app.core.settings import Settings
 from app.models import Card, Deck, Job, ProblemCardReview, User, utcnow
 from app.models.job import REVIEW_PROBLEM_CARDS
@@ -183,8 +183,8 @@ class ProblemCardService:
         self, review: ProblemCardReview, decisions: Sequence[dict]
     ) -> tuple[list[dict], list[Card]]:
         """Change the deck to match the decisions. New cards start as new, with no lapses."""
-        # Step 1: load the deck's cards being decided A card the learner deleted while the
-        # review waited is simply not found here
+        # Step 1: load the deck's cards being decided and treat a card deleted while the review
+        # waited as not found
         options = {item["card_id"]: item["options"] for item in review.recommendations}
         cards = {
             card.id: card
@@ -204,8 +204,8 @@ class ProblemCardService:
             if card is not None and choice == REMOVE:
                 kind = REMOVE
                 removed.append(card_id)
-            # An option adds its new cards A replacing kind removes the old card and any other
-            # kind keeps it quiet until it lapses REFLAG_AFTER more times
+            # An option adds its new cards while a replacing kind also removes the old card and any
+            # other kind keeps it quiet until it lapses REFLAG_AFTER more times
             elif card is not None and choice is not None:
                 option = options[card_id][choice]  # the server's stored option not the request
                 kind = option["kind"]  # rewrite, split, contrast or prerequisite
@@ -249,9 +249,7 @@ class ProblemCardService:
         # Step 1: lock the review and refuse one that's missing, already done or decided
         # wrongly
         # SELECT ... FOR UPDATE makes a double submit wait then see it's completed
-        review = await self.reviews.get_owned_locked(review_id, user.id)
-        if review is None:  # missing or someone else's review
-            raise NotFound(REVIEW_NOT_FOUND)  # 404 never 403
+        review = found(await self.reviews.get_owned_locked(review_id, user.id), REVIEW_NOT_FOUND)
         if review.status != PENDING:  # decisions apply once
             raise Conflict("This review has already been completed.")  # 409 to the client
         self._check_decisions(review, decisions)  # 422 before anything changes
@@ -275,8 +273,8 @@ class ProblemCardService:
             },
         )
 
-        # Step 3: finish the paused LangGraph run with the decisions then drop its
-        # checkpoints The deck is already right if this fails
+        # Step 3: finish the paused LangGraph run with the decisions and drop its checkpoints
+        # last because the deck is already right if this fails
         url = self.settings.database_url
         try:
             async with (
