@@ -34,9 +34,12 @@ jobs:
     name: Publish images to GHCR
     runs-on: ubuntu-latest
     # workflow_dispatch has no workflow_run payload, so allow that through too.
+    # Only CI runs from a push deploy. A pull request's CI run on the same branch would start a
+    # second run whose token can't write the build cache.
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
 
     permissions:
       contents: read
