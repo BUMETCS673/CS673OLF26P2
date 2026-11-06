@@ -59,12 +59,12 @@ class AuthService:
 
     async def login(self, body: LoginRequest) -> tuple[User, str]:
         """The user, and a session token for their cookie."""
-        # Step 1: refuse a password over the limit No stored one can be so don't pay to hash it
+        # Step 1: refuse an overlong password before hashing since no stored one can match it
         if len(body.password) > MAX_PASSWORD_LENGTH:  # blocks a CPU-burning DoS with huge input
             logger.info("login refused", extra={"reason": "password_too_long"})
             raise Unauthorized(INVALID_CREDENTIALS)  # 401 same message as a wrong password
 
-        # Step 2: check the password An unknown email is checked too so both take as long
+        # Step 2: check the password and check unknown emails too so both cases take as long
         user = await self.users.get_by_email(body.email)
         password_hash = user.password_hash if user else None  # None for an unknown email
         # None is checked against a dummy hash with the same timing so emails can't be probed

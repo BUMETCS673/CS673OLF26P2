@@ -8,9 +8,9 @@ from collections.abc import Collection
 from datetime import datetime
 
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import AiUsage
+from app.repositories.base import Repository
 
 
 def _total(*conditions):
@@ -18,10 +18,7 @@ def _total(*conditions):
     return func.coalesce(total.filter(*conditions) if conditions else total, 0)
 
 
-class UsageRepository:
-    def __init__(self, session: AsyncSession):
-        self.session = session
-
+class UsageRepository(Repository):
     def add(self, usage: AiUsage) -> None:
         self.session.add(usage)
 

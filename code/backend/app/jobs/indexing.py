@@ -36,11 +36,6 @@ from app.core.errors import InvalidRequest
 from app.core.settings import Settings
 from app.jobs.execution import JobContext
 from app.models.document import EMBEDDING, FINDING_TOPICS, READING, READY, SCREENING
-from app.repositories.documents import DocumentRepository
-from app.repositories.jobs import JobRepository
-from app.repositories.knowledge import KnowledgeRepository
-from app.repositories.usage import UsageRepository
-from app.repositories.users import UserRepository
 from app.services.budget import MATERIALS, BudgetService
 
 logger = logging.getLogger(__name__)
@@ -59,9 +54,9 @@ def _read(loader: HeadingLoader) -> tuple[list[Chunk], list[str]]:
 
 async def _update(context: JobContext, document_id: int, **values: Any) -> None:
     """Save progress first, and only then tell whoever is following."""
-    async with context.session_factory() as session:
-        await DocumentRepository(session).update(document_id, **values)
-        await session.commit()  # the row first so a reload shows the same stage the event said
+    async with context.transaction() as tx:
+        await tx.documents.update(document_id, **values)
+        await tx.commit()  # the row first so a reload shows the same stage the event said
     await context.report(values)  # then the live event
 
 
@@ -72,8 +67,8 @@ async def _load_file(context: JobContext, document_id: int, mime_type: str) -> t
         # Step 1: copy the 1 MB parts from Postgres to a temp file in order
         while True:
             # A short session per part, so a large file doesn't hold a connection throughout.
-            async with context.session_factory() as session:
-                part = await DocumentRepository(session).read_part(document_id, number)
+            async with context.transaction() as tx:
+                part = await tx.documents.read_part(document_id, number)
             if part is None:  # past the last part
                 break
             file.write(part)  # only one part in memory at a time
@@ -104,8 +99,8 @@ async def _screen(
     """
     # Step 1: check the helper has room for screening's worst case
     await _update(context, document_id, stage=SCREENING)
-    async with context.session_factory() as session:
-        budget = BudgetService(UsageRepository(session), settings)
+    async with context.transaction() as tx:
+        budget = BudgetService(tx.usage, settings)
         models = await budget.pick_models({Role.HELPER: MAX_SCREEN_CALLS})  # at most 8 calls
     if models is None:  # the chunks stay private, which is safe
         logger.info("screening skipped", extra={"document_id": document_id, "reason": "no_budget"})
@@ -117,12 +112,12 @@ async def _screen(
         partial(load_chat_model, Role.HELPER, settings, usage, models=models),
     )
     # Step 3: mark the clean chunks screened and shared at once if the uploader is trusted
-    async with context.session_factory() as session:
-        trusted = await UserRepository(session).is_trusted(context.user_id)
-        await KnowledgeRepository(session).mark_screened(  # one UPDATE by id
+    async with context.transaction() as tx:
+        trusted = await tx.users.is_trusted(context.user_id)
+        await tx.knowledge.mark_screened(  # one UPDATE by id
             [chunk_id(chunks[i]) for i in clean], share=trusted  # same ids aindex saved them under
         )
-        await session.commit()
+        await tx.commit()
     return clean  # positions used to pick the text for topics
 
 
@@ -135,8 +130,8 @@ async def _index(
 ) -> dict[str, Any] | None:
     document_id = context.payload["document_id"]
     # Step 1: load the file's row and stop if it's gone or already done
-    async with context.session_factory() as session:
-        document = await DocumentRepository(session).get(document_id)
+    async with context.transaction() as tx:
+        document = await tx.documents.get(document_id)
     if document is None:  # deleted while it waited
         return None
     if document.status == READY:  # an earlier attempt finished, then its worker died
@@ -161,10 +156,10 @@ async def _index(
     )
 
     async def progress(done: int, _total: int) -> None:  # called after each batch saves
-        async with context.session_factory() as session:
+        async with context.transaction() as tx:
             # GREATEST keeps the count from dropping when batches finish out of order
-            await DocumentRepository(session).raise_chunks_done(document_id, done)
-            await session.commit()
+            await tx.documents.raise_chunks_done(document_id, done)
+            await tx.commit()
         await context.report({"chunks_done": done})
 
     # Step 4: embed and save the chunks skipping any a previous attempt saved
@@ -181,8 +176,8 @@ async def _index(
 
     # Step 6: suggest topics from the clean headings and chunks
     await _update(context, document_id, stage=FINDING_TOPICS)
-    async with context.session_factory() as session:
-        budget = BudgetService(UsageRepository(session), settings)
+    async with context.transaction() as tx:
+        budget = BudgetService(tx.usage, settings)
         models = await budget.pick_models({Role.HELPER: 1})  # None tries the whole chain
     # Only what passed screening, so a file's injected text can't shape the options a learner sees.
     topics = await suggest_topics(
@@ -194,20 +189,20 @@ async def _index(
     # Step 7: mark the file ready and drop its raw parts
     # The chunks now hold the text, so the original only costs storage. A failed file keeps its
     # parts, so a retry doesn't need another upload.
-    async with context.session_factory() as session:
+    async with context.transaction() as tx:
         # A retry that took over may be reading the parts, and it will finish the file itself.
         # holds_attempt locks the job row so no retry can start until this commits
-        if context.attempt is not None and not await JobRepository(session).holds_attempt(
+        if context.attempt is not None and not await tx.jobs.holds_attempt(
             context.job_id, context.attempt
         ):
             logger.info("file indexing yielded", extra={"document_id": document_id})
             return None
-        documents = DocumentRepository(session)
+        documents = tx.documents
         await documents.update(
             document_id, status=READY, suggested_topics=topics, chunks_done=len(chunks), error=None
         )
         await documents.delete_parts(document_id)  # one DELETE for every part
-        await session.commit()  # ready and parts gone together
+        await tx.commit()  # ready and parts gone together
     logger.info(
         "file indexed",
         extra={
@@ -229,7 +224,7 @@ async def index_material(
             return await _index(context, engine, settings, cache, usage)
         finally:
             # A failed run still spent its quota.
-            async with context.session_factory() as session:
-                budget = BudgetService(UsageRepository(session), settings)
+            async with context.transaction() as tx:
+                budget = BudgetService(tx.usage, settings)
                 budget.record(MATERIALS, context.user_id, None, usage)
-                await session.commit()
+                await tx.commit()

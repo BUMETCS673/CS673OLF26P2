@@ -20,6 +20,7 @@ from app.ai.knowledge.indexing import with_query_cache
 from app.ai.models import (
     AIRateLimited,
     AIUnavailable,
+    ChatModel,
     Role,
     RunModels,
     ai_errors,
@@ -33,6 +34,7 @@ from app.ai.tutor.context import TutorContext, no_similar_cards
 from app.ai.tutor.graph import (
     MAX_MESSAGES,
     TURN_COST,
+    TurnOutcome,
     read_messages,
     resume_turn,
     run_turn,
@@ -122,7 +124,7 @@ class TutorService:
         self, deck_id: int, usage: RunUsage
     ) -> Callable[[str], Awaitable[list[dict]]]:
         """A search limited to this deck, so the model can't reach another one."""
-        # Step 1: load the embedder Without one the search finds nothing
+        # Step 1: load the embedder because the search finds nothing without one
         try:
             embeddings = load_embeddings(self.settings, usage, learner_waiting=True)
         except AIUnavailable:  # with no API key the chat still works without vector search
@@ -134,7 +136,7 @@ class TutorService:
             embeddings = with_query_cache(embeddings, self.cache, model)
 
         async def find_similar(query: str) -> list[dict]:  # a closure with deck_id fixed here
-            # Step 1: embed the query If that fails the tool still has word matches
+            # Step 1: embed the query and fall back to word matches if that fails
             try:
                 with ai_errors():  # vendor errors become ours
                     vector = await embeddings.aembed_query(query)
@@ -158,15 +160,8 @@ class TutorService:
             yield self.cards
             await self.session.commit()  # frees the connection while the model runs
 
-    async def send_message(self, deck: Deck, user: User, text: str) -> TutorView:
-        """Run one turn of the chat, and save what it produced."""
-        # Step 1: refuse if the tutor is off or over its limits then load its two models
-        deck_id = deck.id
-        logger.info("tutor turn started", extra={"user_id": user.id, "deck_id": deck_id})
-        if not self.settings.ai_tutor_enabled:  # a kill switch in the environment
-            raise NotAvailable(TURNED_OFF)  # 503 to the client
-        models = await self._check_budgets(user.id)
-        usage = RunUsage()  # callbacks count each call's model and tokens into this
+    def _load_models(self, models: RunModels, usage: RunUsage) -> tuple[ChatModel, ChatModel]:
+        """The writer and the judge for this turn."""
         try:
             writer = load_chat_model(  # the agent that chats and proposes cards
                 # learner_waiting waits at most 12 s on the rate limiter then falls back
@@ -177,11 +172,12 @@ class TutorService:
             )
         except AIUnavailable as error:  # e.g no API key
             raise NotAvailable(error.message) from None  # 503
+        return writer, judge
 
-        # Step 2: refuse while cards wait for a decision or the chat is full then claim the
-        # chat so a second message can't run a turn at the same time
+    async def _claim(self, deck_id: int, user_id: int) -> TutorConversation:
+        """Claims the deck's chat so a second message can't run a turn at the same time."""
         # INSERT ... ON CONFLICT DO NOTHING keeps one chat per deck even with two first messages
-        conversation = await self.conversations.get_or_create(deck_id, user.id)
+        conversation = await self.conversations.get_or_create(deck_id, user_id)
         if conversation.status == AWAITING_DECISION:
             await self.session.commit()  # keeps a chat row that was just created
             logger.info("tutor refused", extra={"deck_id": deck_id, "reason": "awaiting_decision"})
@@ -195,9 +191,13 @@ class TutorService:
             await self.session.commit()
             logger.info("tutor refused", extra={"deck_id": deck_id, "reason": "still_replying"})
             raise Conflict(STILL_REPLYING)  # 409
+        return conversation
 
-        # Step 3: build the turn's context Only this deck's cards are loaded which is all the
-        # agent's tools can ever read
+    async def _build_context(
+        self, deck: Deck, writer: ChatModel, judge: ChatModel, usage: RunUsage
+    ) -> TutorContext:
+        """Loads only this deck's cards because the agent's tools may read nothing else."""
+        deck_id = deck.id
         cards = [
             # lapses show the weak spots
             {"front": card.front, "back": card.back, "lapses": card.lapses}
@@ -220,49 +220,33 @@ class TutorService:
         )
         await self.session.commit()  # holds the claim for other requests and frees the connection
         logger.info("tutor context built", extra={"deck_id": deck_id, "cards": len(cards)})
+        return context
 
-        # Step 4: run the turn A failure is logged by type and handled below
-        outcome = None
+    async def _run(
+        self, context: TutorContext, conversation: TutorConversation, user_id: int, text: str
+    ) -> TurnOutcome | None:
+        """The turn's outcome or None if it failed."""
         try:
             # tags the LangSmith trace with deck, thread, prompt version and opens the chat history
             async with (
                 labelled_trace(
                     "tutor_turn",
-                    user.id,
-                    deck_id=deck_id,
+                    user_id,
+                    deck_id=conversation.deck_id,
                     thread_id=conversation.thread_id,
                     prompt_version=TUTOR_PROMPT_VERSION,
                 ),
                 open_checkpointer(self.settings.database_url) as checkpointer,
             ):
                 # the LangGraph run with agent tools then the judge if cards were proposed
-                outcome = await run_turn(context, checkpointer, conversation.thread_id, text)
+                return await run_turn(context, checkpointer, conversation.thread_id, text)
         except Exception as error:  # caught broadly since the chat must be freed below either way
             # The type only, since the text can contain learner content.
             logger.warning("tutor outcome=turn_error type=%s", type(error).__name__)
+            return None
 
-        # Step 5: save what the calls spent Calls made before a failure still spent quota The
-        # learner may have deleted the deck while the model ran which also deleted this row
-        deleted = await self.conversations.for_deck(deck_id) is None
-        self.budget.record(
-            # None for a deleted deck since the usage row can't point at it
-            TUTOR, user.id, None if deleted else deck_id, usage, TUTOR_PROMPT_VERSION
-        )
-
-        # Step 6: a deleted deck drops the run A failed turn frees the chat for another try
-        if deleted:
-            await self.session.commit()  # the usage row still saves
-            await discard_threads(self.settings.database_url, [conversation.thread_id])
-            logger.info("tutor turn dropped", extra={"deck_id": deck_id, "reason": "deck_deleted"})
-            raise NotFound(DECK_NOT_FOUND)  # 404 to the client
-        if outcome is None:  # the turn failed
-            conversation.status = IDLE  # releases the claim so the learner can try again
-            conversation.status_at = utcnow()
-            await self.session.commit()
-            logger.info("tutor turn failed", extra={"deck_id": deck_id})
-            raise NotAvailable(NO_REPLY)  # 503
-
-        # Step 7: save the turn Proposed cards wait in the chat for the learner's decision
+    async def _save_turn(self, conversation: TutorConversation, outcome: TurnOutcome) -> TutorView:
+        """Proposed cards wait in the chat for the learner's decision."""
         conversation.message_count = len(outcome.messages)  # counted for MAX_MESSAGES
         # proposed cards mean the graph paused at interrupt() waiting for decide()
         conversation.status = AWAITING_DECISION if outcome.proposal else IDLE
@@ -276,18 +260,64 @@ class TutorService:
         logger.info(
             "tutor turn done",
             extra={
-                "deck_id": deck_id,
+                "deck_id": conversation.deck_id,
                 "messages": len(outcome.messages),
                 "proposed_cards": len(outcome.proposal["cards"]) if outcome.proposal else 0,
             },
         )
         return self._view(conversation, outcome.messages)  # 200 with the chat and the new reply
 
+    async def send_message(self, deck: Deck, user: User, text: str) -> TutorView:
+        """Run one turn of the chat, and save what it produced."""
+        # Step 1: refuse if the tutor is off or over its limits then load its two models
+        deck_id = deck.id
+        logger.info("tutor turn started", extra={"user_id": user.id, "deck_id": deck_id})
+        if not self.settings.ai_tutor_enabled:  # a kill switch in the environment
+            raise NotAvailable(TURNED_OFF)  # 503 to the client
+        models = await self._check_budgets(user.id)
+        usage = RunUsage()  # callbacks count each call's model and tokens into this
+        writer, judge = self._load_models(models, usage)
+
+        # Step 2: refuse while cards wait for a decision or the chat is full then claim the
+        # chat so a second message can't run a turn at the same time
+        conversation = await self._claim(deck_id, user.id)
+
+        # Step 3: build the turn's context from this deck's cards alone since the agent's tools
+        # can read nothing else
+        context = await self._build_context(deck, writer, judge, usage)
+
+        # Step 4: run the turn and log any failure by type for the steps below to handle
+        outcome = await self._run(context, conversation, user.id, text)
+
+        # Step 5: save what the calls spent even before a failure and check whether the learner
+        # deleted the deck while the model ran because that also deleted this row
+        deleted = await self.conversations.for_deck(deck_id) is None
+        self.budget.record(
+            # None for a deleted deck since the usage row can't point at it
+            TUTOR, user.id, None if deleted else deck_id, usage, TUTOR_PROMPT_VERSION
+        )
+
+        # Step 6: drop the run for a deleted deck or free the chat for another try after a failure
+        if deleted:
+            await self.session.commit()  # the usage row still saves
+            await discard_threads(self.settings.database_url, [conversation.thread_id])
+            logger.info("tutor turn dropped", extra={"deck_id": deck_id, "reason": "deck_deleted"})
+            raise NotFound(DECK_NOT_FOUND)  # 404 to the client
+        if outcome is None:  # the turn failed
+            conversation.status = IDLE  # releases the claim so the learner can try again
+            conversation.status_at = utcnow()
+            await self.session.commit()
+            logger.info("tutor turn failed", extra={"deck_id": deck_id})
+            raise NotAvailable(NO_REPLY)  # 503
+
+        # Step 7: save the turn with any proposed cards waiting for the learner's decision
+        return await self._save_turn(conversation, outcome)
+
     async def decide(self, deck: Deck, user: User, proposal_id: str, accept: bool) -> TutorView:
         """Add or decline the cards waiting for a decision."""
         deck_id = deck.id
-        # Step 1: lock the chat and check the proposal still waits The lock, the status and the
-        # id tie this approval to one proposal and use it once
+        # Step 1: lock the chat and check that the proposal still waits with the lock, status and id
+        # tying this approval to one proposal used once
         conversation = await self.conversations.for_deck(deck_id, lock=True)  # FOR UPDATE
         proposal = conversation.pending_proposal if conversation else None
         if (
@@ -332,9 +362,9 @@ class TutorService:
             },
         )
 
-        # Step 4: add the closing message to the chat's run The database is the record of what
-        # happened so it commits first A failure here only leaves the closing message out of
-        # the chat and the next message starts a new turn
+        # Step 4: add the closing message to the chat's run only after the database has recorded
+        # the outcome because a failure here then just leaves that message out and the next
+        # message starts a new turn
         closing = (
             f"Added {len(added)} {'card' if len(added) == 1 else 'cards'} to your deck."
             if accept

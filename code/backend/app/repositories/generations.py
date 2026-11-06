@@ -3,20 +3,12 @@
 from datetime import datetime
 
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import AiGeneration
+from app.repositories.base import ModelRepository
 
 
-class GenerationRepository:
-    def __init__(self, session: AsyncSession):
-        self.session = session
-
-    async def add(self, generation: AiGeneration) -> AiGeneration:
-        self.session.add(generation)
-        await self.session.flush()
-        return generation
-
+class GenerationRepository(ModelRepository[AiGeneration]):
     async def get_owned(
         self, generation_id: int, user_id: int, *, lock: bool = False
     ) -> AiGeneration | None:

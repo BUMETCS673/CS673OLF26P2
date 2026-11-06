@@ -1,11 +1,12 @@
 """Queries for users and their sessions."""
 
+from collections.abc import Collection
 from datetime import datetime
 
 from sqlalchemy import ColumnElement, and_, delete, func, literal, select, update
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Card, ChunkReport, Deck, User, UserSession
+from app.repositories.base import ModelRepository
 from app.scheduler import CardState
 
 # A finished deck has at least this many cards, all graduated to review.
@@ -28,13 +29,20 @@ def _finished(since: datetime | None) -> list[ColumnElement[bool]]:
     return conditions
 
 
-class UserRepository:
-    def __init__(self, session: AsyncSession):
-        self.session = session
-
+class UserRepository(ModelRepository[User]):
     async def is_trusted(self, user_id: int) -> bool:
         trusted_at = await self.trusted_at(user_id)
         return trusted_at is not None
+
+    async def trusted_among(self, user_ids: Collection[int]) -> set[int]:
+        """Which of these users are trusted, in one query."""
+        if not user_ids:  # no ids means no query
+            return set()
+        # one primary key IN lookup for the whole batch
+        trusted = await self.session.scalars(
+            select(User.id).where(User.id.in_(user_ids), User.trusted_at.is_not(None))
+        )
+        return set(trusted)
 
     async def trusted_at(self, user_id: int) -> datetime | None:
         return await self.session.scalar(select(User.trusted_at).where(User.id == user_id))
@@ -93,11 +101,6 @@ class UserRepository:
     async def get_by_email(self, email: str) -> User | None:
         """`email` must already be normalized, since a query compares it as given."""
         return await self.session.scalar(select(User).where(User.email == email))
-
-    async def add(self, user: User) -> User:
-        self.session.add(user)
-        await self.session.flush()
-        return user
 
     async def delete(self, user_id: int) -> None:
         """The database's cascade removes everything the user owns."""

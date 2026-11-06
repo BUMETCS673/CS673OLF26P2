@@ -4,10 +4,10 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import ColumnElement, Update, func, or_, select, update
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Job, utcnow
 from app.models.job import DONE, EMBED_CARDS, FAILED, JOBS_CHANNEL, QUEUED, RUNNING
+from app.repositories.base import ModelRepository
 
 RESEND_AFTER = timedelta(minutes=1)  # still queued this long after sending means it was lost
 
@@ -16,14 +16,10 @@ def _retry_is_due(now: datetime) -> ColumnElement[bool]:
     return or_(Job.retry_at.is_(None), Job.retry_at <= now)
 
 
-class JobRepository:
-    def __init__(self, session: AsyncSession):
-        self.session = session
-
+class JobRepository(ModelRepository[Job]):
     async def add(self, job: Job) -> Job:
         """Save a job and announce it. Postgres only delivers the notice if the commit succeeds."""
-        self.session.add(job)
-        await self.session.flush()
+        await super().add(job)  # inserts and flushes the job to give it an id
         await self.session.execute(select(func.pg_notify(JOBS_CHANNEL, "")))
         return job
 

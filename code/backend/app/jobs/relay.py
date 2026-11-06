@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.database import libpq_url
 from app.jobs.execution import MAX_ATTEMPTS, SOMETHING_WENT_WRONG
 from app.models.job import JOBS_CHANNEL
-from app.repositories.jobs import JobRepository
+from app.repositories.unit_of_work import open_unit_of_work
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +34,8 @@ async def relay_once(session_factory: async_sessionmaker[AsyncSession], publish:
     If sending fails, everything rolls back and is sent again later, including any jobs that did
     reach Redis, because a repeat is harmless and a lost job isn't.
     """
-    async with session_factory() as session:  # one transaction for the whole batch
-        jobs = JobRepository(session)
+    async with open_unit_of_work(session_factory) as tx:  # one transaction for the whole batch
+        jobs = tx.jobs
         # Step 1: requeue jobs whose worker died (lease expired) or fail them past 3 attempts
         await jobs.recover_expired(MAX_ATTEMPTS, SOMETHING_WENT_WRONG)  # two set-based UPDATEs
         # Step 2: lock up to 100 jobs due to send
@@ -47,7 +47,7 @@ async def relay_once(session_factory: async_sessionmaker[AsyncSession], publish:
         # Step 4: mark them sent then commit which also releases the row locks
         await jobs.mark_sent(job_ids)  # one UPDATE ... WHERE id IN (...)
         # a crash before this resends so delivery is at-least-once and never lost
-        await session.commit()
+        await tx.commit()
     return len(job_ids)  # a full batch means more may be waiting
 
 

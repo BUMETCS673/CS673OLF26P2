@@ -4,8 +4,9 @@ import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import BudgetExceeded, NotFound
+from app.core.errors import BudgetExceeded, found
 from app.models import Card, Deck, User, utcnow
+from app.repositories.card_reports import CardReportRepository
 from app.repositories.cards import CardRepository
 from app.repositories.generations import GenerationRepository
 from app.repositories.jobs import JobRepository
@@ -27,6 +28,7 @@ class CardService:
         self,
         session: AsyncSession,
         cards: CardRepository,
+        reports: CardReportRepository,
         jobs: JobRepository,
         knowledge: KnowledgeRepository,
         generations: GenerationRepository,
@@ -34,6 +36,7 @@ class CardService:
     ):
         self.session = session  # one request's transaction so nothing saves until commit
         self.cards = cards
+        self.reports = reports
         self.jobs = jobs
         self.knowledge = knowledge
         self.generations = generations
@@ -45,10 +48,8 @@ class CardService:
         await self.jobs.queue_card_embedding(user.id, [card.id], share=False)
 
     async def _owned(self, card_id: int, user: User) -> Card:
-        card = await self.cards.get_owned(card_id, user.id)  # joins the deck to check the owner
-        if card is None:  # missing or someone else's card
-            raise NotFound(CARD_NOT_FOUND)  # 404 never 403 so it doesn't reveal the card exists
-        return card
+        # joins the deck to check the owner
+        return found(await self.cards.get_owned(card_id, user.id), CARD_NOT_FOUND)
 
     async def list_cards(self, deck: Deck) -> list[Card]:
         return await self.cards.list_for_deck(deck.id)  # ownership already checked by OwnedDeck
@@ -90,35 +91,36 @@ class CardService:
         # Step 1: load the learner's card and refuse once they've used today's reports
         card = await self._owned(card_id, user)
         # a rolling 24 hours instead of a calendar day so no burst at midnight
-        reports = await self.cards.count_reports_since(user.id, utcnow() - BUDGET_WINDOW)
+        reports = await self.reports.count_reports_since(user.id, utcnow() - BUDGET_WINDOW)
         if reports >= MAX_REPORTS_PER_DAY:  # caps how much shared content one account can hide
             logger.info("report refused", extra={"card_id": card.id, "reason": "daily_limit"})
             raise BudgetExceeded("You've reached today's limit for reporting cards.")  # 429
 
-        # Step 2: record the report A second report of the same card does nothing more
+        # Step 2: record the report unless the learner already reported this card
         # INSERT ... ON CONFLICT DO NOTHING avoids a race between checking and inserting
-        if not await self.cards.add_report(card.id, user.id):
+        if not await self.reports.add_report(card.id, user.id):
             logger.info("report skipped", extra={"card_id": card.id, "reason": "already_reported"})
             return  # 204 either way since reporting twice isn't an error
 
         # Step 3: hide every shared chunk the card came from which is its own copy, the chunk
         # it confirmed and the material its AI batch was written from
-        hidden = await self.knowledge.hide_card_copy(card.id)  # the card's copy in shared search
+        sources: list[str] = []
         # A second learner's card has no copy of its own, since it confirmed the first learner's.
         if card.confirmed_chunk_id is not None:
-            hidden += await self.knowledge.hide_chunks([str(card.confirmed_chunk_id)])
+            sources.append(str(card.confirmed_chunk_id))
         if card.generation_id is not None:  # an AI card also hides the material it was written from
             generation = await self.generations.get_owned(card.generation_id, user.id)
             if generation is not None:  # None if the batch was deleted with its deck
-                hidden += await self.knowledge.hide_chunks(generation.source_chunk_ids)
+                sources += generation.source_chunk_ids
+        # one UPDATE for the card's copy in shared search and every chunk it came from
+        hidden = await self.knowledge.hide_card_sources(card.id, sources)
 
         # Step 4: count the report against each hidden chunk's author
         trusted = user.trusted_at is not None  # a trusted reporter's reports weigh on trust
         # one insert for every hidden chunk returning the authors it counted against
-        targets = await self.cards.add_chunk_reports(user.id, hidden, trusted)
+        targets = await self.reports.add_chunk_reports(user.id, hidden, trusted)
 
-        # Step 5: take trust away from authors with enough reports Only a trusted report can
-        # be the one that does it
+        # Step 5: let a trusted report take trust away from authors with enough reports
         if trusted:  # untrusted accounts can't knock others' trust down
             now = utcnow()
             for target in targets:  # few authors per card so one check each is cheap

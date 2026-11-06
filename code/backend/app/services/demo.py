@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import NotFound
+from app.core.errors import found
 from app.core.security import hash_password
 from app.models import Card, Deck, User, normalize_email, utcnow
 from app.repositories.cards import CardRepository
@@ -89,15 +89,15 @@ class DemoService:
 
     async def seed(self, *, reset: bool = False) -> list[SeededDeck] | None:
         """The new decks, or None if the demo user already exists and `reset` is off."""
-        # Step 1: keep an existing demo user or delete it when resetting The database's cascade
-        # removes their decks
+        # Step 1: keep an existing demo user or delete it when resetting with the database's
+        # cascade removing their decks
         existing = await self.users.get_by_email(DEMO_EMAIL)
         if existing is not None:
             if not reset:
                 return None  # idempotent so running the seed twice changes nothing
             await self.users.delete(existing.id)  # ON DELETE CASCADE removes decks and cards
 
-        # Step 2: add the demo user One clock reading so every due time is relative to the
+        # Step 2: add the demo user with one clock reading so every due time is relative to the
         # same moment
         now = utcnow()
         user = await self.users.add(  # flushed so the decks can point at its id
@@ -130,9 +130,10 @@ class DemoService:
         """Move a user's due times `days` earlier. Returns their email and how many moved."""
         # Step 1: find the user by email
         # normalized like at sign-up so "Demo@Cadence.local" finds the same user
-        user = await self.users.get_by_email(normalize_email(email))
-        if user is None:
-            raise NotFound(f"No user with the email {email}.")  # the CLI shows this message
+        user = found(
+            await self.users.get_by_email(normalize_email(email)),
+            f"No user with the email {email}.",  # the CLI shows this message
+        )
         # Step 2: move all their cards' due times earlier in one update
         # one UPDATE that shifts due_at in SQL with no rows loaded into Python
         moved = await self.cards.move_due_dates_earlier(user.id, timedelta(days=days))

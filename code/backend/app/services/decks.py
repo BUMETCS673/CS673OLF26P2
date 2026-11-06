@@ -33,8 +33,8 @@ class DeckService:
         return (await self._read_many([deck]))[0]  # one deck as a list of one uses the same query
 
     async def _read_many(self, decks: list[Deck]) -> list[DeckRead]:
-        # Step 1: count every deck's cards and those due now in one grouped query One query
-        # per deck would grow with the deck list
+        # Step 1: count every deck's cards and those due now in one grouped query instead of one
+        # query per deck that would grow with the deck list
         counts = await self.cards.deck_counts([deck.id for deck in decks], utcnow())
         # Step 2: pair each deck with its counts
         return [
@@ -72,7 +72,7 @@ class DeckService:
     async def delete(self, deck: Deck) -> None:
         # Step 1: note the deck's saved LangGraph runs (tutor chat, problem card reviews) first
         thread_ids = await self.decks.graph_thread_ids(deck.id)  # read before the rows go
-        # Step 2: delete the deck Its cards, batches, reviews and chat go with it by cascade
+        # Step 2: delete the deck along with its cards, batches, reviews and chat by cascade
         await self.decks.delete(deck.id)  # one DELETE and ON DELETE CASCADE does the rest
         await self.session.commit()  # the deck is gone even if step 3 fails
         # Step 3: drop those runs' checkpoints which the cascade can't reach

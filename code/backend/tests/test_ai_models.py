@@ -26,7 +26,6 @@ from app.ai.models import (
     ModelSpec,
     Role,
     RunModels,
-    _with_schema,
     agent_model,
     ai_errors,
     check_model_chains,
@@ -38,6 +37,7 @@ from app.ai.models import (
     plan_models,
     structured_reply,
 )
+from app.ai.models.calls import _with_schema
 from app.ai.rate_limits import ModelBusy
 from app.ai.schemas import CardBatch, Verdicts
 from app.core.settings import EMBEDDING_DIMENSIONS, Settings
