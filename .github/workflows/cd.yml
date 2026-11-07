@@ -179,15 +179,20 @@ jobs:
 
       # The hook returns as soon as Render queues the build, so "triggered" is not
       # "live". Poll the deployed app's own health endpoint to find out.
+      # A sleeping backend only wakes for requests from outside Render, so the proxied
+      # /api/health alone gets 502s forever. /wake redirects straight to the backend like
+      # client.js does, and the proxied check then confirms the whole path works.
       - name: Wait for the deployed app to come back healthy
         if: steps.check.outputs.configured == 'true' && vars.APP_URL != ''
         env:
           APP_URL: ${{ vars.APP_URL }}
         run: |
           echo "Polling $APP_URL/api/health for up to 10 minutes"
-          for attempt in $(seq 1 60); do
-            if curl --fail --silent --show-error --max-time 20 "$APP_URL/api/health" > /dev/null; then
-              echo "Healthy after $((attempt * 10))s"
+          deadline=$((SECONDS + 600))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            curl --silent --location --max-time 30 "$APP_URL/wake" > /dev/null || true
+            if curl --fail --silent --max-time 30 "$APP_URL/api/health" | grep -q '"status":"ok"'; then
+              echo "Healthy after ${SECONDS}s"
               exit 0
             fi
             sleep 10
