@@ -195,6 +195,22 @@ jobs:
           echo "::error::$APP_URL/api/health did not recover within 10 minutes"
           exit 1
 
+      # Only the smoke test is needed, so the checkout fetches that one file.
+      - name: Check out the smoke test
+        if: steps.check.outputs.configured == 'true' && vars.APP_URL != ''
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.publish.outputs.sha }}
+          sparse-checkout: code/backend/scripts/mcp_smoke.py
+          sparse-checkout-cone-mode: false
+
+      # Read-only checks that the MCP server and its OAuth discovery point at this site.
+      - name: Smoke-test the MCP server
+        if: steps.check.outputs.configured == 'true' && vars.APP_URL != ''
+        env:
+          APP_URL: ${{ vars.APP_URL }}
+        run: python3 code/backend/scripts/mcp_smoke.py "$APP_URL"
+
       - name: Summary
         if: always()
         run: |
