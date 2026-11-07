@@ -90,7 +90,7 @@ def retriever_with(monkeypatch):
             built.append(fields)
             return retriever
 
-        monkeypatch.setattr(generation, "_build_retriever", build)
+        monkeypatch.setattr(generation, "build_retriever", build)
         return retriever
 
     _retriever_with.built = built
@@ -188,7 +188,7 @@ async def test_prompt_mode_works_without_embeddings_set_up(
     async def not_set_up(*_, **__):
         raise AIUnavailable()
 
-    monkeypatch.setattr(generation, "_build_retriever", not_set_up)
+    monkeypatch.setattr(generation, "build_retriever", not_set_up)
 
     await write_cards(_request(), RunUsage(), engine, settings)
 

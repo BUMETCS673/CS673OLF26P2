@@ -86,7 +86,7 @@ def chunks_for(count: int) -> int:
     return min(max(count * CHUNKS_PER_CARD, MIN_CHUNKS), MAX_CHUNKS)  # 2 per card 6 to 20
 
 
-async def _build_retriever(
+async def build_retriever(
     engine: AsyncEngine,
     settings: Settings,
     usage: RunUsage,
@@ -95,9 +95,11 @@ async def _build_retriever(
     k: int,
     viewer_id: int | None = None,
     cache: ByteStore | None = None,
+    learner_waiting: bool = False,
 ) -> KnowledgeRetriever:
     # usage makes search calls count against the budget
-    embeddings = load_embeddings(settings, usage)
+    # learner_waiting is for a person waiting on the reply rather than a background job
+    embeddings = load_embeddings(settings, usage, learner_waiting=learner_waiting)
     model = model_name(Role.EMBEDDER, settings)
     return KnowledgeRetriever(
         # The store only searches by vector here, so only the retriever embeds.
@@ -140,7 +142,7 @@ async def _search_for_prompt(
         return None
     try:
         k = chunks_for(request.count)
-        return await _build_retriever(
+        return await build_retriever(
             engine,
             settings,
             usage,
@@ -166,7 +168,7 @@ async def _file_material(
     """
     # Step 1: search this one file for the chosen topic
     k = chunks_for(request.count)
-    retriever = await _build_retriever(
+    retriever = await build_retriever(
         engine, settings, usage, document_id=request.document_id, k=k, cache=cache
     )
     with ai_errors():  # vendor errors become ours

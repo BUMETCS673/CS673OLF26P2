@@ -9,8 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import Conflict, Unauthorized
 from app.core.security import (
     hash_password,
-    hash_session_token,
+    hash_token,
     new_session_token,
+    token_hashes,
     verify_password,
 )
 from app.core.settings import Settings
@@ -83,7 +84,7 @@ class AuthService:
     async def logout(self, token: str | None) -> None:
         """Logging out twice isn't an error."""
         if token:  # no cookie means nothing to end
-            await self.users.delete_session(hash_session_token(token))  # found by its hash
+            await self.users.delete_session(token_hashes(token))  # found by its hash
             await self.session.commit()
 
     async def user_for_token(self, token: str | None) -> User:
@@ -91,7 +92,7 @@ class AuthService:
         user = None
         if token:
             # one query for the user only while the session hasn't expired
-            user = await self.users.get_by_session(hash_session_token(token), utcnow())
+            user = await self.users.get_by_session(token_hashes(token), utcnow())
         # Step 2: refuse a missing, unknown or expired session
         if user is None:
             raise Unauthorized("Authentication required.")  # 401 sends the page to login
@@ -103,8 +104,8 @@ class AuthService:
         # Step 2: store only its hash with an expiry
         await self.users.add_session(
             UserSession(
-                # SHA-256 so a leaked table can't be used to sign in
-                token_hash=hash_session_token(token),
+                # a keyed hash so a leaked table can't be used to sign in
+                token_hash=hash_token(token),
                 user_id=user.id,
                 expires_at=utcnow() + timedelta(days=self.settings.session_days),
             )

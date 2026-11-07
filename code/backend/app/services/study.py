@@ -6,7 +6,7 @@ from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import Conflict, found
-from app.models import Deck, User, utcnow
+from app.models import Card, Deck, User, utcnow
 from app.repositories.cards import CardRepository
 from app.repositories.knowledge import KnowledgeRepository
 from app.repositories.users import UserRepository
@@ -29,6 +29,16 @@ def _can_answer(schedule: CardSchedule, now: datetime) -> bool:
     return schedule.due_at <= now + LEARN_AHEAD
 
 
+def _first_cards(due: dict[str, list[Card]], limit: int) -> dict[str, list[Card]]:
+    """At most `limit` cards in study order with learning first, then review, then new."""
+    kept: dict[str, list[Card]] = {}
+    room = limit
+    for group in ("learning", "review", "new"):
+        kept[group] = due[group][:room]  # whatever room the earlier groups left
+        room -= len(kept[group])
+    return kept
+
+
 class StudyService:
     def __init__(
         self,
@@ -44,10 +54,13 @@ class StudyService:
         self.knowledge = knowledge
         self.users = users
 
-    async def due_cards(self, deck: Deck) -> DueCards:
+    async def due_cards(self, deck: Deck, limit: int | None = None) -> DueCards:
+        """The deck's due cards or at most `limit` of them in study order."""
         # Step 1: read the deck's due cards grouped as learning, review and new
         now = utcnow()  # one clock reading for the query and the interval previews
-        due = await self.cards.due_cards(deck.id, now)  # grouped as learning, review and new
+        due = await self.cards.due_cards(deck.id, now, limit)  # grouped as learning, review and new
+        if limit is not None:
+            due = _first_cards(due, limit)  # trimmed before the previews are worked out
         logger.info(
             "due cards read",
             extra={"deck_id": deck.id, **{name: len(cards) for name, cards in due.items()}},

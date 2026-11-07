@@ -6,6 +6,7 @@ from functools import cached_property
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.repositories.api_tokens import ApiTokenRepository
 from app.repositories.card_reports import CardReportRepository
 from app.repositories.cards import CardRepository
 from app.repositories.decks import DeckRepository
@@ -13,6 +14,8 @@ from app.repositories.documents import DocumentRepository
 from app.repositories.generations import GenerationRepository
 from app.repositories.jobs import JobRepository
 from app.repositories.knowledge import KnowledgeRepository
+from app.repositories.oauth_clients import OAuthClientRepository
+from app.repositories.oauth_tokens import OAuthTokenRepository
 from app.repositories.problem_cards import ProblemCardRepository
 from app.repositories.tutor import TutorRepository
 from app.repositories.usage import UsageRepository
@@ -32,6 +35,10 @@ class UnitOfWork:
         await self.session.rollback()
 
     # cached_property builds each repository on first use and reuses it after that
+    @cached_property
+    def api_tokens(self) -> ApiTokenRepository:
+        return ApiTokenRepository(self.session)
+
     @cached_property
     def cards(self) -> CardRepository:
         return CardRepository(self.session)
@@ -59,6 +66,14 @@ class UnitOfWork:
     @cached_property
     def knowledge(self) -> KnowledgeRepository:
         return KnowledgeRepository(self.session)
+
+    @cached_property
+    def oauth_clients(self) -> OAuthClientRepository:
+        return OAuthClientRepository(self.session)
+
+    @cached_property
+    def oauth_tokens(self) -> OAuthTokenRepository:
+        return OAuthTokenRepository(self.session)
 
     @cached_property
     def problem_cards(self) -> ProblemCardRepository:

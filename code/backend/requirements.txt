@@ -11,6 +11,8 @@ pydantic-settings==2.16.2
 python-multipart==0.0.33
 pwdlib[argon2]==0.3.1
 email-validator==2.3.0
+# The MCP server at /api/mcp, in app/mcp/.
+mcp==2.3.0
 # Writes log lines as JSON, in app/core/logs.py.
 python-json-logger==4.2.0
 # Sends metrics and logs over OTLP, to Grafana Cloud, in app/core/telemetry.py.
