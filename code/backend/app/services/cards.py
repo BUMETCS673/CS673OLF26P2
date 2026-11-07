@@ -63,6 +63,18 @@ class CardService:
         logger.info("card created", extra={"deck_id": deck.id, "card_id": card.id})
         return card  # 201 to the client from the router
 
+    async def create_many(self, deck: Deck, user: User, bodies: list[CardCreate]) -> list[Card]:
+        """Several cards in one commit with one embedding job for all of them."""
+        # Step 1: save every card in one multi-row INSERT
+        cards = await self.cards.add_many(
+            [Card(deck_id=deck.id, front=body.front, back=body.back) for body in bodies]
+        )
+        # Step 2: queue one embedding job for them all in the same commit
+        await self.jobs.queue_card_embedding(user.id, [card.id for card in cards], share=False)
+        await self.session.commit()  # all the cards and their job together or none of them
+        logger.info("cards created", extra={"deck_id": deck.id, "cards": len(cards)})
+        return cards
+
     async def update(self, card_id: int, user: User, body: CardUpdate) -> Card:
         # Step 1: load the learner's card
         card = await self._owned(card_id, user)

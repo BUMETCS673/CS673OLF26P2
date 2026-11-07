@@ -62,6 +62,9 @@ services:
       # Render terminates TLS, so the session cookie can and must be Secure here.
       - key: SESSION_COOKIE_SECURE
         value: "1"
+      # Render makes a random key once and keeps it, which the HTTPS setting above requires
+      - key: TOKEN_HASH_KEY
+        generateValue: true
       - key: PORT
         value: "5000"
       # Process counts for the free plan's 512 MB. Change them here or in the dashboard.
@@ -98,6 +101,10 @@ services:
         sync: false
       - key: OTEL_RESOURCE_ATTRIBUTES
         value: deployment.environment.name=production
+      # The frontend's public https address where MCP clients connect. It names the OAuth issuer
+      # and the MCP resource URL and must be the address users see rather than the backend's.
+      - key: PUBLIC_URL
+        sync: false
 
   - type: web
     name: cadence-frontend

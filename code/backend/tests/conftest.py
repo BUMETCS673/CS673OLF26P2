@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from app.ai.checkpoints import close_checkpointers
 from app.core.database import CONNECT_ARGS, get_session
 from app.core.logs import FieldsFilter
-from app.core.security import hash_session_token, new_session_token
+from app.core.security import hash_token, new_session_token
 from app.core.settings import Settings
 from app.dependencies import SESSION_COOKIE
 from app.main import app
@@ -141,7 +141,7 @@ def login_as(client, session):
         token = new_session_token()
         session.add(
             UserSession(
-                token_hash=hash_session_token(token),
+                token_hash=hash_token(token),
                 user_id=user.id,
                 expires_at=utcnow() + timedelta(days=1),
             )

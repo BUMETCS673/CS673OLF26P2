@@ -1,10 +1,14 @@
-"""Password hashing and session tokens."""
+"""Password hashing and the random tokens for sessions and MCP clients."""
 
 import asyncio
 import hashlib
+import hmac
 import secrets
+from datetime import timedelta
 
 from pwdlib import PasswordHash
+
+from app.core.settings import get_settings
 
 _hasher = PasswordHash.recommended()  # Argon2
 
@@ -28,6 +32,30 @@ def new_session_token() -> str:
     return secrets.token_urlsafe(32)
 
 
-def hash_session_token(token: str) -> str:
-    """What the database stores, so a leaked table can't be used to sign in."""
-    return hashlib.sha256(token.encode()).hexdigest()
+API_TOKEN_PREFIX = "cad_"  # makes a leaked token easy to spot in logs and secret scanners
+# how stale a token's last_used_at can get before a request records a new use
+LAST_USED_PRECISION = timedelta(minutes=5)
+
+
+def new_api_token() -> str:
+    return API_TOKEN_PREFIX + secrets.token_urlsafe(32)
+
+
+def hash_token(token: str) -> str:
+    """What the database stores, so a leaked table can't be used to sign in.
+
+    The tokens are random, so a fast hash is enough. The secret key also means a stolen table
+    can't be checked against guesses without the server's environment.
+    """
+    return _keyed_hash(get_settings().token_hash_key, token)
+
+
+def token_hashes(token: str) -> list[str]:
+    """The token's hash under the current key first, then under each old key still accepted."""
+    settings = get_settings()
+    old_keys = [key.strip() for key in settings.token_hash_old_keys.split(",") if key.strip()]
+    return [_keyed_hash(key, token) for key in [settings.token_hash_key, *old_keys]]
+
+
+def _keyed_hash(key: str, token: str) -> str:
+    return hmac.new(key.encode(), token.encode(), hashlib.sha256).hexdigest()  # 64 hex characters

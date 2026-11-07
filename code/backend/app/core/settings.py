@@ -4,12 +4,14 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 EMBEDDING_DIMENSIONS = 768  # changing this means a migration and embedding everything again
 
 _ENV_FILE = Path(__file__).resolve().parents[3] / ".env"  # code/.env
+
+DEV_TOKEN_HASH_KEY = "dev-only-token-hash-key"  # refused once the site is served over HTTPS
 
 _ASYNC_DRIVERS = {
     # Some hosts hand out postgres://, which SQLAlchemy doesn't accept.
@@ -26,6 +28,18 @@ class Settings(BaseSettings):
     redis_url: str = "redis://valkey:6379/0"
     session_cookie_secure: bool = False  # true whenever it's served over HTTPS
     session_days: int = 30
+    # The HMAC key for stored session, API and OAuth token hashes. Changing it signs everyone out.
+    token_hash_key: str  # no default, so a deployment that forgets it won't start
+    # Keys from before a rotation, comma-separated, still accepted for lookups. Keep one for
+    # session_days after replacing it: sessions and OAuth pairs expire by then and API tokens move
+    # to the new key when used. An API token unused in that time stops working.
+    token_hash_old_keys: str = ""
+    # The frontend's address which proxies to the API. MCP clients reach the server and its
+    # OAuth endpoints there and it names the OAuth issuer. Locally it's the Vite dev server.
+    public_url: str = "http://localhost:3000"
+    # OAuth client registrations an hour for each caller address and for the whole site
+    oauth_registrations_per_address_hourly: int = 10
+    oauth_registrations_hourly: int = 50
     log_level: str = "INFO"
     log_format: Literal["json", "text"] = "json"  # text is easier to read in a terminal
 
@@ -75,6 +89,7 @@ class Settings(BaseSettings):
     ai_tutor_enabled: bool = True
     ai_tutor_daily_limit: int = 100  # calls in 24 hours, for the whole site
     ai_tutor_user_daily_limit: int = 20  # and per learner
+    ai_mcp_search_user_daily_limit: int = 50  # knowledge searches by MCP clients per learner
     ai_problem_cards_enabled: bool = True
     # Background reviews' calls in 24 hours, for the whole site and per learner, and how many calls
     # per model they must leave for learners' own requests.
@@ -104,6 +119,13 @@ class Settings(BaseSettings):
             if url.startswith(prefix):
                 return async_prefix + url.removeprefix(prefix)
         return url
+
+    @model_validator(mode="after")
+    def require_a_real_token_key(self) -> "Settings":
+        # HTTPS means a real deployment, where a key everyone can read would protect nothing
+        if self.session_cookie_secure and self.token_hash_key == DEV_TOKEN_HASH_KEY:
+            raise ValueError("Set TOKEN_HASH_KEY to a long random secret when serving over HTTPS")
+        return self
 
     def model_daily_limit(self, model: str) -> int:
         limits = dict(item.strip().split(":") for item in self.ai_model_daily_limits.split(","))

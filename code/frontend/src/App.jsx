@@ -38,6 +38,8 @@ import LoginPage from "./pages/LoginPage";
 import SignupPage from "./pages/SignupPage";
 import TutorPage from "./pages/TutorPage";
 import StudyPage from "./pages/StudyPage";
+import TokensPage from "./pages/TokensPage";
+import ConsentPage from "./pages/ConsentPage";
 
 export default function App() {
   return (
@@ -109,6 +111,25 @@ export default function App() {
           element={
             <ProtectedRoute>
               <TutorPage />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/settings/tokens"
+          element={
+            <ProtectedRoute>
+              <TokensPage />
+            </ProtectedRoute>
+          }
+        />
+
+        {/* An MCP client's OAuth sign-in lands here after login if needed. */}
+        <Route
+          path="/oauth/consent/:requestId"
+          element={
+            <ProtectedRoute>
+              <ConsentPage />
             </ProtectedRoute>
           }
         />

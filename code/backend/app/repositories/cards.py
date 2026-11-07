@@ -200,17 +200,28 @@ class CardRepository(ModelRepository[Card]):
         )
         return result.rowcount
 
-    async def due_cards(self, deck_id: int, now: datetime) -> dict[str, list[Card]]:
-        """What a study session serves: most overdue first, and new cards oldest first."""
+    async def due_cards(
+        self, deck_id: int, now: datetime, limit: int | None = None
+    ) -> dict[str, list[Card]]:
+        """What a study session serves: most overdue first, and new cards oldest first.
+
+        `limit` caps each group for a caller that wants only that many cards in total.
+        """
         conditions = due_conditions(now)
         in_deck = select(Card).where(Card.deck_id == deck_id)
         learning = in_deck.where(conditions["learning"]).order_by(Card.due_at, Card.id)
+        if limit is not None:
+            learning = learning.limit(limit)  # learning has no session cap of its own
         review = (
             in_deck.where(conditions["review"])
             .order_by(Card.due_at, Card.id)
-            .limit(REVIEWS_PER_SESSION)
+            .limit(min(REVIEWS_PER_SESSION, limit or REVIEWS_PER_SESSION))
         )
-        new = in_deck.where(conditions["new"]).order_by(Card.id).limit(NEW_CARDS_PER_SESSION)
+        new = (
+            in_deck.where(conditions["new"])
+            .order_by(Card.id)
+            .limit(min(NEW_CARDS_PER_SESSION, limit or NEW_CARDS_PER_SESSION))
+        )
         return {
             "learning": list(await self.session.scalars(learning)),
             "review": list(await self.session.scalars(review)),

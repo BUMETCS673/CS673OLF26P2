@@ -43,6 +43,7 @@ export default function Header() {
       </Link>
       <div className="app-header-user">
         {/* display_name is optional in the contract, so fall back to the email. */}
+        <Link className="button ghost" to="/settings/tokens">Access tokens</Link>
         <span className="app-header-name">{user.display_name || user.email}</span>
         <button type="button" className="button ghost" onClick={handleLogout} disabled={leaving}>
           {leaving ? "Signing out…" : "Sign out"}

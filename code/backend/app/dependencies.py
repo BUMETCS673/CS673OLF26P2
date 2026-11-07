@@ -13,6 +13,7 @@ from app.jobs.events import JobEvents
 from app.models import Deck, User
 from app.repositories.unit_of_work import UnitOfWork
 from app.schemas.jobs import JobRead
+from app.services.api_tokens import ApiTokenService
 from app.services.auth import AuthService
 from app.services.budget import BudgetService
 from app.services.cards import CardService
@@ -20,6 +21,8 @@ from app.services.decks import DECK_NOT_FOUND, DeckService
 from app.services.generations import GenerationService
 from app.services.jobs import JobService
 from app.services.materials import MaterialService
+from app.services.oauth import OAuthService
+from app.services.oauth_tokens import OAuthTokenService
 from app.services.problem_cards import ProblemCardService
 from app.services.study import StudyService
 from app.services.tutor import TutorService
@@ -48,6 +51,27 @@ async def get_current_user(service: AuthServiceDep, token: SessionToken = None) 
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
+
+
+def get_api_token_service(tx: UnitOfWorkDep) -> ApiTokenService:
+    return ApiTokenService(tx.session, tx.api_tokens)
+
+
+ApiTokenServiceDep = Annotated[ApiTokenService, Depends(get_api_token_service)]
+
+
+def get_oauth_service() -> OAuthService:
+    return OAuthService(get_redis(), get_settings())
+
+
+OAuthServiceDep = Annotated[OAuthService, Depends(get_oauth_service)]
+
+
+def get_oauth_token_service(tx: UnitOfWorkDep) -> OAuthTokenService:
+    return OAuthTokenService(tx.session, tx.oauth_tokens, tx.oauth_clients)
+
+
+OAuthTokenServiceDep = Annotated[OAuthTokenService, Depends(get_oauth_token_service)]
 
 
 def get_deck_service(tx: UnitOfWorkDep) -> DeckService:
