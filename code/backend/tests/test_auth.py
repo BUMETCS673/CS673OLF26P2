@@ -1,11 +1,14 @@
 """POST /api/auth/register, /login and /logout, and GET /me."""
 
+import hashlib
 from datetime import timedelta
 
 import pytest
 from sqlalchemy import select
 
-from app.core.security import hash_session_token
+from app.core import security
+from app.core.security import hash_token
+from app.core.settings import Settings
 from app.models import User, UserSession, utcnow
 
 EMAIL = "miles@bu.edu"
@@ -52,8 +55,16 @@ async def test_the_password_and_token_are_only_stored_hashed(client, session):
     assert PASSWORD not in user.password_hash
     token = resp.cookies["session"]
     stored = await session.scalar(select(UserSession))
-    assert stored.token_hash == hash_session_token(token)
+    assert stored.token_hash == hash_token(token)
     assert stored.token_hash != token
+
+
+def test_a_token_hash_depends_on_the_secret_key(monkeypatch):
+    first = hash_token("same-token")
+    monkeypatch.setattr(security, "get_settings", lambda: Settings(token_hash_key="another-key"))
+
+    assert hash_token("same-token") != first
+    assert first != hashlib.sha256(b"same-token").hexdigest()  # not a plain hash anyone can redo
 
 
 async def test_an_email_is_normalized(client):

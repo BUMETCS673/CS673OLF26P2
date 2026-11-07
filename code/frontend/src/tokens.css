@@ -1,0 +1,52 @@
+/* The access tokens page. */
+
+/* The expiry picker matches the text inputs because styles.css has no select rule. */
+.ws4 .ws4-form select {
+  display: block;
+  width: 100%;
+  padding: 10px var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  font: 400 15px/1.4 var(--font-body);
+  color: var(--color-text);
+}
+
+.ws4 .ws4-form select:focus { border-color: var(--color-primary); }
+
+.ws4 .token-reveal { margin-top: var(--space-5); display: grid; gap: var(--space-3); }
+
+.ws4 .copy-block {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-bg);
+}
+
+.ws4 .copy-block-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.ws4 .copy-block pre {
+  margin: 0;
+  padding: var(--space-3);
+  overflow-x: auto; /* long tokens scroll instead of stretching the page */
+  font-size: 0.85rem;
+}
+
+.ws4 .token-list { list-style: none; padding: 0; display: grid; gap: var(--space-3); }
+
+.ws4 .token-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+.ws4 .connected-apps { margin-top: var(--space-7); }

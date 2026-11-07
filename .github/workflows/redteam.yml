@@ -15,6 +15,9 @@ on:
 permissions:
   contents: read
 
+env:
+  TOKEN_HASH_KEY: dev-only-token-hash-key  # the app needs one, and nothing here is real
+
 jobs:
   redteam:
     # A fork's pull request doesn't get this repository's secrets.

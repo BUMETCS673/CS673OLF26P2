@@ -23,6 +23,7 @@ PROBLEM_CARDS = "problem_cards"
 TUTOR = "tutor"
 MATERIALS = "materials"
 SUGGESTIONS = "suggestions"
+MCP_SEARCH = "mcp_search"
 
 # Which limit a run would pass.
 SITE = "site"

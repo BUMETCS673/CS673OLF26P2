@@ -106,21 +106,21 @@ class UserRepository(ModelRepository[User]):
         """The database's cascade removes everything the user owns."""
         await self.session.execute(delete(User).where(User.id == user_id))
 
-    async def get_by_session(self, token_hash: str, now: datetime) -> User | None:
+    async def get_by_session(self, token_hashes: list[str], now: datetime) -> User | None:
         """The user a live session belongs to."""
         return await self.session.scalar(
             select(User)
             .join(UserSession, UserSession.user_id == User.id)
-            .where(UserSession.token_hash == token_hash, UserSession.expires_at > now)
+            .where(UserSession.token_hash.in_(token_hashes), UserSession.expires_at > now)
         )
 
     async def add_session(self, user_session: UserSession) -> None:
         self.session.add(user_session)
         await self.session.flush()
 
-    async def delete_session(self, token_hash: str) -> None:
+    async def delete_session(self, token_hashes: list[str]) -> None:
         await self.session.execute(
-            delete(UserSession).where(UserSession.token_hash == token_hash)
+            delete(UserSession).where(UserSession.token_hash.in_(token_hashes))
         )
 
     async def delete_expired_sessions(self, user_id: int, now: datetime) -> None:

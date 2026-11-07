@@ -21,6 +21,7 @@ from app.core.settings import get_settings
 from app.core.telemetry import start_telemetry
 from app.jobs.broker import broker
 from app.jobs.card_embedding import embed_cards
+from app.jobs.cleanup import run_cleanup
 from app.jobs.events import JobEvents
 from app.jobs.execution import Handler, JobContext, run_job
 from app.jobs.generation import generate_cards, write_cards
@@ -93,15 +94,18 @@ async def start_relay(state: TaskiqState) -> None:
     state.relay = asyncio.create_task(  # a background task so startup returns at once
         run_relay(settings.database_url, get_session_factory(), _publish)
     )
+    # Step 4: clean up expired OAuth rows every hour, also in the background
+    state.cleanup = asyncio.create_task(run_cleanup(get_session_factory()))
 
 
 @broker.on_event(TaskiqEvents.WORKER_SHUTDOWN)
 async def stop_relay(state: TaskiqState) -> None:
     """In this order, since the relay uses the database until it stops."""
-    # Step 1: stop the relay and wait for it to finish its current batch
-    state.relay.cancel()
-    with suppress(asyncio.CancelledError):  # cancelling raises this inside the task
-        await state.relay
+    # Step 1: stop the relay and the cleanup, and wait for them to finish their current work
+    for task in (state.relay, state.cleanup):
+        task.cancel()
+        with suppress(asyncio.CancelledError):  # cancelling raises this inside the task
+            await task
     # Step 2: flush what's still buffered in threads since both calls block
     await asyncio.to_thread(wait_for_all_tracers)  # LangSmith traces
     await asyncio.to_thread(state.stop_telemetry)  # the last metrics and logs

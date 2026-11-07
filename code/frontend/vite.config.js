@@ -19,6 +19,12 @@ export default defineConfig({
       "/api": {
         target: apiTarget,
         changeOrigin: true
+      },
+      // The MCP server's OAuth endpoints and discovery files, which the SDK serves at the root.
+      // Vite tests the URL with its query string and each path has to end at "?" or the end.
+      "^/((authorize|token|register|revoke)(\\?|$)|\\.well-known/oauth-)": {
+        target: apiTarget,
+        changeOrigin: true
       }
     },
     watch: {

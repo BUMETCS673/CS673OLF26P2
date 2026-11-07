@@ -26,6 +26,7 @@ concurrency:
 env:
   PYTHON_VERSION: "3.12"
   NODE_VERSION: "22"
+  TOKEN_HASH_KEY: dev-only-token-hash-key  # the app needs one, and nothing here is real
 
 jobs:
   backend-lint:

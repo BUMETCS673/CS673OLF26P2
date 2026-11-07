@@ -2,10 +2,12 @@
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 from sqlalchemy.exc import OperationalError
 
+from app.core.body_limit import BODY_MAX
 from app.core.database import get_session
-from app.core.settings import Settings
+from app.core.settings import DEV_TOKEN_HASH_KEY, Settings
 from app.main import app
 
 
@@ -25,6 +27,23 @@ def client():
 )
 def test_the_database_url_always_uses_an_async_driver(url, expected):
     assert Settings(database_url=url).database_url == expected
+
+
+def test_https_refuses_the_dev_token_key():
+    with pytest.raises(ValidationError, match="TOKEN_HASH_KEY"):
+        Settings(session_cookie_secure=True, token_hash_key=DEV_TOKEN_HASH_KEY)
+
+    assert Settings(session_cookie_secure=True, token_hash_key="a-real-secret").token_hash_key
+
+
+def test_a_body_over_the_limit_is_413(client):
+    # streamed in chunks with no Content-Length, so only counting can catch it
+    chunks = (b"x" * 65536 for _ in range(BODY_MAX // 65536 + 1))
+
+    resp = client.post("/api/auth/login", content=chunks)
+
+    assert resp.status_code == 413
+    assert resp.json()["error"]["code"] == "too_large"
 
 
 def test_liveness_needs_no_database(client):
