@@ -1,0 +1,34 @@
+name: Wake
+
+# Started by the Cloudflare Worker through the GitHub API when the backend is asleep.
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  # one run at a time and at most one waiting
+  group: wake
+  cancel-in-progress: false
+
+jobs:
+  wake:
+    name: Wake the backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: production  # holds the API_ORIGIN secret
+    steps:
+      - name: Poll the backend until it answers
+        env:
+          API_ORIGIN: ${{ secrets.API_ORIGIN }}
+        run: |
+          deadline=$((SECONDS + 180))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            if curl --fail --silent --max-time 30 "$API_ORIGIN/api/health" | grep -q '"status":"ok"'; then
+              echo "Awake after ${SECONDS}s"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::the backend did not answer within 3 minutes"
+          exit 1
