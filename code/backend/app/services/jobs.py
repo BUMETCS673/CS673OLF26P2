@@ -8,7 +8,8 @@ from fastapi.sse import ServerSentEvent
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import found
-from app.jobs.events import READ_FAILURES, JobEvents
+from app.jobs.event_hub import JobEventHub
+from app.jobs.events import READ_FAILURES
 from app.models import Job, User
 from app.repositories.jobs import JobRepository
 from app.schemas.jobs import JobEvent, JobRead
@@ -21,10 +22,10 @@ WAIT_SECONDS = 15.0  # how long to wait on Redis before checking the job's row a
 
 
 class JobService:
-    def __init__(self, session: AsyncSession, jobs: JobRepository, events: JobEvents):
+    def __init__(self, session: AsyncSession, jobs: JobRepository, events: JobEventHub):
         self.session = session  # one request's transaction so nothing saves until commit
         self.jobs = jobs
-        self.events = events  # the Redis stream the worker publishes each status to
+        self.events = events  # reads the Redis streams the worker publishes each status to
 
     async def _owned(self, job_id: int, user_id: int) -> Job:
         return found(await self.jobs.get_owned(job_id, user_id), JOB_NOT_FOUND)
@@ -57,7 +58,7 @@ class JobService:
         while True:
             # Step 2: wait on Redis for the job's next events and keep going if Redis fails
             try:
-                # XREAD BLOCK waits in one call with no polling returning as soon as an event lands
+                # the hub's shared XREAD returns as soon as an event lands, with no polling
                 entries = await self.events.read(job_id, after, int(WAIT_SECONDS * 1000))
             except READ_FAILURES as error:
                 logger.warning("job follow outcome=redis_failed type=%s", type(error).__name__)

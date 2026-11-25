@@ -1,5 +1,6 @@
 """Reading a job, and following it live."""
 
+import asyncio
 import json
 
 import pytest
@@ -8,6 +9,7 @@ from sqlalchemy import update
 
 from app.core.redis import get_redis
 from app.jobs import events as job_events
+from app.jobs.event_hub import JobEventHub
 from app.jobs.events import EXPIRE_SECONDS, JobEvents, stream_key
 from app.jobs.execution import run_job
 from app.models import Job
@@ -203,7 +205,7 @@ async def test_events_expire_and_read_back_in_order(make_job, redis_events):
     await events.publish(job.id, JobEvent(status=RUNNING))
     await events.publish(job.id, JobEvent(status=DONE))
 
-    read = await events.read(job.id, job_events.START, 1)
+    read = await JobEventHub(get_redis()).read(job.id, job_events.START, 2000)
     assert [event.status for _, event in read] == [RUNNING, DONE]
     assert 0 < await get_redis().ttl(stream_key(job.id)) <= EXPIRE_SECONDS
 
@@ -288,3 +290,77 @@ async def test_a_handler_can_report_progress(session_factory, make_job):
     await run_job(job.id, session_factory, {"test": handler}, publish_event=publish)
 
     assert sent[1] == JobEvent(status=RUNNING, progress={"stage": "reading"})
+
+
+# --- the shared reader --------------------------------------------------------------------
+
+
+class _CountingRedis:
+    """Real Redis, recording which streams each XREAD asked for."""
+
+    def __init__(self):
+        self.reads = []
+
+    async def xread(self, streams, block):
+        self.reads.append(dict(streams))
+        return await get_redis().xread(streams, block=block)
+
+
+async def test_one_read_serves_followers_of_different_jobs(make_job, redis_events):
+    first, second = await make_job(), await make_job()
+    for job in (first, second):
+        await (await redis_events(job.id)).publish(job.id, JobEvent(status=RUNNING))
+    redis = _CountingRedis()
+    hub = JobEventHub(redis)
+
+    a, b = await asyncio.gather(
+        hub.read(first.id, job_events.START, 2000), hub.read(second.id, job_events.START, 2000)
+    )
+
+    assert [event.status for _, event in a] == [RUNNING]
+    assert [event.status for _, event in b] == [RUNNING]
+    assert redis.reads[0].keys() == {stream_key(first.id), stream_key(second.id)}
+
+
+async def test_each_follower_of_a_job_gets_what_it_has_not_seen(make_job, redis_events):
+    job = await make_job()
+    events = await redis_events(job.id)
+    await events.publish(job.id, JobEvent(status=RUNNING))
+    await events.publish(job.id, JobEvent(status=DONE))
+    hub = JobEventHub(get_redis())
+    everything = await hub.read(job.id, job_events.START, 2000)
+
+    behind, caught_up = await asyncio.gather(
+        hub.read(job.id, job_events.START, 2000), hub.read(job.id, everything[0][0], 2000)
+    )
+
+    assert [event_id for event_id, _ in behind] == [event_id for event_id, _ in everything]
+    assert [event_id for event_id, _ in caught_up] == [everything[1][0]]
+
+
+async def test_a_wait_with_no_events_is_empty_and_the_reader_stops(make_job, redis_events):
+    job = await make_job()
+    await redis_events(job.id)
+    hub = JobEventHub(get_redis())
+
+    assert await hub.read(job.id, job_events.START, 50) == []
+    await asyncio.wait_for(hub._reader, 3)  # its current round ends and nobody is waiting
+    assert hub._reader.done()
+
+
+async def test_a_redis_failure_reaches_every_follower(make_job):
+    class _Down:
+        async def xread(self, *_, **__):
+            raise RedisConnectionError
+
+    first, second = await make_job(), await make_job()
+    hub = JobEventHub(_Down())
+
+    results = await asyncio.gather(
+        hub.read(first.id, job_events.START, 2000),
+        hub.read(second.id, job_events.START, 2000),
+        return_exceptions=True,
+    )
+
+    assert all(isinstance(result, RedisConnectionError) for result in results)
+    await asyncio.wait_for(hub._reader, 3)  # it pauses, then stops with nobody waiting
