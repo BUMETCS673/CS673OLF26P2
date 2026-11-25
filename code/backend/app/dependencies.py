@@ -9,7 +9,7 @@ from app.core.database import SessionDep
 from app.core.errors import found
 from app.core.redis import get_redis
 from app.core.settings import get_settings
-from app.jobs.events import JobEvents
+from app.jobs.event_hub import get_event_hub
 from app.models import Deck, User
 from app.repositories.unit_of_work import UnitOfWork
 from app.schemas.jobs import JobRead
@@ -90,8 +90,9 @@ DeckServiceDep = Annotated[DeckService, Depends(get_deck_service)]
 CardServiceDep = Annotated[CardService, Depends(get_card_service)]
 
 
-def get_job_service(tx: UnitOfWorkDep) -> JobService:
-    return JobService(tx.session, tx.jobs, JobEvents(get_redis()))
+async def get_job_service(tx: UnitOfWorkDep) -> JobService:
+    # async so it runs on the event loop, whose hub it uses, rather than in a thread
+    return JobService(tx.session, tx.jobs, get_event_hub())
 
 
 JobServiceDep = Annotated[JobService, Depends(get_job_service)]

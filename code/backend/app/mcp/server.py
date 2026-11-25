@@ -184,7 +184,7 @@ async def get_job(job_id: int) -> JobRead:
     A finished generation's cards wait for the user to review in Cadence.
     """
     async with _tool_call() as (tx, user):
-        return await get_job_service(tx).get(job_id, user)  # someone else's job is not found
+        return await (await get_job_service(tx)).get(job_id, user)  # someone else's job is not found
 
 
 def build_mcp_app() -> Starlette:
