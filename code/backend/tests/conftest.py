@@ -13,12 +13,14 @@ from httpx import ASGITransport, AsyncClient
 from opentelemetry import metrics
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+from redis.exceptions import RedisError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from app.ai.checkpoints import close_checkpointers
 from app.core.database import CONNECT_ARGS, get_session
 from app.core.logs import FieldsFilter
+from app.core.redis import get_redis
 from app.core.security import hash_token, new_session_token
 from app.core.settings import Settings
 from app.dependencies import SESSION_COOKIE
@@ -29,6 +31,18 @@ from app.repositories.users import UserRepository
 _METRICS = InMemoryMetricReader()
 # OpenTelemetry lets a process set its provider only once, so the whole run shares one.
 metrics.set_meter_provider(MeterProvider(metric_readers=[_METRICS]))
+
+
+@pytest.fixture(autouse=True)
+async def clear_login_limits():
+    """Starts each test at zero, since failed sign-ins stay counted in Redis for 15 minutes."""
+    redis = get_redis()
+    try:
+        keys = [key async for key in redis.scan_iter("login:failed:*")]
+        if keys:
+            await redis.delete(*keys)
+    except RedisError:
+        pass  # without Redis the limit is skipped, so there's nothing to clear
 
 
 @pytest.fixture

@@ -44,12 +44,4 @@ class JobEvents:
         except READ_FAILURES as error:
             logger.warning("job event outcome=failed type=%s", type(error).__name__)
 
-    async def read(self, job_id: int, after: str, block_ms: int) -> list[tuple[str, JobEvent]]:
-        """Events after a position, waiting up to `block_ms` for one. Empty if none arrives."""
-        # XREAD BLOCK holds the call until an event lands or time runs out with no polling
-        streams = await self.redis.xread({stream_key(job_id): after}, block=block_ms)
-        return [  # flattened to (stream id, event) the id being the SSE Last-Event-ID
-            (event_id, JobEvent.model_validate_json(fields["data"]))  # validated not trusted
-            for _, entries in streams  # one stream asked for so at most one entry here
-            for event_id, fields in entries
-        ]
+    # Reading is the hub's job (app/jobs/event_hub.py), so one connection serves every follower.

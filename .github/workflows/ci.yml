@@ -244,6 +244,11 @@ jobs:
       # import path or broken JSX fails here.
       - run: npm run build
 
+      # Bundles the Worker with the build above without deploying, so a broken wrangler.jsonc
+      # or Worker fails here instead of in CD. Same wrangler version as cd.yml.
+      - name: Check the Cloudflare Worker bundles
+        run: npx --yes wrangler@4.168.0 deploy --dry-run --outdir "$RUNNER_TEMP/worker"
+
       - name: Upload build
         uses: actions/upload-artifact@v4
         with:
@@ -259,7 +264,7 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
-      # Builds the `prod` targets -- the ones CD pushes. Until now nothing built these
+      # Builds the backend's `prod` target -- the one CD pushes. Until now nothing built these
       # images at all, so a broken Dockerfile passed CI and failed at `compose up`.
       # No push here: that's cd.yml's job, and it only runs after this passes.
       - name: Build backend image
@@ -273,26 +278,9 @@ jobs:
           cache-from: type=gha,scope=backend
           cache-to: type=gha,scope=backend,mode=max
 
-      - name: Build frontend image
-        uses: docker/build-push-action@v7
-        with:
-          context: code/frontend
-          target: prod
-          push: false
-          load: true
-          tags: cadence-frontend:ci
-          cache-from: type=gha,scope=frontend
-          cache-to: type=gha,scope=frontend,mode=max
-          # The prod stage's `apk upgrade` is how this image picks up Alpine security
-          # patches. Served from cache, it never runs again, and Trivy fails the build as
-          # soon as a new CVE is published against the stale layer (OpenSSL, Oct 2026).
-          # The stage is the upgrade plus two COPYs, so rebuilding it costs seconds;
-          # npm ci and vite build above it still come from the cache.
-          no-cache-filters: prod
-
       # CodeQL reads our source; this reads everything underneath it -- the Debian and
       # Alpine packages in the base images, and the installed Python and npm dependencies.
-      # A CVE in uvicorn or nginx is invisible to CodeQL and shows up here.
+      # A CVE in uvicorn is invisible to CodeQL and shows up here.
       #
       # HIGH and CRITICAL only, and only ones with a fix available: an unfixable CVE in a
       # base image is not something this team can act on, and a build that is red for
@@ -301,15 +289,6 @@ jobs:
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: cadence-backend:ci
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          exit-code: "1"
-          format: table
-
-      - name: Scan frontend image
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          image-ref: cadence-frontend:ci
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           exit-code: "1"

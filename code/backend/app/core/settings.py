@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     # OAuth client registrations an hour for each caller address and for the whole site
     oauth_registrations_per_address_hourly: int = 10
     oauth_registrations_hourly: int = 50
+    # Failed sign-ins allowed in 15 minutes for one email and for one caller address
+    login_failures_per_email: int = 10
+    login_failures_per_address: int = 50
     log_level: str = "INFO"
     log_format: Literal["json", "text"] = "json"  # text is easier to read in a terminal
 

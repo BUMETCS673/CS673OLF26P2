@@ -24,7 +24,11 @@ function stubBackend(response = () => new Response('{"ok":true}')) {
   return sent;
 }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 test('an API call goes to the backend with the same path, query, method, cookie and body', async () => {
   const sent = stubBackend();
@@ -53,7 +57,7 @@ test('the OAuth endpoints and discovery files are forwarded too', async () => {
   assert.equal(sent.length, 6);
 });
 
-test('paths the globs catch but nginx never forwarded get the static files', async () => {
+test('paths the globs catch that aren\'t backend paths get the static files', async () => {
   const sent = stubBackend();
   const { env, assets } = makeEnv();
   for (const path of ['/tokens', '/register-now', '/.well-known/oauth-', '/api']) {
@@ -107,4 +111,101 @@ test("the backend's response is returned as is, so a stream isn't buffered", asy
   const response = await worker.fetch(new Request(`${SITE}/api/jobs/4/events`), env);
 
   assert.equal(response, backendResponse);
+});
+
+// A sleeping backend's answer, with GitHub's dispatch endpoint stubbed alongside it
+function stubSleepingBackend(dispatchStatus = 204) {
+  const dispatches = [];
+  vi.stubGlobal('fetch', async (request, options) => {
+    if (String(request).startsWith('https://api.github.com/')) {
+      dispatches.push({ url: String(request), options });
+      return new Response(null, { status: dispatchStatus });
+    }
+    return new Response('rate limited', { status: 429, headers: { 'x-render-routing': 'hibernate-rate-limited' } });
+  });
+  return dispatches;
+}
+
+// Collects what the Worker hands to waitUntil so a test can wait for it
+function makeCtx() {
+  const pending = [];
+  return { pending, ctx: { waitUntil: (promise) => pending.push(promise) } };
+}
+
+// The cooldown lives in the module, so each test starts far from the last one's clock
+let clock = Date.UTC(2026, 0, 1);
+function nextClock() {
+  clock += 60 * 60_000;
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(clock);
+}
+
+function wakeEnv() {
+  const { env } = makeEnv();
+  return { ...env, GITHUB_REPO: 'owner/repo', GITHUB_WAKE_TOKEN: 'token' };
+}
+
+test('a sleeping backend starts the wake workflow and the browser gets a plain text 503', async () => {
+  nextClock();
+  const dispatches = stubSleepingBackend();
+  const { ctx, pending } = makeCtx();
+  const response = await worker.fetch(new Request(`${SITE}/api/health`), wakeEnv(), ctx);
+  await Promise.all(pending);
+
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get('Content-Type'), 'text/plain');
+  assert.equal(dispatches.length, 1);
+  assert.equal(dispatches[0].url, 'https://api.github.com/repos/owner/repo/actions/workflows/wake.yml/dispatches');
+  assert.equal(dispatches[0].options.headers.Authorization, 'Bearer token');
+  assert.deepEqual(JSON.parse(dispatches[0].options.body), { ref: 'develop' });
+});
+
+test('requests during the cooldown do not start another wake', async () => {
+  nextClock();
+  const dispatches = stubSleepingBackend();
+  const { ctx, pending } = makeCtx();
+  for (let i = 0; i < 3; i += 1) {
+    await worker.fetch(new Request(`${SITE}/api/health`), wakeEnv(), ctx);
+  }
+  await Promise.all(pending);
+  assert.equal(dispatches.length, 1);
+
+  vi.setSystemTime(clock + 3 * 60_000); // past the cooldown
+  await worker.fetch(new Request(`${SITE}/api/health`), wakeEnv(), ctx);
+  await Promise.all(pending);
+  assert.equal(dispatches.length, 2);
+});
+
+test('a failed dispatch lets the next request try again', async () => {
+  nextClock();
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+  const dispatches = stubSleepingBackend(401);
+  const { ctx, pending } = makeCtx();
+  await worker.fetch(new Request(`${SITE}/api/health`), wakeEnv(), ctx);
+  await Promise.all(pending);
+  await worker.fetch(new Request(`${SITE}/api/health`), wakeEnv(), ctx);
+  await Promise.all(pending);
+
+  assert.equal(dispatches.length, 2);
+});
+
+test('without a GitHub token the browser still gets the 503 and nothing is dispatched', async () => {
+  nextClock();
+  const dispatches = stubSleepingBackend();
+  const { env } = makeEnv();
+  const { ctx } = makeCtx();
+  const response = await worker.fetch(new Request(`${SITE}/api/health`), env, ctx);
+
+  assert.equal(response.status, 503);
+  assert.equal(dispatches.length, 0);
+});
+
+test('a 429 from the backend itself is passed through', async () => {
+  nextClock();
+  const sent = stubBackend(() => new Response('{"error":{}}', { status: 429 }));
+  const { ctx } = makeCtx();
+  const response = await worker.fetch(new Request(`${SITE}/api/auth/login`), wakeEnv(), ctx);
+
+  assert.equal(response.status, 429);
+  assert.equal(sent.length, 1); // the backend call only, no dispatch
 });

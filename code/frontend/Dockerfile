@@ -1,12 +1,7 @@
 # syntax=docker/dockerfile:1
 
-# Two targets from one file:
-#
-#   dev  -> Vite's dev server on :3000, source bind-mounted by docker-compose
-#   prod -> `vite build` output served by nginx on :8080   (what CD pushes)
-#
-# The prod image carries no node_modules and no Node runtime -- just static files and
-# nginx, which is why it's ~50 MB instead of ~400 MB.
+# Vite's dev server on :3000, with the source bind-mounted by docker-compose. Production is
+# the Cloudflare Worker in wrangler.jsonc, so there's no prod image.
 
 FROM node:22-alpine AS deps
 
@@ -26,30 +21,3 @@ COPY . .
 EXPOSE 3000
 
 CMD ["npm", "run", "dev"]
-
-
-FROM deps AS build
-
-COPY . .
-
-RUN npm run build
-
-
-# The stable line. 1.27's Alpine 3.21 never got the libexpat fix for CVE-2026-117610/118370.
-FROM nginx:1.30-alpine AS prod
-
-# Same reason as the backend: the pinned tag lags the distro's patched packages. This is
-# where the openssl and c-ares CVEs Trivy reported get fixed.
-RUN apk upgrade --no-cache
-
-# The official image runs envsubst over everything in templates/ at startup. The filter
-# restricts that to API_ORIGIN, so nginx's own $host / $remote_addr survive untouched.
-ENV NGINX_ENVSUBST_FILTER="^(API_ORIGIN|PORT)$" \
-    API_ORIGIN="http://backend:5000" \
-    PORT=8080
-
-COPY nginx.conf.template /etc/nginx/templates/default.conf.template
-COPY --from=build /app/dist /usr/share/nginx/html
-
-# 8080, not 80: an unprivileged port, so the container can drop root if a host asks it to.
-EXPOSE 8080

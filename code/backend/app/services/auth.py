@@ -18,6 +18,7 @@ from app.core.settings import Settings
 from app.models import User, UserSession, utcnow
 from app.repositories.users import UserRepository
 from app.schemas.auth import MAX_PASSWORD_LENGTH, LoginRequest, RegisterRequest
+from app.services.login_limits import LoginLimit
 
 logger = logging.getLogger(__name__)
 
@@ -26,10 +27,17 @@ INVALID_CREDENTIALS = "Invalid email or password."  # one message so no hint whi
 
 
 class AuthService:
-    def __init__(self, session: AsyncSession, users: UserRepository, settings: Settings):
+    def __init__(
+        self,
+        session: AsyncSession,
+        users: UserRepository,
+        settings: Settings,
+        login_limit: LoginLimit | None = None,  # None skips the limit, as in tests of other parts
+    ):
         self.session = session  # one request's transaction so nothing saves until commit
         self.users = users
         self.settings = settings
+        self.login_limit = login_limit
 
     async def register(self, body: RegisterRequest) -> tuple[User, str]:
         """The new user, and a session token for their cookie."""
@@ -58,26 +66,37 @@ class AuthService:
         logger.info("user registered", extra={"user_id": user.id})
         return user, token  # router puts the token in an HttpOnly cookie
 
-    async def login(self, body: LoginRequest) -> tuple[User, str]:
-        """The user, and a session token for their cookie."""
-        # Step 1: refuse an overlong password before hashing since no stored one can match it
-        if len(body.password) > MAX_PASSWORD_LENGTH:  # blocks a CPU-burning DoS with huge input
-            logger.info("login refused", extra={"reason": "password_too_long"})
-            raise Unauthorized(INVALID_CREDENTIALS)  # 401 same message as a wrong password
+    async def _refuse(self, reason: str, body: LoginRequest, address: str) -> Unauthorized:
+        """Logs and counts a failed sign-in, and returns the error to raise."""
+        logger.info("login refused", extra={"reason": reason})
+        if self.login_limit is not None:
+            await self.login_limit.record_failure(body.email, address)
+        return Unauthorized(INVALID_CREDENTIALS)  # 401 the same for every reason
 
-        # Step 2: check the password and check unknown emails too so both cases take as long
+    async def login(self, body: LoginRequest, address: str = "unknown") -> tuple[User, str]:
+        """The user, and a session token for their cookie."""
+        # Step 1: refuse while this email or address has had too many recent failures
+        if self.login_limit is not None:
+            await self.login_limit.check(body.email, address)  # 429
+
+        # Step 2: refuse an overlong password before hashing since no stored one can match it
+        if len(body.password) > MAX_PASSWORD_LENGTH:  # blocks a CPU-burning DoS with huge input
+            raise await self._refuse("password_too_long", body, address)
+
+        # Step 3: check the password and check unknown emails too so both cases take as long
         user = await self.users.get_by_email(body.email)
         password_hash = user.password_hash if user else None  # None for an unknown email
         # None is checked against a dummy hash with the same timing so emails can't be probed
         if not await verify_password(body.password, password_hash):
             reason = "wrong_password" if user else "unknown_email"  # told apart in logs only
-            logger.info("login refused", extra={"reason": reason})
-            raise Unauthorized(INVALID_CREDENTIALS)  # 401 the same either way
+            raise await self._refuse(reason, body, address)
 
-        # Step 3: clear the user's expired sessions then start a new one
+        # Step 4: clear the user's expired sessions then start a new one
         await self.users.delete_expired_sessions(user.id, utcnow())  # one DELETE for all
         token = await self._start_session(user)  # random token only its hash stored
         await self.session.commit()  # cleanup and new session in one transaction
+        if self.login_limit is not None:
+            await self.login_limit.clear(body.email, address)
         logger.info("user logged in", extra={"user_id": user.id})
         return user, token  # router puts the token in an HttpOnly cookie
 

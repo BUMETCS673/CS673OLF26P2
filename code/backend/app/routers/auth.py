@@ -4,8 +4,9 @@ Register and login put a session cookie on the response. The frontend calls /me 
 to find out whether someone is still signed in.
 """
 
-from fastapi import APIRouter, Response, status
+from fastapi import APIRouter, Request, Response, status
 
+from app.core.addresses import client_address
 from app.core.settings import get_settings
 from app.dependencies import SESSION_COOKIE, AuthServiceDep, CurrentUser, SessionToken
 from app.schemas.auth import LoginRequest, RegisterRequest, UserRead
@@ -33,8 +34,10 @@ async def register(body: RegisterRequest, response: Response, service: AuthServi
 
 
 @router.post("/login", response_model=UserRead)
-async def login(body: LoginRequest, response: Response, service: AuthServiceDep):
-    user, token = await service.login(body)
+async def login(
+    body: LoginRequest, request: Request, response: Response, service: AuthServiceDep
+):
+    user, token = await service.login(body, client_address(request.scope))
     _set_session_cookie(response, token)
     return user
 

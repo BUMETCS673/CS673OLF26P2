@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Response, status
 
 from app.dependencies import CurrentUser, OwnedDeck, TutorServiceDep
+from app.schemas.generations import JobStarted
 from app.schemas.tutor import ProposalDecision, TutorMessageCreate, TutorView
 
 router = APIRouter(prefix="/api/decks/{deck_id}/tutor", tags=["tutor"])
@@ -13,11 +14,12 @@ async def get_tutor(deck: OwnedDeck, service: TutorServiceDep) -> TutorView:
     return await service.view(deck)
 
 
-@router.post("/messages")
+@router.post("/messages", status_code=status.HTTP_202_ACCEPTED)
 async def send_message(
     deck: OwnedDeck, body: TutorMessageCreate, user: CurrentUser, service: TutorServiceDep
-) -> TutorView:
-    return await service.send_message(deck, user, body.text)
+) -> JobStarted:
+    """Follow the job, then read the chat. A failed job's error says why."""
+    return JobStarted(job_id=await service.start_turn(deck, user, body.text))
 
 
 @router.post("/proposal")
