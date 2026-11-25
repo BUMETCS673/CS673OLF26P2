@@ -4,11 +4,13 @@ import hashlib
 from datetime import timedelta
 
 import pytest
+from redis.exceptions import RedisError
 from sqlalchemy import select
 
+from app import dependencies
 from app.core import security
 from app.core.security import hash_token
-from app.core.settings import Settings
+from app.core.settings import Settings, get_settings
 from app.models import User, UserSession, utcnow
 
 EMAIL = "miles@bu.edu"
@@ -212,3 +214,76 @@ async def test_a_wrong_method_uses_the_same_error_shape(client):
     assert resp.status_code == 405
     assert _error(resp)["code"] == "method_not_allowed"
     assert "allow" in resp.headers
+
+
+TOO_MANY = {
+    "code": "rate_limited",
+    "message": "Too many sign-in attempts. Try again in 15 minutes.",
+}
+
+
+def _login_from(client, address, email=EMAIL, password=PASSWORD):
+    return client.post(
+        "/api/auth/login",
+        json={"email": email, "password": password},
+        headers={"X-Forwarded-For": address},
+    )
+
+
+async def test_too_many_failures_for_an_email_refuse_even_the_right_password(client, monkeypatch):
+    monkeypatch.setattr(get_settings(), "login_failures_per_email", 2)
+    await _register(client)
+    client.cookies.clear()
+
+    for _ in range(2):
+        assert (await _login(client, password="wrong password")).status_code == 401
+    resp = await _login(client)
+
+    assert resp.status_code == 429
+    assert _error(resp) == TOO_MANY
+    assert "set-cookie" not in resp.headers
+
+
+async def test_too_many_failures_from_an_address_refuse_any_email(client, monkeypatch):
+    monkeypatch.setattr(get_settings(), "login_failures_per_address", 2)
+
+    for email in ("a@bu.edu", "b@bu.edu"):
+        assert (await _login_from(client, "203.0.113.9", email)).status_code == 401
+    blocked = await _login_from(client, "203.0.113.9", "c@bu.edu")
+    elsewhere = await _login_from(client, "198.51.100.4", "c@bu.edu")
+
+    assert (blocked.status_code, elsewhere.status_code) == (429, 401)
+
+
+async def test_signing_in_resets_the_emails_count(client, monkeypatch):
+    monkeypatch.setattr(get_settings(), "login_failures_per_email", 2)
+    await _register(client)
+    client.cookies.clear()
+
+    assert (await _login(client, password="wrong password")).status_code == 401
+    assert (await _login(client)).status_code == 200
+    assert (await _login(client, password="wrong password")).status_code == 401
+
+    assert (await _login(client)).status_code == 200
+
+
+class _BrokenRedis:
+    async def mget(self, *_):
+        raise RedisError
+
+    def pipeline(self):
+        raise RedisError
+
+    async def delete(self, *_):
+        raise RedisError
+
+
+async def test_a_redis_outage_lets_sign_ins_through(client, monkeypatch):
+    monkeypatch.setattr(dependencies, "get_redis", _BrokenRedis)
+    monkeypatch.setattr(get_settings(), "login_failures_per_email", 1)
+    await _register(client)
+    client.cookies.clear()
+
+    for _ in range(2):
+        assert (await _login(client, password="wrong password")).status_code == 401
+    assert (await _login(client)).status_code == 200
