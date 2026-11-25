@@ -74,6 +74,10 @@ services:
         value: "1"
       - key: TASKIQ_MAX_ASYNC_TASKS
         value: "20"
+      # Open connections and requests past this get a 503 instead of running the container out of
+      # memory, and the frontend retries 503s. uvicorn reads it from this name by itself.
+      - key: UVICORN_LIMIT_CONCURRENCY
+        value: "100"
       # The real models. Each chat role falls back to other Gemini models once a model's daily
       # limit is reached. Set AI_WRITER_PROVIDER to "fake" in the dashboard for sample cards.
       - key: AI_WRITER_PROVIDER
