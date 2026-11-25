@@ -18,6 +18,7 @@ INDEX_MATERIAL = "index_material"
 GENERATE_CARDS = "generate_cards"
 EMBED_CARDS = "embed_cards"
 REVIEW_PROBLEM_CARDS = "review_problem_cards"
+TUTOR_TURN = "tutor_turn"
 
 JOBS_CHANNEL = "jobs_new"  # the Postgres channel that announces a new job to the relay
 

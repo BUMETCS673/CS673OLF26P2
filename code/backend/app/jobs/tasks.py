@@ -28,7 +28,14 @@ from app.jobs.generation import generate_cards, write_cards
 from app.jobs.indexing import index_material
 from app.jobs.problem_cards import review_problem_cards
 from app.jobs.relay import run_relay
-from app.models.job import EMBED_CARDS, GENERATE_CARDS, INDEX_MATERIAL, REVIEW_PROBLEM_CARDS
+from app.jobs.tutor import run_tutor_turn
+from app.models.job import (
+    EMBED_CARDS,
+    GENERATE_CARDS,
+    INDEX_MATERIAL,
+    REVIEW_PROBLEM_CARDS,
+    TUTOR_TURN,
+)
 
 
 async def _index_material(context: JobContext) -> dict[str, Any] | None:
@@ -53,12 +60,17 @@ async def _review_problem_cards(context: JobContext) -> dict[str, Any] | None:
     return await review_problem_cards(context, get_settings())
 
 
+async def _tutor_turn(context: JobContext) -> None:
+    await run_tutor_turn(context, get_settings(), RedisByteStore(get_redis()))
+
+
 # a job's `kind` column picks its handler so one Taskiq task serves every kind
 HANDLERS: dict[str, Handler] = {
     REVIEW_PROBLEM_CARDS: _review_problem_cards,
     EMBED_CARDS: _embed_cards,
     INDEX_MATERIAL: _index_material,
     GENERATE_CARDS: _generate_cards,
+    TUTOR_TURN: _tutor_turn,
 }
 
 
