@@ -254,7 +254,25 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           API_ORIGIN: ${{ secrets.API_ORIGIN }}
-        run: npx --yes wrangler@4.168.0 deploy --var "API_ORIGIN:$API_ORIGIN"
+        run: |
+          npx --yes wrangler@4.168.0 deploy \
+            --var "API_ORIGIN:$API_ORIGIN" \
+            --var "GITHUB_REPO:$GITHUB_REPOSITORY"
+
+      # The token for starting wake.yml. Without it the Worker skips the wake.
+      - name: Set the Worker's GitHub token
+        if: steps.check.outputs.configured == 'true'
+        working-directory: code/frontend
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          WAKE_TOKEN: ${{ secrets.WAKE_TOKEN }}
+        run: |
+          if [ -z "$WAKE_TOKEN" ]; then
+            echo "::warning::WAKE_TOKEN not set -- the Worker won't wake a sleeping backend. See .github/CICD.md."
+            exit 0
+          fi
+          printf '%s' "$WAKE_TOKEN" | npx --yes wrangler@4.168.0 secret put GITHUB_WAKE_TOKEN
 
       - name: Summary
         if: always()

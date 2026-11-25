@@ -199,18 +199,23 @@ this is done, CD skips the Worker deploy with a warning.
 
 3. **Create an API token.** **My Profile → API Tokens → Create Token**, then use the
    **Edit Cloudflare Workers** template. Under **Account Resources**, include only your account.
-   Cloudflare shows the token once, so copy it straight into step 5.
+   Cloudflare shows the token once, so copy it straight into step 6.
 
 4. **Copy the account ID.** It's on the right of the **Workers & Pages** overview page.
 
-5. **Add them to the `production` GitHub Environment.** Repo **Settings → Environments →
-   production**. Add three secrets:
+5. **Create a GitHub token for waking the backend.** **Settings → Developer settings →
+   Fine-grained tokens → Generate new token**, limited to this repo with only
+   **Actions: Read and write**. The Worker uses it to start `wake.yml`.
+
+6. **Add them to the `production` GitHub Environment.** Repo **Settings → Environments →
+   production**. Add four secrets:
 
    | Secret | Value |
    |---|---|
    | `CLOUDFLARE_API_TOKEN` | the token from step 3 |
    | `CLOUDFLARE_ACCOUNT_ID` | the account ID from step 4 |
    | `API_ORIGIN` | the backend's public address, from `cadence-backend`'s service page |
+   | `WAKE_TOKEN` | the token from step 5, set on the Worker as `GITHUB_WAKE_TOKEN` |
 
    `API_ORIGIN` is only `https://` and the host, with no path. It's a secret so the public
    Actions logs mask it.
