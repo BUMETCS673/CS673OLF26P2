@@ -1,0 +1,12 @@
+# Cache rules for the static files Cloudflare serves. Vite copies this into dist/, and
+# Cloudflare reads it there without serving it. Responses from the Worker don't use it.
+
+# Vite puts a hash in these filenames, so a given URL's contents never change
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# The page itself must never be cached, or browsers keep loading the old bundle after a deploy
+/
+  Cache-Control: no-cache, no-store, must-revalidate
+/index.html
+  Cache-Control: no-cache, no-store, must-revalidate

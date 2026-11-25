@@ -1,7 +1,7 @@
 # Render Blueprint -- the deploy target's infrastructure, in the repo rather than in a
 # dashboard nobody can review. Create it once at
 # https://dashboard.render.com/select-repo?type=blueprint, then CD's deploy hooks take
-# over. Full walkthrough in doc/CICD.md.
+# over. Full walkthrough in .github/CICD.md.
 #
 # Everything here is on Render's free tier. Free web services sleep after 15 minutes
 # idle, so the first request to a cold deployment takes ~30 seconds -- expected, not a
@@ -101,7 +101,8 @@ services:
         sync: false
       - key: OTEL_RESOURCE_ATTRIBUTES
         value: deployment.environment.name=production
-      # The frontend's public https address where MCP clients connect. It names the OAuth issuer
+      # The frontend's public https address where MCP clients connect, which is the Cloudflare
+      # Worker's https://cadence.<subdomain>.workers.dev once it's live. It names the OAuth issuer
       # and the MCP resource URL and must be the address users see rather than the backend's.
       - key: PUBLIC_URL
         sync: false
