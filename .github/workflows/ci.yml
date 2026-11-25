@@ -244,6 +244,11 @@ jobs:
       # import path or broken JSX fails here.
       - run: npm run build
 
+      # Bundles the Worker with the build above without deploying, so a broken wrangler.jsonc
+      # or Worker fails here instead of in CD. Same wrangler version as cd.yml.
+      - name: Check the Cloudflare Worker bundles
+        run: npx --yes wrangler@4.168.0 deploy --dry-run --outdir "$RUNNER_TEMP/worker"
+
       - name: Upload build
         uses: actions/upload-artifact@v4
         with:
