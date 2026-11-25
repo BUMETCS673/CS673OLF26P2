@@ -25,9 +25,9 @@
 const BASE = "/api";
 
 // Render answers with its own 502/503/504 page while the backend restarts after a deploy or a
-// cold start. Each retry goes through the Cloudflare Worker, which also wakes a sleeping backend.
+// cold start. The Worker answers a plain 503 while wake.yml starts a sleeping backend.
 const WAKING_STATUSES = new Set([502, 503, 504]);
-const WAKE_TIMEOUT_MS = 90_000;
+const WAKE_TIMEOUT_MS = 180_000; // a GitHub runner start plus a cold start
 const RETRY_DELAY_MS = 3_000;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
