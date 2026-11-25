@@ -101,29 +101,8 @@ services:
         sync: false
       - key: OTEL_RESOURCE_ATTRIBUTES
         value: deployment.environment.name=production
-      # The frontend's public https address where MCP clients connect, which is the Cloudflare
-      # Worker's https://cadence.<subdomain>.workers.dev once it's live. It names the OAuth issuer
+      # The site's public https address where MCP clients connect, the Cloudflare Worker's
+      # https://cadence.<subdomain>.workers.dev. It names the OAuth issuer
       # and the MCP resource URL and must be the address users see rather than the backend's.
       - key: PUBLIC_URL
-        sync: false
-
-  - type: web
-    name: cadence-frontend
-    runtime: docker
-    plan: free
-    region: ohio
-    # Last stage is `prod`: nginx serving the Vite build.
-    dockerfilePath: ./code/frontend/Dockerfile
-    dockerContext: ./code/frontend
-    autoDeploy: false
-    envVars:
-      - key: PORT
-        value: "8080"
-      # Where nginx forwards /api, set once when the blueprint is created: the backend's
-      # public address, https://cadence-backend-....onrender.com, from its service page.
-      # Not the internal http://cadence-backend:5000: free web services can send
-      # private-network traffic but can't receive it (render.com/docs/private-network).
-      # Keeping the browser on one origin is what makes the session cookie work without
-      # CORS (decision D4).
-      - key: API_ORIGIN
         sync: false

@@ -6,8 +6,8 @@
 // The backend sees these requests coming from outside Render, so a sleeping free-tier backend
 // wakes up on the first one. The request just waits through the cold start.
 
-// The paths nginx used to forward: the API, plus the MCP server's OAuth endpoints and discovery
-// files, which the SDK serves at fixed root paths
+// The backend's paths: the API, plus the MCP server's OAuth endpoints and discovery files,
+// which the SDK serves at fixed root paths
 const PROXIED = /^\/(api\/|(authorize|token|register|revoke)$|\.well-known\/oauth-[a-z-]+(\/.*)?$)/;
 
 export default {
@@ -38,7 +38,7 @@ export default {
     // OAuth's authorize step has to send the browser itself on to the client's redirect URI
     const response = await fetch(forwarded, { redirect: 'manual' });
 
-    // Step 4: point redirects aimed at the backend back at this site, as nginx did by default
+    // Step 4: point redirects aimed at the backend back at this site
     const location = response.headers.get('Location');
     if (location?.startsWith(target.origin)) {
       const rewritten = new Response(response.body, response); // same status, headers and stream

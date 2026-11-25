@@ -53,7 +53,7 @@ test('the OAuth endpoints and discovery files are forwarded too', async () => {
   assert.equal(sent.length, 6);
 });
 
-test('paths the globs catch but nginx never forwarded get the static files', async () => {
+test('paths the globs catch that aren\'t backend paths get the static files', async () => {
   const sent = stubBackend();
   const { env, assets } = makeEnv();
   for (const path of ['/tokens', '/register-now', '/.well-known/oauth-', '/api']) {

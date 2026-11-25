@@ -15,7 +15,7 @@ What runs, when, and what to do when it goes red.
                               +-- Backend tests pg      pytest against Postgres 18
                               +-- Migrations            db upgrade, db check, downgrade round-trip
                               +-- Frontend              eslint, npm test, vite build
-                              +-- Docker                build prod images, Trivy scan, boot the stack
+                              +-- Docker                build the backend prod image, Trivy scan, boot the stack
                               |
                          CodeQL (separate workflow, security + quality)
             |
@@ -25,14 +25,14 @@ What runs, when, and what to do when it goes red.
             v
           CI  --- passes --->  CD
                                 |
-                                +-- publish   SHA-tagged images to GHCR
+                                +-- publish   SHA-tagged backend image to GHCR
                                 +-- deploy    skips with a warning (no staging services)
             |
             v
    merge develop to main
             |
             v
-          CI ---> CD ---> Render production, then poll /api/health
+          CI ---> CD ---> Render backend + Cloudflare Worker, then poll /api/health
 ```
 
 Three workflows:
@@ -51,7 +51,7 @@ start on a commit whose tests were still running or had already failed.
 | Branch | Environment | Deploys to |
 |---|---|---|
 | `develop` | `staging` | nothing: the environment is empty, so deploy skips with a warning |
-| `main` | `production` | the one set of Render services |
+| `main` | `production` | the Render backend and the Cloudflare Worker |
 
 There is one set of Render services, deployed from `main` only.
 
@@ -138,40 +138,23 @@ failing until it is done. So the pipeline is green in the meantime.
 1. **Create the blueprint.** Sign in at [dashboard.render.com](https://dashboard.render.com)
    with the GitHub account that can see `BUMETCS673/CS673OLF26P2`, then
    **New → Blueprint** and pick the repo. It reads `render.yaml` at the root and proposes
-   `cadence-db`, `cadence-backend` and `cadence-frontend`, all on the free tier.
+   `cadence-db`, `cadence-valkey` and `cadence-backend`, all on the free tier.
 
-2. **Fill in `API_ORIGIN`.** The blueprint marks it `sync: false`, so Render asks for it.
-   Set it to the backend's public address, copied from the backend service's page, with
-   nothing after `.onrender.com`: no trailing slash and no path.
+2. **Copy the deploy hook.** On `cadence-backend`: **Settings → Deploy Hook → Copy**. It's a
+   URL containing a secret key, so treat it like a password.
 
-   ```
-   https://cadence-backend-....onrender.com
-   ```
-
-   This is what nginx forwards `/api` to. Don't use the internal
-   `http://cadence-backend:5000`: free web services can send private-network traffic but
-   can't receive it ([Render docs](https://render.com/docs/private-network)). And don't
-   add a trailing slash: when `proxy_pass` has a path, even just `/`, nginx swaps the
-   `/api/` prefix for it, so the backend gets `/health` instead of `/api/health`. Either
-   mistake means the site loads but every API call fails.
-
-3. **Copy the deploy hooks.** For each of `cadence-backend` and `cadence-frontend`:
-   **Settings → Deploy Hook → Copy**. Each is a URL containing a secret key — treat it
-   like a password and never paste it into an issue or a commit.
-
-4. **Create the GitHub Environments.** Repo **Settings → Environments → New environment**,
-   named exactly `staging` and `production`. In `production` only, add two secrets:
+3. **Create the GitHub Environments.** Repo **Settings → Environments → New environment**,
+   named exactly `staging` and `production`. In `production` only, add one secret:
 
    | Secret | Value |
    |---|---|
    | `RENDER_BACKEND_DEPLOY_HOOK` | the backend hook URL |
-   | `RENDER_FRONTEND_DEPLOY_HOOK` | the frontend hook URL |
 
    and one variable:
 
    | Variable | Value |
    |---|---|
-   | `APP_URL` | the frontend's public URL, e.g. `https://cadence-frontend.onrender.com` |
+   | `APP_URL` | the site's public URL, `https://cadence.<subdomain>.workers.dev` |
 
    `APP_URL` is what the post-deploy health poll checks. Leave it unset and the deploy
    still runs, just unverified.
@@ -180,7 +163,7 @@ failing until it is done. So the pipeline is green in the meantime.
    `develop`'s deploy job skips with a warning instead of deploying every merge to the
    live site. Only a green merge to `main` deploys.
 
-5. **Set the AI settings.** On `cadence-backend`'s **Environment** tab, set
+4. **Set the AI settings.** On `cadence-backend`'s **Environment** tab, set
    `GEMINI_API_KEY` and `GEMINI_MODEL` (`gemini-3.5-flash`). Both are `sync: false`, so
    they are always entered by hand and never stored in the repo. `AI_PROVIDER` comes from
    `render.yaml` as `gemini`. To fall back to sample cards, set
@@ -209,9 +192,9 @@ from `main` only, is fine for a semester project; say so in the progress report 
 
 ## Deploy targets: one-time Cloudflare setup
 
-The frontend is moving to a Cloudflare Worker (`code/frontend/wrangler.jsonc`). Cloudflare serves
-the built files, and the Worker forwards `/api` and the OAuth paths to the backend on Render.
-This is done once by hand. Until it is, CD skips the Worker deploy with a warning.
+The frontend is a Cloudflare Worker (`code/frontend/wrangler.jsonc`). Cloudflare serves the
+built files, and the Worker forwards `/api` and the OAuth paths to the backend on Render. Until
+this is done, CD skips the Worker deploy with a warning.
 
 1. **Create a Cloudflare account** at [dash.cloudflare.com](https://dash.cloudflare.com/sign-up).
    The free plan is enough.
@@ -233,30 +216,14 @@ This is done once by hand. Until it is, CD skips the Worker deploy with a warnin
    |---|---|
    | `CLOUDFLARE_API_TOKEN` | the token from step 3 |
    | `CLOUDFLARE_ACCOUNT_ID` | the account ID from step 4 |
-   | `API_ORIGIN` | the backend's public address, the same value as `API_ORIGIN` on `cadence-frontend` in Render |
+   | `API_ORIGIN` | the backend's public address, from `cadence-backend`'s service page |
 
    `API_ORIGIN` is only `https://` and the host, with no path. It's a secret so the public
    Actions logs mask it.
 
-Leave `APP_URL` pointing at the Render frontend for now. It moves to the `workers.dev` address
-once the Worker has been checked end to end, and the Render frontend is removed after that.
-
-### Switching over to the Worker
-
-Once a CD run has deployed the Worker:
-
-1. **Open the `workers.dev` address** and sign in, to see that pages load and the API answers.
-2. **Change both addresses together.** Set `PUBLIC_URL` on `cadence-backend` in Render and
-   `APP_URL` in the `production` GitHub Environment to `https://cadence.<subdomain>.workers.dev`.
-   `PUBLIC_URL` names the OAuth issuer, and the MCP smoke test checks that the issuer matches
-   `APP_URL`. If only one changes, the next deploy's smoke test fails.
-3. **Reconnect MCP clients** to the new address. Ones added with the old address keep pointing
-   at the Render frontend.
-4. **Re-run CD** from the Actions tab (**Run workflow** on `main`). Its health poll and MCP smoke
-   test now go through the Worker.
-
-The Render frontend keeps running until it's removed, so pointing both addresses back at it is
-the rollback.
+`PUBLIC_URL` on `cadence-backend` and `APP_URL` are both the `workers.dev` address. Change them
+together: `PUBLIC_URL` names the OAuth issuer, and the MCP smoke test checks it matches `APP_URL`.
+MCP clients added with an old address need reconnecting.
 
 For `wrangler dev` on your own machine, put `API_ORIGIN=...` in `code/frontend/.dev.vars`. It's
 gitignored.
@@ -299,10 +266,10 @@ gh api repos/BUMETCS673/CS673OLF26P2/branches/develop/protection \
 | Backend tests, "Required test coverage not reached" | new code arrived without tests | add tests, or argue the threshold down in `ci.yml` |
 | Frontend, eslint | most often `react-hooks/exhaustive-deps` — an effect reading a value it doesn't list | add the dependency; don't silence the rule |
 | Frontend, build | a bad import path or broken JSX | `npm run build` locally |
-| Docker, "Build backend/frontend image" | the Dockerfile itself broke | `docker build --target prod code/backend` |
+| Docker, "Build backend image" | the Dockerfile itself broke | `docker build --target prod code/backend` |
 | Docker, "Start the stack" | a container exited during boot | read the "Container logs" step, which only appears on failure |
 | Docker, "Backend answers /api/health" | Flask is up but erroring, usually the database connection | same logs step |
-| Docker, "Scan backend/frontend image" | Trivy found a fixable HIGH/CRITICAL CVE in a base image or dependency | bump the base image tag or the dependency; unfixable ones are already ignored |
+| Docker, "Scan backend image" | Trivy found a fixable HIGH/CRITICAL CVE in a base image or dependency | bump the base image tag or the dependency; unfixable ones are already ignored |
 | **Migrations, "flask db check"** | a model changed without a matching migration | `cd code/backend && FLASK_APP=wsgi.py flask db migrate -m "what changed"`, read the generated file, commit it |
 | Migrations, "downgrade to base and back up" | a migration's `downgrade()` is wrong or incomplete | fix `downgrade()` in the migration file |
 | Docker and both backend test jobs fail together, with `toomanyrequests` or 429 in the log | Docker Hub's anonymous pull limit | re-run the failed jobs |

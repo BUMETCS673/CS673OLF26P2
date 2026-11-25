@@ -24,18 +24,11 @@
 
 const BASE = "/api";
 
-// A free-tier backend on Render sleeps when idle, and while it does, every proxied /api
-// request gets an instant 502/503/504 page from Render instead of our JSON. The browser
-// itself has to reach the backend to wake it (nginx's /wake), and then we retry until
-// it answers. A cold start takes 30-60 seconds.
+// Render answers with its own 502/503/504 page while the backend restarts after a deploy or a
+// cold start. Each retry goes through the Cloudflare Worker, which also wakes a sleeping backend.
 const WAKING_STATUSES = new Set([502, 503, 504]);
 const WAKE_TIMEOUT_MS = 90_000;
 const RETRY_DELAY_MS = 3_000;
-
-function wakeBackend() {
-  // Opaque and not awaited: only the request reaching the backend matters.
-  fetch("/wake", { mode: "no-cors", cache: "no-store" }).catch(() => {});
-}
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -92,16 +85,11 @@ async function send(path, method, body) {
 
 export async function request(path, { method = "GET", body } = {}) {
   const deadline = Date.now() + WAKE_TIMEOUT_MS;
-  let woken = false;
   let { response, payload } = await send(path, method, body);
 
   // Only a non-JSON answer is Render's page for a sleeping backend. A JSON 5xx came from
   // Flask, so the request was handled and retrying a POST could repeat it.
   while (WAKING_STATUSES.has(response.status) && payload === null && Date.now() < deadline) {
-    if (!woken) {
-      wakeBackend();
-      woken = true;
-    }
     await sleep(RETRY_DELAY_MS);
     ({ response, payload } = await send(path, method, body));
   }
