@@ -1,7 +1,7 @@
 """The deck tutor: budgets, one conversation per deck, running turns, and applying proposals.
 
-A turn runs inside the request, since it only waits on the network and the page shows the reply
-when it returns. No database transaction stays open while the model runs.
+A turn runs as a background job, so no request waits on the model, and the page reads the chat
+once the job is done. No database transaction stays open while the model runs.
 """
 
 import asyncio
@@ -42,9 +42,17 @@ from app.ai.tutor.graph import (
 from app.ai.tutor.prompts import TUTOR_PROMPT_VERSION
 from app.ai.tutor.tools import MAX_TOOL_CARDS
 from app.ai.usage import RunUsage
-from app.core.errors import BudgetExceeded, Conflict, InvalidRequest, NotAvailable, NotFound
+from app.core.errors import (
+    AppError,
+    BudgetExceeded,
+    Conflict,
+    InvalidRequest,
+    NotAvailable,
+    NotFound,
+)
 from app.core.settings import Settings
-from app.models import Card, Deck, TutorConversation, User, utcnow
+from app.models import Card, Deck, Job, TutorConversation, User, utcnow
+from app.models.job import TUTOR_TURN
 from app.models.tutor import AWAITING_DECISION, IDLE, REPLYING
 from app.repositories.cards import CardRepository
 from app.repositories.jobs import JobRepository
@@ -265,36 +273,69 @@ class TutorService:
                 "proposed_cards": len(outcome.proposal["cards"]) if outcome.proposal else 0,
             },
         )
-        return self._view(conversation, outcome.messages)  # 200 with the chat and the new reply
+        return self._view(conversation, outcome.messages)
 
-    async def send_message(self, deck: Deck, user: User, text: str) -> TutorView:
-        """Run one turn of the chat, and save what it produced."""
-        # Step 1: refuse if the tutor is off or over its limits then load its two models
+    async def _release(self, conversation: TutorConversation) -> None:
+        """Free the chat so the learner can try again."""
+        conversation.status = IDLE
+        conversation.status_at = utcnow()
+        await self.session.commit()
+
+    async def start_turn(self, deck: Deck, user: User, text: str) -> int:
+        """Claim the chat and queue the turn. Returns the job's id for the page to follow."""
+        # Step 1: refuse if the tutor is off or over its limits, now rather than in the job
         deck_id = deck.id
-        logger.info("tutor turn started", extra={"user_id": user.id, "deck_id": deck_id})
         if not self.settings.ai_tutor_enabled:  # a kill switch in the environment
             raise NotAvailable(TURNED_OFF)  # 503 to the client
-        models = await self._check_budgets(user.id)
-        usage = RunUsage()  # callbacks count each call's model and tokens into this
-        writer, judge = self._load_models(models, usage)
+        await self._check_budgets(user.id)  # 429
 
         # Step 2: refuse while cards wait for a decision or the chat is full then claim the
         # chat so a second message can't run a turn at the same time
-        conversation = await self._claim(deck_id, user.id)
+        await self._claim(deck_id, user.id)
+
+        # Step 3: queue the turn in the same commit as the claim
+        job = await self.jobs.add(
+            Job(user_id=user.id, kind=TUTOR_TURN, payload={"deck_id": deck_id, "text": text})
+        )
+        await self.session.commit()  # the relay hands the job to a worker after this commit
+        logger.info("tutor turn queued", extra={"deck_id": deck_id, "job_id": job.id})
+        return job.id  # 202 to the client which follows the job's events
+
+    async def run_turn(self, deck_id: int, user_id: int, text: str) -> None:
+        """Run a turn that start_turn claimed, in the worker, and save what it produced.
+
+        Expected failures free the chat and raise our own errors, which the job system fails
+        once with their message instead of running the turn again.
+        """
+        # Step 1: stop if the deck was deleted while the turn waited in the queue
+        conversation = await self.conversations.for_deck(deck_id)
+        deck = await self.session.get(Deck, deck_id)
+        if conversation is None or deck is None:
+            raise NotFound(DECK_NOT_FOUND)
+        logger.info("tutor turn started", extra={"user_id": user_id, "deck_id": deck_id})
+
+        # Step 2: pick and load the two models, since the limits may have filled since the request
+        usage = RunUsage()  # callbacks count each call's model and tokens into this
+        try:
+            models = await self._check_budgets(user_id)
+            writer, judge = self._load_models(models, usage)
+        except AppError:
+            await self._release(conversation)
+            raise
 
         # Step 3: build the turn's context from this deck's cards alone since the agent's tools
         # can read nothing else
         context = await self._build_context(deck, writer, judge, usage)
 
         # Step 4: run the turn and log any failure by type for the steps below to handle
-        outcome = await self._run(context, conversation, user.id, text)
+        outcome = await self._run(context, conversation, user_id, text)
 
         # Step 5: save what the calls spent even before a failure and check whether the learner
         # deleted the deck while the model ran because that also deleted this row
         deleted = await self.conversations.for_deck(deck_id) is None
         self.budget.record(
             # None for a deleted deck since the usage row can't point at it
-            TUTOR, user.id, None if deleted else deck_id, usage, TUTOR_PROMPT_VERSION
+            TUTOR, user_id, None if deleted else deck_id, usage, TUTOR_PROMPT_VERSION
         )
 
         # Step 6: drop the run for a deleted deck or free the chat for another try after a failure
@@ -302,16 +343,14 @@ class TutorService:
             await self.session.commit()  # the usage row still saves
             await discard_threads(self.settings.database_url, [conversation.thread_id])
             logger.info("tutor turn dropped", extra={"deck_id": deck_id, "reason": "deck_deleted"})
-            raise NotFound(DECK_NOT_FOUND)  # 404 to the client
+            raise NotFound(DECK_NOT_FOUND)
         if outcome is None:  # the turn failed
-            conversation.status = IDLE  # releases the claim so the learner can try again
-            conversation.status_at = utcnow()
-            await self.session.commit()
+            await self._release(conversation)  # also saves the usage row
             logger.info("tutor turn failed", extra={"deck_id": deck_id})
-            raise NotAvailable(NO_REPLY)  # 503
+            raise NotAvailable(NO_REPLY)
 
         # Step 7: save the turn with any proposed cards waiting for the learner's decision
-        return await self._save_turn(conversation, outcome)
+        await self._save_turn(conversation, outcome)
 
     async def decide(self, deck: Deck, user: User, proposal_id: str, accept: bool) -> TutorView:
         """Add or decline the cards waiting for a decision."""

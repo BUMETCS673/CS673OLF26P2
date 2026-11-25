@@ -43,21 +43,55 @@ const input = () => screen.getByLabelText('Your message');
 const type = (text) => fireEvent.change(input(), { target: { value: text } });
 const button = (name) => screen.getByRole('button', { name });
 
-test('the API calls the four routes', () => {
+test('the API calls the read, decide and reset routes', () => {
   const request = vi.fn();
   const api = createTutorApi(request);
 
   api.getTutor(2);
-  api.sendMessage(2, 'Hi');
   api.decideProposal(2, 'p', true);
   api.resetTutor(2);
 
   expect(request.mock.calls).toEqual([
     ['/api/decks/2/tutor'],
-    ['/api/decks/2/tutor/messages', { method: 'POST', body: { text: 'Hi' } }],
     ['/api/decks/2/tutor/proposal', { method: 'POST', body: { proposal_id: 'p', accept: true } }],
     ['/api/decks/2/tutor', { method: 'DELETE' }],
   ]);
+});
+
+// The message route answers with a job, and the chat is read once the job is done
+const jobRequest = () => vi.fn(async (path) => (path.endsWith('/messages') ? { job_id: 7 } : CHAT));
+
+test('sending a message follows its job, then reads the chat', async () => {
+  const request = jobRequest();
+  const follow = vi.fn().mockResolvedValue({ status: 'done', result: null });
+  const api = createTutorApi(request, follow);
+
+  expect(await api.sendMessage(2, 'Hi')).toEqual(CHAT);
+  expect(follow).toHaveBeenCalledWith(7);
+  expect(request.mock.calls).toEqual([
+    ['/api/decks/2/tutor/messages', { method: 'POST', body: { text: 'Hi' } }],
+    ['/api/decks/2/tutor'],
+  ]);
+});
+
+test("a failed turn throws the job's message", async () => {
+  const follow = vi.fn().mockResolvedValue({ status: 'failed', error: 'The tutor didn’t respond.' });
+  const api = createTutorApi(jobRequest(), follow);
+
+  await expect(api.sendMessage(2, 'Hi')).rejects.toMatchObject({
+    code: 'job_failed',
+    message: 'The tutor didn’t respond.',
+  });
+});
+
+test('a blocked stream falls back to polling the job', async () => {
+  const request = jobRequest();
+  const follow = vi.fn().mockRejectedValue(apiError('job_unavailable', 'no stream'));
+  const poll = vi.fn().mockResolvedValue({ status: 'done', result: null });
+  const api = createTutorApi(request, follow, poll);
+
+  expect(await api.sendMessage(2, 'Hi')).toEqual(CHAT);
+  expect(poll).toHaveBeenCalledWith(7, request);
 });
 
 test('an empty chat explains itself, and warns about privacy', async () => {

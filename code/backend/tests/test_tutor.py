@@ -25,8 +25,10 @@ from app.ai.tutor.graph import (
     run_turn,
 )
 from app.core.settings import EMBEDDING_DIMENSIONS, get_settings
+from app.jobs.execution import run_job
+from app.jobs.tutor import run_tutor_turn
 from app.models import Card, Deck, Job, TutorConversation
-from app.models.job import EMBED_CARDS
+from app.models.job import DONE, EMBED_CARDS, FAILED, TUTOR_TURN
 from app.models.tutor import AWAITING_DECISION, IDLE, REPLYING
 from app.repositories.cards import CardRepository
 from app.services import tutor as service_module
@@ -253,13 +255,28 @@ def models(monkeypatch):
     return _set
 
 
-async def _propose(client, deck, models) -> dict:
+@pytest.fixture
+def send(client, session, session_factory):
+    """Posts a message, runs its job as a worker would, and returns the job and the chat."""
+    handlers = {TUTOR_TURN: lambda context: run_tutor_turn(context, get_settings())}
+
+    async def _send(deck, text="Hi") -> tuple[Job, dict]:
+        response = await client.post(f"/api/decks/{deck.id}/tutor/messages", json={"text": text})
+        assert response.status_code == 202
+        job_id = response.json()["job_id"]
+        await run_job(job_id, session_factory, handlers)
+        job = await session.get(Job, job_id, populate_existing=True)
+        view = (await client.get(f"/api/decks/{deck.id}/tutor")).json()
+        return job, view
+
+    return _send
+
+
+async def _propose(send, deck, models) -> dict:
     models(_proposal(), verdicts=_verdicts(True))
-    response = await client.post(
-        f"/api/decks/{deck.id}/tutor/messages", json={"text": "Make a card"}
-    )
-    assert response.status_code == 200
-    return response.json()
+    job, view = await send(deck, "Make a card")
+    assert job.status == DONE
+    return view
 
 
 async def test_a_new_deck_has_an_empty_chat(client, deck):
@@ -277,15 +294,14 @@ async def test_someone_elses_deck_is_not_found(client, make_user, make_deck, me)
     assert response.status_code == 404
 
 
-async def test_a_message_returns_the_reply_and_reading_finds_it(client, deck, models):
+async def test_a_message_queues_a_turn_whose_reply_reading_finds(session, deck, models, send):
     models(AIMessage("Hello."))
-    response = await client.post(f"/api/decks/{deck.id}/tutor/messages", json={"text": "Hi"})
-    assert response.status_code == 200
-    assert response.json()["status"] == IDLE
-    assert response.json()["messages"][-1] == {"role": "tutor", "text": "Hello.", "error": False}
+    job, view = await send(deck)
 
-    stored = await client.get(f"/api/decks/{deck.id}/tutor")
-    assert stored.json()["messages"] == response.json()["messages"]
+    assert (job.kind, job.status, job.result) == (TUTOR_TURN, DONE, None)
+    assert job.payload == {"deck_id": deck.id, "text": "Hi"}
+    assert view["status"] == IDLE
+    assert view["messages"][-1] == {"role": "tutor", "text": "Hello.", "error": False}
 
 
 async def test_an_empty_message_is_rejected(client, deck, models):
@@ -305,21 +321,50 @@ async def test_the_learners_budget_stops_messages(client, deck, models, monkeypa
     assert response.status_code == 429
 
 
-async def test_a_reply_in_progress_blocks_another_message(client, session, deck, models):
-    models(AIMessage("Hello."))
-    await client.post(f"/api/decks/{deck.id}/tutor/messages", json={"text": "Hi"})
+async def test_a_queued_turn_blocks_another_message(client, session, deck, models):
+    url = f"/api/decks/{deck.id}/tutor/messages"
+    assert (await client.post(url, json={"text": "Hi"})).status_code == 202
     conversation = await session.scalar(select(TutorConversation))
-    conversation.status = REPLYING
-    await session.commit()
+    assert conversation.status == REPLYING
 
+    assert (await client.post(url, json={"text": "Hi"})).status_code == 409
+
+
+async def test_a_failed_turn_frees_the_chat(session, deck, models, send, monkeypatch):
+    models()
+
+    async def broken_turn(*_):
+        raise RuntimeError("the model went away")
+
+    monkeypatch.setattr(service_module, "run_turn", broken_turn)
+    job, view = await send(deck)
+
+    assert (job.status, job.error, job.attempts) == (FAILED, service_module.NO_REPLY, 1)
+    assert view["status"] == IDLE
+
+
+async def test_a_budget_filled_while_queued_fails_the_turn(
+    client, session, session_factory, deck, models, monkeypatch
+):
+    models(AIMessage("Hello."))
     response = await client.post(f"/api/decks/{deck.id}/tutor/messages", json={"text": "Hi"})
-    assert response.status_code == 409
+    monkeypatch.setattr(get_settings(), "ai_tutor_user_daily_limit", 0)
+
+    job_id = response.json()["job_id"]
+    handlers = {TUTOR_TURN: lambda context: run_tutor_turn(context, get_settings())}
+    await run_job(job_id, session_factory, handlers)
+
+    job = await session.get(Job, job_id, populate_existing=True)
+    assert (job.status, job.error) == (FAILED, service_module.USER_LIMIT)
+    conversation = await session.scalar(select(TutorConversation))
+    await session.refresh(conversation)
+    assert conversation.status == IDLE
 
 
 async def test_accepting_adds_the_servers_cards_and_queues_embedding(
-    client, session, deck, models
+    client, session, deck, models, send
 ):
-    view = await _propose(client, deck, models)
+    view = await _propose(send, deck, models)
     assert view["status"] == AWAITING_DECISION
 
     blocked = await client.post(f"/api/decks/{deck.id}/tutor/messages", json={"text": "Hi"})
@@ -341,8 +386,8 @@ async def test_accepting_adds_the_servers_cards_and_queues_embedding(
     assert (await client.post(url, json=body)).status_code == 409
 
 
-async def test_declining_adds_nothing(client, session, deck, models):
-    view = await _propose(client, deck, models)
+async def test_declining_adds_nothing(client, session, deck, models, send):
+    view = await _propose(send, deck, models)
     response = await client.post(
         f"/api/decks/{deck.id}/tutor/proposal",
         json={"proposal_id": view["proposal"]["id"], "accept": False},
@@ -351,16 +396,16 @@ async def test_declining_adds_nothing(client, session, deck, models):
     assert await session.scalar(select(func.count()).select_from(Card)) == 0
 
 
-async def test_a_wrong_proposal_id_is_refused(client, deck, models):
-    await _propose(client, deck, models)
+async def test_a_wrong_proposal_id_is_refused(client, deck, models, send):
+    await _propose(send, deck, models)
     response = await client.post(
         f"/api/decks/{deck.id}/tutor/proposal", json={"proposal_id": "wrong", "accept": True}
     )
     assert response.status_code == 409
 
 
-async def test_deleting_the_deck_during_a_reply_is_not_found(
-    client, session, deck, models, monkeypatch
+async def test_deleting_the_deck_during_a_reply_fails_the_turn(
+    session, deck, models, send, monkeypatch
 ):
     models()
     deck_id = deck.id
@@ -371,13 +416,14 @@ async def test_deleting_the_deck_during_a_reply_is_not_found(
         return TurnOutcome([], None, PASSED)
 
     monkeypatch.setattr(service_module, "run_turn", delete_during_turn)
-    response = await client.post(f"/api/decks/{deck_id}/tutor/messages", json={"text": "Hi"})
-    assert response.status_code == 404
+    job, _ = await send(deck)
+    assert job.status == FAILED
+    assert await session.scalar(select(func.count()).select_from(TutorConversation)) == 0
 
 
-async def test_reset_deletes_the_chat(client, session, deck, models):
+async def test_reset_deletes_the_chat(client, session, deck, models, send):
     models(AIMessage("Hello."))
-    await client.post(f"/api/decks/{deck.id}/tutor/messages", json={"text": "Hi"})
+    await send(deck)
     reset = await client.delete(f"/api/decks/{deck.id}/tutor")
 
     assert reset.status_code == 204
