@@ -207,6 +207,60 @@ from `main` only, is fine for a semester project; say so in the progress report 
 - Gemini's free tier allows **20 requests a day** for the whole project. The site caps
   itself at 18 (`AI_SITE_DAILY_LIMIT`) and each user at 10, in a rolling 24 hours.
 
+## Deploy targets: one-time Cloudflare setup
+
+The frontend is moving to a Cloudflare Worker (`code/frontend/wrangler.jsonc`). Cloudflare serves
+the built files, and the Worker forwards `/api` and the OAuth paths to the backend on Render.
+This is done once by hand. Until it is, CD skips the Worker deploy with a warning.
+
+1. **Create a Cloudflare account** at [dash.cloudflare.com](https://dash.cloudflare.com/sign-up).
+   The free plan is enough.
+
+2. **Pick a `workers.dev` subdomain.** Open **Workers & Pages** in the dashboard. The first visit
+   asks for an account subdomain. The site will then live at
+   `https://cadence.<subdomain>.workers.dev`, where `cadence` is the `name` in `wrangler.jsonc`.
+
+3. **Create an API token.** **My Profile → API Tokens → Create Token**, then use the
+   **Edit Cloudflare Workers** template. Under **Account Resources**, include only your account.
+   Cloudflare shows the token once, so copy it straight into step 5.
+
+4. **Copy the account ID.** It's on the right of the **Workers & Pages** overview page.
+
+5. **Add them to the `production` GitHub Environment.** Repo **Settings → Environments →
+   production**. Add three secrets:
+
+   | Secret | Value |
+   |---|---|
+   | `CLOUDFLARE_API_TOKEN` | the token from step 3 |
+   | `CLOUDFLARE_ACCOUNT_ID` | the account ID from step 4 |
+   | `API_ORIGIN` | the backend's public address, the same value as `API_ORIGIN` on `cadence-frontend` in Render |
+
+   `API_ORIGIN` is only `https://` and the host, with no path. It's a secret so the public
+   Actions logs mask it.
+
+Leave `APP_URL` pointing at the Render frontend for now. It moves to the `workers.dev` address
+once the Worker has been checked end to end, and the Render frontend is removed after that.
+
+### Switching over to the Worker
+
+Once a CD run has deployed the Worker:
+
+1. **Open the `workers.dev` address** and sign in, to see that pages load and the API answers.
+2. **Change both addresses together.** Set `PUBLIC_URL` on `cadence-backend` in Render and
+   `APP_URL` in the `production` GitHub Environment to `https://cadence.<subdomain>.workers.dev`.
+   `PUBLIC_URL` names the OAuth issuer, and the MCP smoke test checks that the issuer matches
+   `APP_URL`. If only one changes, the next deploy's smoke test fails.
+3. **Reconnect MCP clients** to the new address. Ones added with the old address keep pointing
+   at the Render frontend.
+4. **Re-run CD** from the Actions tab (**Run workflow** on `main`). Its health poll and MCP smoke
+   test now go through the Worker.
+
+The Render frontend keeps running until it's removed, so pointing both addresses back at it is
+the rollback.
+
+For `wrangler dev` on your own machine, put `API_ORIGIN=...` in `code/frontend/.dev.vars`. It's
+gitignored.
+
 ## Branch protection
 
 CI only actually protects anything once merges are blocked on it. `ci-ok` is the single

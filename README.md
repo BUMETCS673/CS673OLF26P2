@@ -137,7 +137,7 @@ With an OpenTelemetry endpoint set, each process also sends its metrics and its 
 
 1. In Grafana Cloud, open **Connections → OpenTelemetry (OTLP)** and create a token.
 2. On the backend's Render **Environment** tab, set `OTEL_EXPORTER_OTLP_ENDPOINT` to the endpoint it shows, and `OTEL_EXPORTER_OTLP_HEADERS` to `Authorization=Basic%20<the encoded token>`. Locally, put the same two in `.env`.
-3. In Grafana, **Dashboards → New → Import** [doc/grafana/cadence-dashboard.json](doc/grafana/cadence-dashboard.json), and pick your Prometheus and Loki data sources.
+3. In Grafana, **Dashboards → New → Import** [observability/grafana/cadence-dashboard.json](observability/grafana/cadence-dashboard.json), and pick your Prometheus and Loki data sources.
 
 | Metric (as named in Prometheus) | Labels | What it counts |
 |---|---|---|
