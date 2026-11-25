@@ -21,7 +21,9 @@ failures = 0
 def request(method, url, body=None, headers=None):
     """Status, headers and body. Error statuses are answers here, not exceptions."""
     data = body if isinstance(body, bytes) or body is None else json.dumps(body).encode()
-    req = urllib.request.Request(url, data=data, method=method, headers=headers or {})
+    # Cloudflare blocks urllib's default User-Agent (error 1010)
+    headers = {"User-Agent": "cadence-mcp-smoke/1.0", **(headers or {})}
+    req = urllib.request.Request(url, data=data, method=method, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=60) as resp:
             return resp.status, resp.headers, resp.read().decode()
