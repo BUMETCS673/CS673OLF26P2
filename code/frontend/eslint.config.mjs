@@ -66,6 +66,16 @@ export default [
   },
 
   {
+    // The Cloudflare Worker runs with service-worker style globals such as fetch and Response
+    files: ["worker/**/*.js"],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: "module",
+      globals: globals.serviceworker,
+    },
+  },
+
+  {
     // Tests run under Vitest in Node (component tests in a simulated browser), and config
     // files run under Node: different globals, and both are allowed to print. Component
     // tests are .jsx, so JSX parsing and the two rules that let eslint see JSX as a use of
