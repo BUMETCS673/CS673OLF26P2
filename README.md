@@ -20,8 +20,9 @@ An AI-assisted spaced-repetition learning platform. Describe what you want to le
 ![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)
 ![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-CI%2FCD-2088FF?logo=githubactions&logoColor=white)
 ![Render](https://img.shields.io/badge/Render-hosting-46E3B7?logo=render&logoColor=black)
+![Cloudflare](https://img.shields.io/badge/Cloudflare-Workers-F38020?logo=cloudflare&logoColor=white)
 
-**Live site:** https://cadence-frontend-jufj.onrender.com — it runs on Render's free tier, which sleeps after 15 minutes idle, so the first visit after a quiet spell takes about 30 seconds.
+**Live site:** https://cadence.ducanhng.workers.dev — the frontend runs on Cloudflare and the backend on Render's free tier, which sleeps after 15 minutes idle, so the first visit after a quiet spell takes about 30 seconds.
 
 AI card generation uses Google Gemini's free tier, so to use it you must be 18 or over and not in the EEA, Switzerland, or the UK, and you shouldn't upload anything containing personal information. To stay within that tier, the site allows 18 generations a day in total and 10 per account.
 
@@ -59,7 +60,7 @@ It's aimed at people who need to retain a lot of discrete facts: students in med
 | **AI** | LangChain, LangGraph, Google Gemini |
 | **AI tracing and evaluations** | LangSmith |
 | **Metrics and logs** | OpenTelemetry, Grafana Cloud (Prometheus, Loki) |
-| **Delivery** | Docker, GitHub Actions, Render |
+| **Delivery** | Docker, GitHub Actions, Render, Cloudflare Workers |
 
 ## Getting Started
 

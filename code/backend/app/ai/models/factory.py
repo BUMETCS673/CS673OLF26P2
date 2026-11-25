@@ -16,8 +16,7 @@ from app.ai.usage import RoleUsage, RunUsage
 from app.core.redis import get_redis
 from app.core.settings import Settings
 
-# How long a learner's call waits behind others. A tutor turn makes at most 4 chat calls and 2
-# searches, so with the timeout above it stays under nginx's limit of 280 seconds.
+# How long a learner's call waits behind others, kept short since the learner is watching.
 LEARNER_MAX_WAIT_MS = 12_000
 
 # A model with fallbacks, as load_chat_model returns when the role has later models.

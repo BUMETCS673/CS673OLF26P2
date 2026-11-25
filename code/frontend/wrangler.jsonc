@@ -1,5 +1,5 @@
 // The Cloudflare Worker that serves the built frontend and forwards the API to the backend.
-// It replaces the nginx container on Render. CD deploys it with `wrangler deploy`.
+// CD deploys it with `wrangler deploy`.
 {
   "name": "cadence",
   "main": "worker/index.js",

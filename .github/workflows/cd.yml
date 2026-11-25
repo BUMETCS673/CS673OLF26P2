@@ -7,7 +7,7 @@ name: CD
 #   main    -> production
 #
 # Two things happen, in order:
-#   1. publish -- build the prod images and push them to GHCR, tagged with the SHA. This
+#   1. publish -- build the backend's prod image and push it to GHCR, tagged with the SHA. This
 #      is the artifact of record: any commit on develop or main can be pulled and run.
 #   2. deploy  -- ask Render to roll out that commit. Skipped, not failed, when the
 #      deploy-hook secret is absent, so the pipeline is green before anyone has set up
@@ -108,22 +108,6 @@ jobs:
           cache-from: type=gha,scope=backend
           cache-to: type=gha,scope=backend,mode=max
 
-      - name: Push frontend image
-        uses: docker/build-push-action@v7
-        with:
-          context: code/frontend
-          target: prod
-          push: true
-          tags: |
-            ${{ steps.prefix.outputs.value }}/frontend:${{ steps.resolve.outputs.sha }}
-            ${{ steps.prefix.outputs.value }}/frontend:${{ steps.resolve.outputs.environment }}
-            ${{ steps.prefix.outputs.value }}/frontend:latest
-          cache-from: type=gha,scope=frontend
-          cache-to: type=gha,scope=frontend,mode=max
-          # Same as ci.yml: always rerun the prod stage's `apk upgrade`, so the image we
-          # push has today's Alpine security patches rather than a cached layer's.
-          no-cache-filters: prod
-
       - name: Summary
         run: |
           {
@@ -132,7 +116,6 @@ jobs:
             echo "| Image | Tag |"
             echo "|---|---|"
             echo "| backend  | \`${{ steps.resolve.outputs.sha }}\` |"
-            echo "| frontend | \`${{ steps.resolve.outputs.sha }}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
   deploy:
@@ -153,11 +136,10 @@ jobs:
         id: check
         env:
           BACKEND_HOOK: ${{ secrets.RENDER_BACKEND_DEPLOY_HOOK }}
-          FRONTEND_HOOK: ${{ secrets.RENDER_FRONTEND_DEPLOY_HOOK }}
         run: |
-          if [ -z "$BACKEND_HOOK" ] || [ -z "$FRONTEND_HOOK" ]; then
+          if [ -z "$BACKEND_HOOK" ]; then
             echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::RENDER_*_DEPLOY_HOOK not set for '${{ needs.publish.outputs.environment }}' -- skipping deploy. See .github/CICD.md."
+            echo "::warning::RENDER_BACKEND_DEPLOY_HOOK not set for '${{ needs.publish.outputs.environment }}' -- skipping deploy. See .github/CICD.md."
           else
             echo "configured=true" >> "$GITHUB_OUTPUT"
           fi
@@ -172,18 +154,9 @@ jobs:
           SHA: ${{ needs.publish.outputs.sha }}
         run: curl --fail --silent --show-error --request POST "$HOOK&ref=$SHA"
 
-      - name: Trigger frontend deploy
-        if: steps.check.outputs.configured == 'true'
-        env:
-          HOOK: ${{ secrets.RENDER_FRONTEND_DEPLOY_HOOK }}
-          SHA: ${{ needs.publish.outputs.sha }}
-        run: curl --fail --silent --show-error --request POST "$HOOK&ref=$SHA"
-
       # The hook returns as soon as Render queues the build, so "triggered" is not
-      # "live". Poll the deployed app's own health endpoint to find out.
-      # A sleeping backend only wakes for requests from outside Render, so the proxied
-      # /api/health alone gets 502s forever. /wake redirects straight to the backend like
-      # client.js does, and the proxied check then confirms the whole path works.
+      # "live". Poll the deployed app's own health endpoint to find out. The request goes
+      # through the Cloudflare Worker, which also wakes a sleeping backend.
       - name: Wait for the deployed app to come back healthy
         if: steps.check.outputs.configured == 'true' && vars.APP_URL != ''
         env:
@@ -192,7 +165,6 @@ jobs:
           echo "Polling $APP_URL/api/health for up to 10 minutes"
           deadline=$((SECONDS + 600))
           while [ "$SECONDS" -lt "$deadline" ]; do
-            curl --silent --location --max-time 30 "$APP_URL/wake" > /dev/null || true
             if curl --fail --silent --max-time 30 "$APP_URL/api/health" | grep -q '"status":"ok"'; then
               echo "Healthy after ${SECONDS}s"
               exit 0
@@ -228,7 +200,7 @@ jobs:
           fi
 
   # Cloudflare serves the built frontend and the Worker forwards /api and the OAuth paths to the
-  # backend. It runs next to the Render frontend until the Worker has been checked end to end.
+  # backend.
   deploy-worker:
     name: Deploy Cloudflare Worker (${{ needs.publish.outputs.environment }})
     runs-on: ubuntu-latest

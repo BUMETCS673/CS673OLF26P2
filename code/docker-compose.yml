@@ -107,7 +107,6 @@ services:
   frontend:
     build:
       context: ./frontend
-      # `prod` is nginx serving a build; dev wants Vite and hot reload.
       target: dev
     container_name: react-frontend
     restart: unless-stopped
