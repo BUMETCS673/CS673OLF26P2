@@ -152,16 +152,18 @@ jobs:
         run: curl --fail --silent --show-error --request POST "$HOOK&ref=$SHA"
 
       # The hook returns as soon as Render queues the build, so "triggered" is not
-      # "live". Poll the deployed app's own health endpoint to find out. The request goes
-      # through the Cloudflare Worker, which also wakes a sleeping backend.
+      # "live". Poll the deployed app's own health endpoint to find out.
       - name: Wait for the deployed app to come back healthy
         if: steps.check.outputs.configured == 'true' && vars.APP_URL != ''
         env:
           APP_URL: ${{ vars.APP_URL }}
+          API_ORIGIN: ${{ secrets.API_ORIGIN }}
         run: |
           echo "Polling $APP_URL/api/health for up to 10 minutes"
           deadline=$((SECONDS + 600))
           while [ "$SECONDS" -lt "$deadline" ]; do
+            # direct call to the backend to wake it
+            curl --silent --max-time 30 "$API_ORIGIN/api/health" > /dev/null || true
             if curl --fail --silent --max-time 30 "$APP_URL/api/health" | grep -q '"status":"ok"'; then
               echo "Healthy after ${SECONDS}s"
               exit 0
