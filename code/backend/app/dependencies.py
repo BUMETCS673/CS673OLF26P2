@@ -20,6 +20,7 @@ from app.services.cards import CardService
 from app.services.decks import DECK_NOT_FOUND, DeckService
 from app.services.generations import GenerationService
 from app.services.jobs import JobService
+from app.services.login_limits import LoginLimit
 from app.services.materials import MaterialService
 from app.services.oauth import OAuthService
 from app.services.oauth_tokens import OAuthTokenService
@@ -39,7 +40,8 @@ UnitOfWorkDep = Annotated[UnitOfWork, Depends(get_unit_of_work)]
 
 
 def get_auth_service(tx: UnitOfWorkDep) -> AuthService:
-    return AuthService(tx.session, tx.users, get_settings())
+    settings = get_settings()
+    return AuthService(tx.session, tx.users, settings, LoginLimit(get_redis(), settings))
 
 
 AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
