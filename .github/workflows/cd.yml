@@ -1,14 +1,12 @@
 name: CD
 
-# Runs only after CI has passed on develop or main -- `workflow_run` means this cannot
-# start from a commit whose tests failed, which a plain `push` trigger would allow.
-#
-#   develop -> staging
-#   main    -> production
+# Runs only after CI has passed on main, and deploys to production. `workflow_run` means
+# this cannot start from a commit whose tests failed, which a plain `push` trigger would allow.
+# develop has no deploy target, so merges there stop at CI.
 #
 # Two things happen, in order:
 #   1. publish -- build the backend's prod image and push it to GHCR, tagged with the SHA. This
-#      is the artifact of record: any commit on develop or main can be pulled and run.
+#      is the artifact of record: any commit on main can be pulled and run.
 #   2. deploy  -- ask Render to roll out that commit. Skipped, not failed, when the
 #      deploy-hook secret is absent, so the pipeline is green before anyone has set up
 #      the Render account (see .github/CICD.md).
@@ -18,7 +16,7 @@ on:
   workflow_run:
     workflows: [CI]
     types: [completed]
-    branches: [develop, main]
+    branches: [main]
   # For re-running a deploy without pushing a commit.
   workflow_dispatch:
 
@@ -66,7 +64,6 @@ jobs:
           fi
           case "$branch" in
             main)    environment=production ;;
-            develop) environment=staging ;;
             *) echo "::error::CD does not run for branch '$branch'"; exit 1 ;;
           esac
           echo "sha=$sha"                 >> "$GITHUB_OUTPUT"
@@ -130,7 +127,7 @@ jobs:
       url: ${{ vars.APP_URL }}
 
     steps:
-      # A missing secret is a "not set up yet", not a broken build. This keeps develop
+      # A missing secret is a "not set up yet", not a broken build. This keeps main
       # green until someone creates the Render blueprint and adds the hooks.
       - name: Check for deploy hooks
         id: check

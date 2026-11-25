@@ -23,10 +23,7 @@ What runs, when, and what to do when it goes red.
      merge to develop
             |
             v
-          CI  --- passes --->  CD
-                                |
-                                +-- publish   SHA-tagged backend image to GHCR
-                                +-- deploy    skips with a warning (no staging services)
+          CI  (no CD: develop has nothing to deploy to)
             |
             v
    merge develop to main
@@ -41,7 +38,7 @@ Three workflows:
 |---|---|---|
 | `.github/workflows/ci.yml` | every PR; pushes to `develop`/`main` | lint, test, build, image and stack checks |
 | `.github/workflows/codeql.yml` | pushes/PRs to `develop`/`main`; Mondays 06:00 UTC | static analysis into the Security tab |
-| `.github/workflows/cd.yml` | CI completing successfully on `develop`/`main` | publish images, deploy |
+| `.github/workflows/cd.yml` | CI completing successfully on `main` | publish images, deploy |
 
 CD uses `workflow_run`, not `push`. That is deliberate: a `push` trigger would let CD
 start on a commit whose tests were still running or had already failed.
@@ -50,10 +47,9 @@ start on a commit whose tests were still running or had already failed.
 
 | Branch | Environment | Deploys to |
 |---|---|---|
-| `develop` | `staging` | nothing: the environment is empty, so deploy skips with a warning |
 | `main` | `production` | the Render backend and the Cloudflare Worker |
 
-There is one set of Render services, deployed from `main` only.
+There is one set of Render services, deployed from `main` only. CD doesn't run for `develop`.
 
 Images land in GHCR either way, tagged three ways — the commit SHA (what a rollback
 pins to), the environment name, and `latest` (only ever `main`).
@@ -144,7 +140,7 @@ failing until it is done. So the pipeline is green in the meantime.
    URL containing a secret key, so treat it like a password.
 
 3. **Create the GitHub Environments.** Repo **Settings → Environments → New environment**,
-   named exactly `staging` and `production`. In `production` only, add one secret:
+   named exactly `production`. Add one secret:
 
    | Secret | Value |
    |---|---|
@@ -159,9 +155,8 @@ failing until it is done. So the pipeline is green in the meantime.
    `APP_URL` is what the post-deploy health poll checks. Leave it unset and the deploy
    still runs, just unverified.
 
-   Leave `staging` empty. There is one set of Render services, and it's production, so
-   `develop`'s deploy job skips with a warning instead of deploying every merge to the
-   live site. Only a green merge to `main` deploys.
+   There is one set of Render services, and it's production, so only a green merge to
+   `main` deploys.
 
 4. **Set the AI settings.** On `cadence-backend`'s **Environment** tab, set
    `GEMINI_API_KEY` and `GEMINI_MODEL` (`gemini-3.5-flash`). Both are `sync: false`, so
@@ -173,9 +168,8 @@ failing until it is done. So the pipeline is green in the meantime.
 The `production` environment has no required reviewer, so a green merge to `main`
 deploys without a second approval.
 
-Doing it twice — separate Render services for staging and production, with the staging
-hooks in the `staging` environment — is the fuller setup. One set of services, deployed
-from `main` only, is fine for a semester project; say so in the progress report either way.
+Doing it twice, with separate Render services for a staging environment deployed from
+`develop`, is the fuller setup. That would mean adding `develop` back to CD's trigger.
 
 ### Free-tier behaviour worth knowing
 
@@ -273,7 +267,7 @@ gh api repos/BUMETCS673/CS673OLF26P2/branches/develop/protection \
 | **Migrations, "flask db check"** | a model changed without a matching migration | `cd code/backend && FLASK_APP=wsgi.py flask db migrate -m "what changed"`, read the generated file, commit it |
 | Migrations, "downgrade to base and back up" | a migration's `downgrade()` is wrong or incomplete | fix `downgrade()` in the migration file |
 | Docker and both backend test jobs fail together, with `toomanyrequests` or 429 in the log | Docker Hub's anonymous pull limit | re-run the failed jobs |
-| CD, deploy skipped | expected on `develop`, whose `staging` environment is empty; on `main`, the Render hooks aren't set | on `main`, the setup section above — this is a warning, not a failure |
+| CD, deploy skipped | the Render hooks aren't set in `production` | the setup section above — this is a warning, not a failure |
 | CD, health poll timed out | Render build failed, or a cold start took over 10 minutes | Render dashboard → the service → Events |
 
 ## Rolling back
